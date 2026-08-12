@@ -6,7 +6,9 @@
 //! is what makes the editor testable without a terminal attached.
 
 pub mod buffer;
+pub mod history;
 pub mod position;
 
 pub use buffer::{TextBuffer, TAB_WIDTH};
+pub use history::{Edit, History};
 pub use position::{Position, Range};
