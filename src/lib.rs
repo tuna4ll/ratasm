@@ -6,6 +6,7 @@
 //! - [`ui`] owns terminal lifecycle, layout and widgets and never mutates
 //!   application state.
 //! - [`editor`] is pure text state with no rendering dependency.
+//! - [`instruction`] holds static ISA knowledge shared by every panel.
 //! - [`logging`] redirects diagnostics to a file so the TUI keeps stdout.
 //!
 //! Every subsystem is usable without a terminal attached, which is what makes
@@ -14,5 +15,6 @@
 #![warn(missing_docs)]
 
 pub mod editor;
+pub mod instruction;
 pub mod logging;
 pub mod ui;
