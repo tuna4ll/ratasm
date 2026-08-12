@@ -1,0 +1,62 @@
+[workspace]
+members = ["."]
+
+[package]
+name = "ratasm"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.82"
+description = "A terminal IDE and debugger for x86_64 assembly"
+authors = ["Tuna Kılıç <tuna@tunakilic.com>"]
+license = "MIT"
+readme = "README.md"
+repository = "https://github.com/tunakilic/ratasm"
+homepage = "https://github.com/tunakilic/ratasm"
+documentation = "https://docs.rs/ratasm"
+keywords = ["assembly", "debugger", "tui", "nasm", "x86-64"]
+categories = ["command-line-utilities", "development-tools::debugging"]
+exclude = ["/docs", "/examples", "/.github"]
+
+[dependencies]
+anyhow = "1.0"
+clap = { version = "4.5", features = ["derive", "wrap_help"] }
+crossterm = { version = "0.28", features = ["event-stream"] }
+iced-x86 = { version = "1.21", default-features = false, features = [
+    "std",
+    "decoder",
+    "intel",
+    "gas",
+    "instr_info",
+] }
+object = { version = "0.36", default-features = false, features = [
+    "read",
+    "elf",
+    "std",
+] }
+ratatui = "0.29"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tempfile = "3.12"
+thiserror = "2.0"
+tokio = { version = "1.40", features = [
+    "rt-multi-thread",
+    "macros",
+    "process",
+    "io-util",
+    "sync",
+    "time",
+    "signal",
+] }
+toml = "0.8"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+unicode-width = "0.2"
+
+[dev-dependencies]
+tokio = { version = "1.40", features = ["rt", "macros", "time", "process"] }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
+panic = "unwind"
