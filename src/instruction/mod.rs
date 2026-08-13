@@ -9,8 +9,10 @@
 
 pub mod conditions;
 pub mod flags;
+pub mod mnemonics;
 pub mod registers;
 
 pub use conditions::{satisfied_conditions, ConditionCode};
 pub use flags::{Flag, Flags};
+pub use mnemonics::is_mnemonic;
 pub use registers::{AbiRole, Register, RegisterWidth, SyscallRole};
