@@ -9,10 +9,14 @@ pub mod buffer;
 pub mod document;
 pub mod history;
 pub mod position;
+pub mod search;
+pub mod symbols;
 pub mod syntax;
 
 pub use buffer::{TextBuffer, TAB_WIDTH};
 pub use document::{Document, Movement, SelectionMode};
 pub use history::{Edit, History};
 pub use position::{Position, Range};
+pub use search::{find_all, SearchOptions};
+pub use symbols::{Symbol, SymbolKind};
 pub use syntax::{tokenize, Token, TokenKind};
