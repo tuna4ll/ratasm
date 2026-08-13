@@ -6,11 +6,13 @@
 //! is what makes the editor testable without a terminal attached.
 
 pub mod buffer;
+pub mod document;
 pub mod history;
 pub mod position;
 pub mod syntax;
 
 pub use buffer::{TextBuffer, TAB_WIDTH};
+pub use document::{Document, Movement, SelectionMode};
 pub use history::{Edit, History};
 pub use position::{Position, Range};
 pub use syntax::{tokenize, Token, TokenKind};
