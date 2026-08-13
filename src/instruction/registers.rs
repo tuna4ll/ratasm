@@ -239,11 +239,12 @@ impl Register {
 }
 
 /// Builds a general-purpose register entry.
+///
+/// `aliases` lists the 32-, 16- and low-8-bit names in that order, which keeps
+/// the table below readable as a grid.
 const fn gpr(
     name: &'static str,
-    dword: &'static str,
-    word: &'static str,
-    low_byte: &'static str,
+    aliases: [&'static str; 3],
     high_byte: Option<&'static str>,
     abi_role: AbiRole,
     syscall_role: SyscallRole,
@@ -251,9 +252,9 @@ const fn gpr(
 ) -> Register {
     Register {
         name,
-        dword: Some(dword),
-        word: Some(word),
-        low_byte: Some(low_byte),
+        dword: Some(aliases[0]),
+        word: Some(aliases[1]),
+        low_byte: Some(aliases[2]),
         high_byte,
         abi_role,
         syscall_role,
@@ -265,9 +266,7 @@ const fn gpr(
 pub const GENERAL_PURPOSE: [Register; 16] = [
     gpr(
         "rax",
-        "eax",
-        "ax",
-        "al",
+        ["eax", "ax", "al"],
         Some("ah"),
         AbiRole::ReturnValue,
         SyscallRole::Number,
@@ -275,9 +274,7 @@ pub const GENERAL_PURPOSE: [Register; 16] = [
     ),
     gpr(
         "rbx",
-        "ebx",
-        "bx",
-        "bl",
+        ["ebx", "bx", "bl"],
         Some("bh"),
         AbiRole::CalleeSaved,
         SyscallRole::Unused,
@@ -285,9 +282,7 @@ pub const GENERAL_PURPOSE: [Register; 16] = [
     ),
     gpr(
         "rcx",
-        "ecx",
-        "cx",
-        "cl",
+        ["ecx", "cx", "cl"],
         Some("ch"),
         AbiRole::Argument(4),
         SyscallRole::Clobbered,
@@ -296,9 +291,7 @@ pub const GENERAL_PURPOSE: [Register; 16] = [
     ),
     gpr(
         "rdx",
-        "edx",
-        "dx",
-        "dl",
+        ["edx", "dx", "dl"],
         Some("dh"),
         AbiRole::Argument(3),
         SyscallRole::Argument(3),
@@ -306,9 +299,7 @@ pub const GENERAL_PURPOSE: [Register; 16] = [
     ),
     gpr(
         "rsi",
-        "esi",
-        "si",
-        "sil",
+        ["esi", "si", "sil"],
         None,
         AbiRole::Argument(2),
         SyscallRole::Argument(2),
@@ -316,9 +307,7 @@ pub const GENERAL_PURPOSE: [Register; 16] = [
     ),
     gpr(
         "rdi",
-        "edi",
-        "di",
-        "dil",
+        ["edi", "di", "dil"],
         None,
         AbiRole::Argument(1),
         SyscallRole::Argument(1),
@@ -346,9 +335,7 @@ pub const GENERAL_PURPOSE: [Register; 16] = [
     },
     gpr(
         "r8",
-        "r8d",
-        "r8w",
-        "r8b",
+        ["r8d", "r8w", "r8b"],
         None,
         AbiRole::Argument(5),
         SyscallRole::Argument(5),
@@ -356,9 +343,7 @@ pub const GENERAL_PURPOSE: [Register; 16] = [
     ),
     gpr(
         "r9",
-        "r9d",
-        "r9w",
-        "r9b",
+        ["r9d", "r9w", "r9b"],
         None,
         AbiRole::Argument(6),
         SyscallRole::Argument(6),
@@ -366,9 +351,7 @@ pub const GENERAL_PURPOSE: [Register; 16] = [
     ),
     gpr(
         "r10",
-        "r10d",
-        "r10w",
-        "r10b",
+        ["r10d", "r10w", "r10b"],
         None,
         AbiRole::CallerSaved,
         SyscallRole::Argument(4),
@@ -376,9 +359,7 @@ pub const GENERAL_PURPOSE: [Register; 16] = [
     ),
     gpr(
         "r11",
-        "r11d",
-        "r11w",
-        "r11b",
+        ["r11d", "r11w", "r11b"],
         None,
         AbiRole::CallerSaved,
         SyscallRole::Clobbered,
@@ -386,9 +367,7 @@ pub const GENERAL_PURPOSE: [Register; 16] = [
     ),
     gpr(
         "r12",
-        "r12d",
-        "r12w",
-        "r12b",
+        ["r12d", "r12w", "r12b"],
         None,
         AbiRole::CalleeSaved,
         SyscallRole::Unused,
@@ -396,9 +375,7 @@ pub const GENERAL_PURPOSE: [Register; 16] = [
     ),
     gpr(
         "r13",
-        "r13d",
-        "r13w",
-        "r13b",
+        ["r13d", "r13w", "r13b"],
         None,
         AbiRole::CalleeSaved,
         SyscallRole::Unused,
@@ -406,9 +383,7 @@ pub const GENERAL_PURPOSE: [Register; 16] = [
     ),
     gpr(
         "r14",
-        "r14d",
-        "r14w",
-        "r14b",
+        ["r14d", "r14w", "r14b"],
         None,
         AbiRole::CalleeSaved,
         SyscallRole::Unused,
@@ -416,9 +391,7 @@ pub const GENERAL_PURPOSE: [Register; 16] = [
     ),
     gpr(
         "r15",
-        "r15d",
-        "r15w",
-        "r15b",
+        ["r15d", "r15w", "r15b"],
         None,
         AbiRole::CalleeSaved,
         SyscallRole::Unused,
