@@ -8,7 +8,9 @@
 pub mod buffer;
 pub mod history;
 pub mod position;
+pub mod syntax;
 
 pub use buffer::{TextBuffer, TAB_WIDTH};
 pub use history::{Edit, History};
 pub use position::{Position, Range};
+pub use syntax::{tokenize, Token, TokenKind};
