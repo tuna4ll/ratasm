@@ -5,6 +5,7 @@
 //!
 //! - [`ui`] owns terminal lifecycle, layout and widgets and never mutates
 //!   application state.
+//! - [`assembler`] drives the toolchain and parses what it says.
 //! - [`editor`] is pure text state with no rendering dependency.
 //! - [`instruction`] holds static ISA knowledge shared by every panel.
 //! - [`logging`] redirects diagnostics to a file so the TUI keeps stdout.
@@ -14,6 +15,7 @@
 
 #![warn(missing_docs)]
 
+pub mod assembler;
 pub mod editor;
 pub mod instruction;
 pub mod logging;
