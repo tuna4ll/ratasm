@@ -8,6 +8,7 @@
 //! - [`assembler`] drives the toolchain and parses what it says.
 //! - [`editor`] is pure text state with no rendering dependency.
 //! - [`instruction`] holds static ISA knowledge shared by every panel.
+//! - [`process`] runs external tools without a shell and without zombies.
 //! - [`logging`] redirects diagnostics to a file so the TUI keeps stdout.
 //!
 //! Every subsystem is usable without a terminal attached, which is what makes
@@ -19,4 +20,5 @@ pub mod assembler;
 pub mod editor;
 pub mod instruction;
 pub mod logging;
+pub mod process;
 pub mod ui;
