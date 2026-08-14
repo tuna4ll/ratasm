@@ -21,4 +21,5 @@ pub mod editor;
 pub mod instruction;
 pub mod logging;
 pub mod process;
+pub mod project;
 pub mod ui;
