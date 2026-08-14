@@ -14,6 +14,7 @@ pub mod position;
 pub mod search;
 pub mod symbols;
 pub mod syntax;
+pub mod workspace;
 
 pub use buffer::{TextBuffer, TAB_WIDTH};
 pub use completion::{candidates, Candidate};
@@ -23,3 +24,4 @@ pub use position::{Position, Range};
 pub use search::{find_all, SearchOptions};
 pub use symbols::{Symbol, SymbolKind};
 pub use syntax::{tokenize, Token, TokenKind};
+pub use workspace::{FileError, Workspace};
