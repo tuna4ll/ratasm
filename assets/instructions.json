@@ -1,0 +1,3982 @@
+{
+  "version": 1,
+  "architecture": "x86_64",
+  "instructions": [
+    {
+      "mnemonic": "mov",
+      "group": "data-movement",
+      "summary": "Copy the source to the destination.",
+      "operands": [
+        "dst",
+        "src"
+      ],
+      "effect": "{dst} \u2190 {src}",
+      "reads": [
+        "src"
+      ],
+      "writes": [
+        "dst"
+      ],
+      "flags_set": [],
+      "flags_read": [],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "Does not affect any flag. To zero a register, `xor reg, reg` is shorter and breaks the dependency chain."
+    },
+    {
+      "mnemonic": "movzx",
+      "group": "data-movement",
+      "summary": "Copy a narrower value, filling the rest with zeros.",
+      "operands": [
+        "dst",
+        "src"
+      ],
+      "effect": "{dst} \u2190 zero_extend({src})",
+      "reads": [
+        "src"
+      ],
+      "writes": [
+        "dst"
+      ],
+      "flags_set": [],
+      "flags_read": [],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "Use for unsigned values. Writing to a 32-bit register already zeroes the upper 32 bits, so `mov eax, ...` needs no movzx."
+    },
+    {
+      "mnemonic": "movsx",
+      "group": "data-movement",
+      "summary": "Copy a narrower value, replicating its sign bit.",
+      "operands": [
+        "dst",
+        "src"
+      ],
+      "effect": "{dst} \u2190 sign_extend({src})",
+      "reads": [
+        "src"
+      ],
+      "writes": [
+        "dst"
+      ],
+      "flags_set": [],
+      "flags_read": [],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "Use for signed values; movzx is the unsigned counterpart."
+    },
+    {
+      "mnemonic": "movsxd",
+      "group": "data-movement",
+      "summary": "Copy a 32-bit value into 64 bits, replicating its sign bit.",
+      "operands": [
+        "dst",
+        "src"
+      ],
+      "effect": "{dst} \u2190 sign_extend({src})",
+      "reads": [
+        "src"
+      ],
+      "writes": [
+        "dst"
+      ],
+      "flags_set": [],
+      "flags_read": [],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": null
+    },
+    {
+      "mnemonic": "lea",
+      "group": "data-movement",
+      "summary": "Compute an address without reading memory.",
+      "operands": [
+        "dst",
+        "src"
+      ],
+      "effect": "{dst} \u2190 address_of({src})",
+      "reads": [
+        "src"
+      ],
+      "writes": [
+        "dst"
+      ],
+      "flags_set": [],
+      "flags_read": [],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "Despite the brackets, lea performs no memory access. It is often used as a fast three-operand add or multiply."
+    },
+    {
+      "mnemonic": "xchg",
+      "group": "data-movement",
+      "summary": "Swap two operands.",
+      "operands": [
+        "a",
+        "b"
+      ],
+      "effect": "{a} \u2194 {b}",
+      "reads": [
+        "a",
+        "b"
+      ],
+      "writes": [
+        "a",
+        "b"
+      ],
+      "flags_set": [],
+      "flags_read": [],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "With a memory operand the exchange is atomic even without a lock prefix."
+    },
+    {
+      "mnemonic": "bswap",
+      "group": "data-movement",
+      "summary": "Reverse the byte order of a register.",
+      "operands": [
+        "dst"
+      ],
+      "effect": "{dst} \u2190 byte_reverse({dst})",
+      "reads": [
+        "dst"
+      ],
+      "writes": [
+        "dst"
+      ],
+      "flags_set": [],
+      "flags_read": [],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "Converts between little-endian and big-endian."
+    },
+    {
+      "mnemonic": "cbw",
+      "group": "data-movement",
+      "summary": "Sign-extend AL into AX.",
+      "operands": [],
+      "effect": "AX \u2190 sign_extend(AL)",
+      "reads": [
+        "al"
+      ],
+      "writes": [
+        "ax"
+      ],
+      "flags_set": [],
+      "flags_read": [],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": null
+    },
+    {
+      "mnemonic": "cwde",
+      "group": "data-movement",
+      "summary": "Sign-extend AX into EAX.",
+      "operands": [],
+      "effect": "EAX \u2190 sign_extend(AX)",
+      "reads": [
+        "ax"
+      ],
+      "writes": [
+        "eax"
+      ],
+      "flags_set": [],
+      "flags_read": [],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": null
+    },
+    {
+      "mnemonic": "cdqe",
+      "group": "data-movement",
+      "summary": "Sign-extend EAX into RAX.",
+      "operands": [],
+      "effect": "RAX \u2190 sign_extend(EAX)",
+      "reads": [
+        "eax"
+      ],
+      "writes": [
+        "rax"
+      ],
+      "flags_set": [],
+      "flags_read": [],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": null
+    },
+    {
+      "mnemonic": "cwd",
+      "group": "data-movement",
+      "summary": "Sign-extend AX into DX:AX.",
+      "operands": [],
+      "effect": "DX \u2190 sign_bits(AX)",
+      "reads": [
+        "ax"
+      ],
+      "writes": [
+        "dx"
+      ],
+      "flags_set": [],
+      "flags_read": [],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": null
+    },
+    {
+      "mnemonic": "cdq",
+      "group": "data-movement",
+      "summary": "Sign-extend EAX into EDX:EAX.",
+      "operands": [],
+      "effect": "EDX \u2190 sign_bits(EAX)",
+      "reads": [
+        "eax"
+      ],
+      "writes": [
+        "edx"
+      ],
+      "flags_set": [],
+      "flags_read": [],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "Required before idiv with 32-bit operands: idiv divides EDX:EAX, so EDX must hold the sign extension."
+    },
+    {
+      "mnemonic": "cqo",
+      "group": "data-movement",
+      "summary": "Sign-extend RAX into RDX:RAX.",
+      "operands": [],
+      "effect": "RDX \u2190 sign_bits(RAX)",
+      "reads": [
+        "rax"
+      ],
+      "writes": [
+        "rdx"
+      ],
+      "flags_set": [],
+      "flags_read": [],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "Required before idiv with 64-bit operands. Using xor rdx, rdx instead is only correct for non-negative values."
+    },
+    {
+      "mnemonic": "add",
+      "group": "arithmetic",
+      "summary": "Add the source to the destination.",
+      "operands": [
+        "dst",
+        "src"
+      ],
+      "effect": "{dst} \u2190 {dst} + {src}",
+      "reads": [
+        "dst",
+        "src"
+      ],
+      "writes": [
+        "dst"
+      ],
+      "flags_set": [
+        "CF",
+        "PF",
+        "AF",
+        "ZF",
+        "SF",
+        "OF"
+      ],
+      "flags_read": [],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": null
+    },
+    {
+      "mnemonic": "sub",
+      "group": "arithmetic",
+      "summary": "Subtract the source from the destination.",
+      "operands": [
+        "dst",
+        "src"
+      ],
+      "effect": "{dst} \u2190 {dst} - {src}",
+      "reads": [
+        "dst",
+        "src"
+      ],
+      "writes": [
+        "dst"
+      ],
+      "flags_set": [
+        "CF",
+        "PF",
+        "AF",
+        "ZF",
+        "SF",
+        "OF"
+      ],
+      "flags_read": [],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": null
+    },
+    {
+      "mnemonic": "adc",
+      "group": "arithmetic",
+      "summary": "Add the source and the carry flag to the destination.",
+      "operands": [
+        "dst",
+        "src"
+      ],
+      "effect": "{dst} \u2190 {dst} + {src} + CF",
+      "reads": [
+        "dst",
+        "src"
+      ],
+      "writes": [
+        "dst"
+      ],
+      "flags_set": [
+        "CF",
+        "PF",
+        "AF",
+        "ZF",
+        "SF",
+        "OF"
+      ],
+      "flags_read": [
+        "CF"
+      ],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "Used to chain additions across registers for values wider than 64 bits."
+    },
+    {
+      "mnemonic": "sbb",
+      "group": "arithmetic",
+      "summary": "Subtract the source and the carry flag from the destination.",
+      "operands": [
+        "dst",
+        "src"
+      ],
+      "effect": "{dst} \u2190 {dst} - {src} - CF",
+      "reads": [
+        "dst",
+        "src"
+      ],
+      "writes": [
+        "dst"
+      ],
+      "flags_set": [
+        "CF",
+        "PF",
+        "AF",
+        "ZF",
+        "SF",
+        "OF"
+      ],
+      "flags_read": [
+        "CF"
+      ],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": null
+    },
+    {
+      "mnemonic": "inc",
+      "group": "arithmetic",
+      "summary": "Add one to the operand.",
+      "operands": [
+        "dst"
+      ],
+      "effect": "{dst} \u2190 {dst} + 1",
+      "reads": [
+        "dst"
+      ],
+      "writes": [
+        "dst"
+      ],
+      "flags_set": [
+        "PF",
+        "AF",
+        "ZF",
+        "SF",
+        "OF"
+      ],
+      "flags_read": [],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "Deliberately leaves CF unchanged, which is what distinguishes it from `add dst, 1`."
+    },
+    {
+      "mnemonic": "dec",
+      "group": "arithmetic",
+      "summary": "Subtract one from the operand.",
+      "operands": [
+        "dst"
+      ],
+      "effect": "{dst} \u2190 {dst} - 1",
+      "reads": [
+        "dst"
+      ],
+      "writes": [
+        "dst"
+      ],
+      "flags_set": [
+        "PF",
+        "AF",
+        "ZF",
+        "SF",
+        "OF"
+      ],
+      "flags_read": [],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "Leaves CF unchanged, unlike `sub dst, 1`."
+    },
+    {
+      "mnemonic": "neg",
+      "group": "arithmetic",
+      "summary": "Replace the operand with its two's complement negation.",
+      "operands": [
+        "dst"
+      ],
+      "effect": "{dst} \u2190 0 - {dst}",
+      "reads": [
+        "dst"
+      ],
+      "writes": [
+        "dst"
+      ],
+      "flags_set": [
+        "CF",
+        "PF",
+        "AF",
+        "ZF",
+        "SF",
+        "OF"
+      ],
+      "flags_read": [],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "CF is set unless the operand was zero."
+    },
+    {
+      "mnemonic": "mul",
+      "group": "arithmetic",
+      "summary": "Unsigned multiply of the accumulator by the operand.",
+      "operands": [
+        "src"
+      ],
+      "effect": "RDX:RAX \u2190 RAX \u00d7 {src}",
+      "reads": [
+        "rax",
+        "src"
+      ],
+      "writes": [
+        "rax",
+        "rdx"
+      ],
+      "flags_set": [
+        "CF",
+        "OF"
+      ],
+      "flags_read": [],
+      "flags_cleared": [],
+      "flags_undefined": [
+        "PF",
+        "AF",
+        "ZF",
+        "SF"
+      ],
+      "notes": "The upper half of the product lands in RDX. CF and OF are set when that upper half is non-zero."
+    },
+    {
+      "mnemonic": "imul",
+      "group": "arithmetic",
+      "summary": "Signed multiply.",
+      "operands": [
+        "dst",
+        "src"
+      ],
+      "effect": "{dst} \u2190 {dst} \u00d7 {src}",
+      "reads": [
+        "dst",
+        "src"
+      ],
+      "writes": [
+        "dst"
+      ],
+      "flags_set": [
+        "CF",
+        "OF"
+      ],
+      "flags_read": [],
+      "flags_cleared": [],
+      "flags_undefined": [
+        "PF",
+        "AF",
+        "ZF",
+        "SF"
+      ],
+      "notes": "The one-operand form multiplies RAX and writes RDX:RAX; the two- and three-operand forms keep only the low half."
+    },
+    {
+      "mnemonic": "div",
+      "group": "arithmetic",
+      "summary": "Unsigned divide of RDX:RAX by the operand.",
+      "operands": [
+        "src"
+      ],
+      "effect": "RAX \u2190 RDX:RAX \u00f7 {src}, RDX \u2190 remainder",
+      "reads": [
+        "rax",
+        "rdx",
+        "src"
+      ],
+      "writes": [
+        "rax",
+        "rdx"
+      ],
+      "flags_set": [],
+      "flags_read": [],
+      "flags_cleared": [],
+      "flags_undefined": [
+        "CF",
+        "PF",
+        "AF",
+        "ZF",
+        "SF",
+        "OF"
+      ],
+      "notes": "RDX must be cleared first or the division overflows and raises SIGFPE. Dividing by zero also raises SIGFPE."
+    },
+    {
+      "mnemonic": "idiv",
+      "group": "arithmetic",
+      "summary": "Signed divide of RDX:RAX by the operand.",
+      "operands": [
+        "src"
+      ],
+      "effect": "RAX \u2190 RDX:RAX \u00f7 {src}, RDX \u2190 remainder",
+      "reads": [
+        "rax",
+        "rdx",
+        "src"
+      ],
+      "writes": [
+        "rax",
+        "rdx"
+      ],
+      "flags_set": [],
+      "flags_read": [],
+      "flags_cleared": [],
+      "flags_undefined": [
+        "CF",
+        "PF",
+        "AF",
+        "ZF",
+        "SF",
+        "OF"
+      ],
+      "notes": "Sign-extend RAX into RDX with cqo first. Using xor rdx, rdx is wrong for negative dividends."
+    },
+    {
+      "mnemonic": "xadd",
+      "group": "arithmetic",
+      "summary": "Exchange the operands, then add.",
+      "operands": [
+        "dst",
+        "src"
+      ],
+      "effect": "temp \u2190 {dst} + {src}, {src} \u2190 {dst}, {dst} \u2190 temp",
+      "reads": [
+        "dst",
+        "src"
+      ],
+      "writes": [
+        "dst",
+        "src"
+      ],
+      "flags_set": [
+        "CF",
+        "PF",
+        "AF",
+        "ZF",
+        "SF",
+        "OF"
+      ],
+      "flags_read": [],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": null
+    },
+    {
+      "mnemonic": "and",
+      "group": "bitwise",
+      "summary": "Bitwise AND.",
+      "operands": [
+        "dst",
+        "src"
+      ],
+      "effect": "{dst} \u2190 {dst} AND {src}",
+      "reads": [
+        "dst",
+        "src"
+      ],
+      "writes": [
+        "dst"
+      ],
+      "flags_set": [
+        "PF",
+        "ZF",
+        "SF"
+      ],
+      "flags_read": [],
+      "flags_cleared": [
+        "CF",
+        "OF"
+      ],
+      "flags_undefined": [
+        "AF"
+      ],
+      "notes": "Clears CF and OF unconditionally. Commonly used to mask bits."
+    },
+    {
+      "mnemonic": "or",
+      "group": "bitwise",
+      "summary": "Bitwise OR.",
+      "operands": [
+        "dst",
+        "src"
+      ],
+      "effect": "{dst} \u2190 {dst} OR {src}",
+      "reads": [
+        "dst",
+        "src"
+      ],
+      "writes": [
+        "dst"
+      ],
+      "flags_set": [
+        "PF",
+        "ZF",
+        "SF"
+      ],
+      "flags_read": [],
+      "flags_cleared": [
+        "CF",
+        "OF"
+      ],
+      "flags_undefined": [
+        "AF"
+      ],
+      "notes": null
+    },
+    {
+      "mnemonic": "xor",
+      "group": "bitwise",
+      "summary": "Bitwise exclusive OR.",
+      "operands": [
+        "dst",
+        "src"
+      ],
+      "effect": "{dst} \u2190 {dst} XOR {src}",
+      "reads": [
+        "dst",
+        "src"
+      ],
+      "writes": [
+        "dst"
+      ],
+      "flags_set": [
+        "PF",
+        "ZF",
+        "SF"
+      ],
+      "flags_read": [],
+      "flags_cleared": [
+        "CF",
+        "OF"
+      ],
+      "flags_undefined": [
+        "AF"
+      ],
+      "notes": "`xor reg, reg` is the idiomatic way to zero a register: it is shorter than mov and the processor recognises it as breaking the dependency on the old value."
+    },
+    {
+      "mnemonic": "not",
+      "group": "bitwise",
+      "summary": "Bitwise complement.",
+      "operands": [
+        "dst"
+      ],
+      "effect": "{dst} \u2190 NOT {dst}",
+      "reads": [
+        "dst"
+      ],
+      "writes": [
+        "dst"
+      ],
+      "flags_set": [],
+      "flags_read": [],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "The only bitwise operation that affects no flags."
+    },
+    {
+      "mnemonic": "test",
+      "group": "comparison",
+      "summary": "Bitwise AND, keeping only the flags.",
+      "operands": [
+        "a",
+        "b"
+      ],
+      "effect": "flags \u2190 {a} AND {b}",
+      "reads": [
+        "a",
+        "b"
+      ],
+      "writes": [],
+      "flags_set": [
+        "PF",
+        "ZF",
+        "SF"
+      ],
+      "flags_read": [],
+      "flags_cleared": [
+        "CF",
+        "OF"
+      ],
+      "flags_undefined": [
+        "AF"
+      ],
+      "notes": "`test reg, reg` is the usual way to check whether a register is zero; it sets ZF without modifying anything."
+    },
+    {
+      "mnemonic": "bt",
+      "group": "bitwise",
+      "summary": "Copy a bit into the carry flag.",
+      "operands": [
+        "src",
+        "index"
+      ],
+      "effect": "CF \u2190 bit {index} of {src}",
+      "reads": [
+        "src",
+        "index"
+      ],
+      "writes": [],
+      "flags_set": [
+        "CF"
+      ],
+      "flags_read": [],
+      "flags_cleared": [],
+      "flags_undefined": [
+        "PF",
+        "AF",
+        "SF",
+        "OF"
+      ],
+      "notes": null
+    },
+    {
+      "mnemonic": "bts",
+      "group": "bitwise",
+      "summary": "Copy a bit into the carry flag, then set it.",
+      "operands": [
+        "dst",
+        "index"
+      ],
+      "effect": "CF \u2190 bit {index} of {dst}, then set that bit",
+      "reads": [
+        "dst",
+        "index"
+      ],
+      "writes": [
+        "dst"
+      ],
+      "flags_set": [
+        "CF"
+      ],
+      "flags_read": [],
+      "flags_cleared": [],
+      "flags_undefined": [
+        "PF",
+        "AF",
+        "SF",
+        "OF"
+      ],
+      "notes": null
+    },
+    {
+      "mnemonic": "btr",
+      "group": "bitwise",
+      "summary": "Copy a bit into the carry flag, then clear it.",
+      "operands": [
+        "dst",
+        "index"
+      ],
+      "effect": "CF \u2190 bit {index} of {dst}, then clear that bit",
+      "reads": [
+        "dst",
+        "index"
+      ],
+      "writes": [
+        "dst"
+      ],
+      "flags_set": [
+        "CF"
+      ],
+      "flags_read": [],
+      "flags_cleared": [],
+      "flags_undefined": [
+        "PF",
+        "AF",
+        "SF",
+        "OF"
+      ],
+      "notes": null
+    },
+    {
+      "mnemonic": "btc",
+      "group": "bitwise",
+      "summary": "Copy a bit into the carry flag, then invert it.",
+      "operands": [
+        "dst",
+        "index"
+      ],
+      "effect": "CF \u2190 bit {index} of {dst}, then invert that bit",
+      "reads": [
+        "dst",
+        "index"
+      ],
+      "writes": [
+        "dst"
+      ],
+      "flags_set": [
+        "CF"
+      ],
+      "flags_read": [],
+      "flags_cleared": [],
+      "flags_undefined": [
+        "PF",
+        "AF",
+        "SF",
+        "OF"
+      ],
+      "notes": null
+    },
+    {
+      "mnemonic": "bsf",
+      "group": "bitwise",
+      "summary": "Find the lowest set bit.",
+      "operands": [
+        "dst",
+        "src"
+      ],
+      "effect": "{dst} \u2190 index of the lowest set bit in {src}",
+      "reads": [
+        "src"
+      ],
+      "writes": [
+        "dst"
+      ],
+      "flags_set": [
+        "ZF"
+      ],
+      "flags_read": [],
+      "flags_cleared": [],
+      "flags_undefined": [
+        "CF",
+        "PF",
+        "AF",
+        "SF",
+        "OF"
+      ],
+      "notes": "When the source is zero, ZF is set and the destination is left undefined."
+    },
+    {
+      "mnemonic": "bsr",
+      "group": "bitwise",
+      "summary": "Find the highest set bit.",
+      "operands": [
+        "dst",
+        "src"
+      ],
+      "effect": "{dst} \u2190 index of the highest set bit in {src}",
+      "reads": [
+        "src"
+      ],
+      "writes": [
+        "dst"
+      ],
+      "flags_set": [
+        "ZF"
+      ],
+      "flags_read": [],
+      "flags_cleared": [],
+      "flags_undefined": [
+        "CF",
+        "PF",
+        "AF",
+        "SF",
+        "OF"
+      ],
+      "notes": "When the source is zero, ZF is set and the destination is left undefined."
+    },
+    {
+      "mnemonic": "popcnt",
+      "group": "bitwise",
+      "summary": "Count the set bits.",
+      "operands": [
+        "dst",
+        "src"
+      ],
+      "effect": "{dst} \u2190 number of set bits in {src}",
+      "reads": [
+        "src"
+      ],
+      "writes": [
+        "dst"
+      ],
+      "flags_set": [
+        "ZF"
+      ],
+      "flags_read": [],
+      "flags_cleared": [
+        "CF",
+        "PF",
+        "AF",
+        "SF",
+        "OF"
+      ],
+      "flags_undefined": [],
+      "notes": null
+    },
+    {
+      "mnemonic": "shl",
+      "group": "shift-rotate",
+      "summary": "Shift left, filling with zeros.",
+      "operands": [
+        "dst",
+        "count"
+      ],
+      "effect": "{dst} \u2190 {dst} << {count}",
+      "reads": [
+        "dst",
+        "count"
+      ],
+      "writes": [
+        "dst"
+      ],
+      "flags_set": [
+        "CF",
+        "PF",
+        "ZF",
+        "SF",
+        "OF"
+      ],
+      "flags_read": [],
+      "flags_cleared": [],
+      "flags_undefined": [
+        "AF"
+      ],
+      "notes": "Shifting left by n multiplies by 2^n. The shift count is taken modulo 64 for 64-bit operands, and from CL when the count is not a literal."
+    },
+    {
+      "mnemonic": "sal",
+      "group": "shift-rotate",
+      "summary": "Arithmetic shift left; identical to shl.",
+      "operands": [
+        "dst",
+        "count"
+      ],
+      "effect": "{dst} \u2190 {dst} << {count}",
+      "reads": [
+        "dst",
+        "count"
+      ],
+      "writes": [
+        "dst"
+      ],
+      "flags_set": [
+        "CF",
+        "PF",
+        "ZF",
+        "SF",
+        "OF"
+      ],
+      "flags_read": [],
+      "flags_cleared": [],
+      "flags_undefined": [
+        "AF"
+      ],
+      "notes": "Encoded identically to shl; the two mnemonics are the same instruction."
+    },
+    {
+      "mnemonic": "shr",
+      "group": "shift-rotate",
+      "summary": "Shift right, filling with zeros.",
+      "operands": [
+        "dst",
+        "count"
+      ],
+      "effect": "{dst} \u2190 {dst} >> {count}  (unsigned)",
+      "reads": [
+        "dst",
+        "count"
+      ],
+      "writes": [
+        "dst"
+      ],
+      "flags_set": [
+        "CF",
+        "PF",
+        "ZF",
+        "SF",
+        "OF"
+      ],
+      "flags_read": [],
+      "flags_cleared": [],
+      "flags_undefined": [
+        "AF"
+      ],
+      "notes": "Unsigned division by 2^n. For signed values use sar. The shift count is taken modulo 64 for 64-bit operands, and from CL when the count is not a literal."
+    },
+    {
+      "mnemonic": "sar",
+      "group": "shift-rotate",
+      "summary": "Shift right, replicating the sign bit.",
+      "operands": [
+        "dst",
+        "count"
+      ],
+      "effect": "{dst} \u2190 {dst} >> {count}  (signed)",
+      "reads": [
+        "dst",
+        "count"
+      ],
+      "writes": [
+        "dst"
+      ],
+      "flags_set": [
+        "CF",
+        "PF",
+        "ZF",
+        "SF",
+        "OF"
+      ],
+      "flags_read": [],
+      "flags_cleared": [],
+      "flags_undefined": [
+        "AF"
+      ],
+      "notes": "Signed division by 2^n, rounding towards negative infinity rather than towards zero. The shift count is taken modulo 64 for 64-bit operands, and from CL when the count is not a literal."
+    },
+    {
+      "mnemonic": "rol",
+      "group": "shift-rotate",
+      "summary": "Rotate left.",
+      "operands": [
+        "dst",
+        "count"
+      ],
+      "effect": "{dst} \u2190 rotate_left({dst}, {count})",
+      "reads": [
+        "dst",
+        "count"
+      ],
+      "writes": [
+        "dst"
+      ],
+      "flags_set": [
+        "CF",
+        "OF"
+      ],
+      "flags_read": [],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": null
+    },
+    {
+      "mnemonic": "ror",
+      "group": "shift-rotate",
+      "summary": "Rotate right.",
+      "operands": [
+        "dst",
+        "count"
+      ],
+      "effect": "{dst} \u2190 rotate_right({dst}, {count})",
+      "reads": [
+        "dst",
+        "count"
+      ],
+      "writes": [
+        "dst"
+      ],
+      "flags_set": [
+        "CF",
+        "OF"
+      ],
+      "flags_read": [],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": null
+    },
+    {
+      "mnemonic": "rcl",
+      "group": "shift-rotate",
+      "summary": "Rotate left through the carry flag.",
+      "operands": [
+        "dst",
+        "count"
+      ],
+      "effect": "{dst}, CF \u2190 rotate_left_through_carry({dst}, CF, {count})",
+      "reads": [
+        "dst",
+        "count",
+        "CF"
+      ],
+      "writes": [
+        "dst"
+      ],
+      "flags_set": [
+        "CF",
+        "OF"
+      ],
+      "flags_read": [
+        "CF"
+      ],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": null
+    },
+    {
+      "mnemonic": "rcr",
+      "group": "shift-rotate",
+      "summary": "Rotate right through the carry flag.",
+      "operands": [
+        "dst",
+        "count"
+      ],
+      "effect": "{dst}, CF \u2190 rotate_right_through_carry({dst}, CF, {count})",
+      "reads": [
+        "dst",
+        "count",
+        "CF"
+      ],
+      "writes": [
+        "dst"
+      ],
+      "flags_set": [
+        "CF",
+        "OF"
+      ],
+      "flags_read": [
+        "CF"
+      ],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": null
+    },
+    {
+      "mnemonic": "shld",
+      "group": "shift-rotate",
+      "summary": "Shift left, bringing in bits from a second operand.",
+      "operands": [
+        "dst",
+        "src",
+        "count"
+      ],
+      "effect": "{dst} \u2190 ({dst} << {count}) | ({src} >> (width - {count}))",
+      "reads": [
+        "dst",
+        "src",
+        "count"
+      ],
+      "writes": [
+        "dst"
+      ],
+      "flags_set": [
+        "CF",
+        "PF",
+        "ZF",
+        "SF",
+        "OF"
+      ],
+      "flags_read": [],
+      "flags_cleared": [],
+      "flags_undefined": [
+        "AF"
+      ],
+      "notes": null
+    },
+    {
+      "mnemonic": "shrd",
+      "group": "shift-rotate",
+      "summary": "Shift right, bringing in bits from a second operand.",
+      "operands": [
+        "dst",
+        "src",
+        "count"
+      ],
+      "effect": "{dst} \u2190 ({dst} >> {count}) | ({src} << (width - {count}))",
+      "reads": [
+        "dst",
+        "src",
+        "count"
+      ],
+      "writes": [
+        "dst"
+      ],
+      "flags_set": [
+        "CF",
+        "PF",
+        "ZF",
+        "SF",
+        "OF"
+      ],
+      "flags_read": [],
+      "flags_cleared": [],
+      "flags_undefined": [
+        "AF"
+      ],
+      "notes": null
+    },
+    {
+      "mnemonic": "cmp",
+      "group": "comparison",
+      "summary": "Subtract, keeping only the flags.",
+      "operands": [
+        "a",
+        "b"
+      ],
+      "effect": "flags \u2190 {a} - {b}",
+      "reads": [
+        "a",
+        "b"
+      ],
+      "writes": [],
+      "flags_set": [
+        "CF",
+        "PF",
+        "AF",
+        "ZF",
+        "SF",
+        "OF"
+      ],
+      "flags_read": [],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "Neither operand is modified. Follow it with a conditional jump: after `cmp a, b`, `jg` is taken when a > b as signed values and `ja` when a > b as unsigned values."
+    },
+    {
+      "mnemonic": "jmp",
+      "group": "unconditional-jump",
+      "summary": "Jump unconditionally.",
+      "operands": [
+        "target"
+      ],
+      "effect": "RIP \u2190 {target}",
+      "reads": [
+        "target"
+      ],
+      "writes": [
+        "rip"
+      ],
+      "flags_set": [],
+      "flags_read": [],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": null
+    },
+    {
+      "mnemonic": "call",
+      "group": "call-return",
+      "summary": "Push the return address and jump.",
+      "operands": [
+        "target"
+      ],
+      "effect": "RSP \u2190 RSP - 8, [RSP] \u2190 RIP, RIP \u2190 {target}",
+      "reads": [
+        "target",
+        "rsp"
+      ],
+      "writes": [
+        "rsp",
+        "rip",
+        "memory"
+      ],
+      "flags_set": [],
+      "flags_read": [],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "The return address is pushed onto the stack, which shifts RSP by 8 and changes the alignment the ABI requires."
+    },
+    {
+      "mnemonic": "ret",
+      "group": "call-return",
+      "summary": "Pop the return address and jump to it.",
+      "operands": [],
+      "effect": "RIP \u2190 [RSP], RSP \u2190 RSP + 8",
+      "reads": [
+        "rsp",
+        "memory"
+      ],
+      "writes": [
+        "rsp",
+        "rip"
+      ],
+      "flags_set": [],
+      "flags_read": [],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "Whatever is at [RSP] is used as the return address, so an unbalanced stack sends execution somewhere unintended."
+    },
+    {
+      "mnemonic": "leave",
+      "group": "stack",
+      "summary": "Tear down the current stack frame.",
+      "operands": [],
+      "effect": "RSP \u2190 RBP, RBP \u2190 [RSP], RSP \u2190 RSP + 8",
+      "reads": [
+        "rbp",
+        "memory"
+      ],
+      "writes": [
+        "rsp",
+        "rbp"
+      ],
+      "flags_set": [],
+      "flags_read": [],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "Exactly equivalent to `mov rsp, rbp` followed by `pop rbp`."
+    },
+    {
+      "mnemonic": "enter",
+      "group": "stack",
+      "summary": "Build a stack frame.",
+      "operands": [
+        "size",
+        "nesting"
+      ],
+      "effect": "push RBP, RBP \u2190 RSP, RSP \u2190 RSP - {size}",
+      "reads": [
+        "rsp",
+        "rbp"
+      ],
+      "writes": [
+        "rsp",
+        "rbp",
+        "memory"
+      ],
+      "flags_set": [],
+      "flags_read": [],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "Rarely used; the equivalent push/mov/sub sequence is faster."
+    },
+    {
+      "mnemonic": "loop",
+      "group": "conditional-jump",
+      "summary": "Decrement RCX and jump while it is non-zero.",
+      "operands": [
+        "target"
+      ],
+      "effect": "RCX \u2190 RCX - 1, if RCX \u2260 0 then RIP \u2190 {target}",
+      "reads": [
+        "rcx",
+        "target"
+      ],
+      "writes": [
+        "rcx",
+        "rip"
+      ],
+      "flags_set": [],
+      "flags_read": [],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "Does not set any flag, and is slower on modern processors than an explicit dec and jnz."
+    },
+    {
+      "mnemonic": "push",
+      "group": "stack",
+      "summary": "Push a value onto the stack.",
+      "operands": [
+        "src"
+      ],
+      "effect": "RSP \u2190 RSP - 8, [RSP] \u2190 {src}",
+      "reads": [
+        "src",
+        "rsp"
+      ],
+      "writes": [
+        "rsp",
+        "memory"
+      ],
+      "flags_set": [],
+      "flags_read": [],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "The stack grows downwards, so pushing decreases RSP."
+    },
+    {
+      "mnemonic": "pop",
+      "group": "stack",
+      "summary": "Pop a value from the stack.",
+      "operands": [
+        "dst"
+      ],
+      "effect": "{dst} \u2190 [RSP], RSP \u2190 RSP + 8",
+      "reads": [
+        "rsp",
+        "memory"
+      ],
+      "writes": [
+        "dst",
+        "rsp"
+      ],
+      "flags_set": [],
+      "flags_read": [],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": null
+    },
+    {
+      "mnemonic": "pushfq",
+      "group": "stack",
+      "summary": "Push the flags register.",
+      "operands": [],
+      "effect": "RSP \u2190 RSP - 8, [RSP] \u2190 RFLAGS",
+      "reads": [
+        "rsp",
+        "rflags"
+      ],
+      "writes": [
+        "rsp",
+        "memory"
+      ],
+      "flags_set": [],
+      "flags_read": [],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": null
+    },
+    {
+      "mnemonic": "popfq",
+      "group": "stack",
+      "summary": "Pop the flags register.",
+      "operands": [],
+      "effect": "RFLAGS \u2190 [RSP], RSP \u2190 RSP + 8",
+      "reads": [
+        "rsp",
+        "memory"
+      ],
+      "writes": [
+        "rsp",
+        "rflags"
+      ],
+      "flags_set": [
+        "CF",
+        "PF",
+        "AF",
+        "ZF",
+        "SF",
+        "TF",
+        "IF",
+        "DF",
+        "OF"
+      ],
+      "flags_read": [],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": null
+    },
+    {
+      "mnemonic": "movsb",
+      "group": "string",
+      "summary": "Copy 1 byte(s) from [RSI] to [RDI].",
+      "operands": [],
+      "effect": "[RDI] \u2190 [RSI], then RSI and RDI advance by 1",
+      "reads": [
+        "rsi",
+        "rdi",
+        "memory",
+        "DF"
+      ],
+      "writes": [
+        "rsi",
+        "rdi",
+        "memory"
+      ],
+      "flags_set": [],
+      "flags_read": [
+        "DF"
+      ],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "DF decides the direction: clear counts up, set counts down. Prefix with rep to repeat RCX times."
+    },
+    {
+      "mnemonic": "movsw",
+      "group": "string",
+      "summary": "Copy 2 byte(s) from [RSI] to [RDI].",
+      "operands": [],
+      "effect": "[RDI] \u2190 [RSI], then RSI and RDI advance by 2",
+      "reads": [
+        "rsi",
+        "rdi",
+        "memory",
+        "DF"
+      ],
+      "writes": [
+        "rsi",
+        "rdi",
+        "memory"
+      ],
+      "flags_set": [],
+      "flags_read": [
+        "DF"
+      ],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "DF decides the direction: clear counts up, set counts down. Prefix with rep to repeat RCX times."
+    },
+    {
+      "mnemonic": "movsd",
+      "group": "string",
+      "summary": "Copy 4 byte(s) from [RSI] to [RDI].",
+      "operands": [],
+      "effect": "[RDI] \u2190 [RSI], then RSI and RDI advance by 4",
+      "reads": [
+        "rsi",
+        "rdi",
+        "memory",
+        "DF"
+      ],
+      "writes": [
+        "rsi",
+        "rdi",
+        "memory"
+      ],
+      "flags_set": [],
+      "flags_read": [
+        "DF"
+      ],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "DF decides the direction: clear counts up, set counts down. Prefix with rep to repeat RCX times."
+    },
+    {
+      "mnemonic": "movsq",
+      "group": "string",
+      "summary": "Copy 8 byte(s) from [RSI] to [RDI].",
+      "operands": [],
+      "effect": "[RDI] \u2190 [RSI], then RSI and RDI advance by 8",
+      "reads": [
+        "rsi",
+        "rdi",
+        "memory",
+        "DF"
+      ],
+      "writes": [
+        "rsi",
+        "rdi",
+        "memory"
+      ],
+      "flags_set": [],
+      "flags_read": [
+        "DF"
+      ],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "DF decides the direction: clear counts up, set counts down. Prefix with rep to repeat RCX times."
+    },
+    {
+      "mnemonic": "stosb",
+      "group": "string",
+      "summary": "Store 1 byte(s) from the accumulator to [RDI].",
+      "operands": [],
+      "effect": "[RDI] \u2190 accumulator, then RDI advances by 1",
+      "reads": [
+        "rax",
+        "rdi",
+        "DF"
+      ],
+      "writes": [
+        "rdi",
+        "memory"
+      ],
+      "flags_set": [],
+      "flags_read": [
+        "DF"
+      ],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "Combined with rep, this is the usual way to fill a buffer."
+    },
+    {
+      "mnemonic": "stosw",
+      "group": "string",
+      "summary": "Store 2 byte(s) from the accumulator to [RDI].",
+      "operands": [],
+      "effect": "[RDI] \u2190 accumulator, then RDI advances by 2",
+      "reads": [
+        "rax",
+        "rdi",
+        "DF"
+      ],
+      "writes": [
+        "rdi",
+        "memory"
+      ],
+      "flags_set": [],
+      "flags_read": [
+        "DF"
+      ],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "Combined with rep, this is the usual way to fill a buffer."
+    },
+    {
+      "mnemonic": "stosd",
+      "group": "string",
+      "summary": "Store 4 byte(s) from the accumulator to [RDI].",
+      "operands": [],
+      "effect": "[RDI] \u2190 accumulator, then RDI advances by 4",
+      "reads": [
+        "rax",
+        "rdi",
+        "DF"
+      ],
+      "writes": [
+        "rdi",
+        "memory"
+      ],
+      "flags_set": [],
+      "flags_read": [
+        "DF"
+      ],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "Combined with rep, this is the usual way to fill a buffer."
+    },
+    {
+      "mnemonic": "stosq",
+      "group": "string",
+      "summary": "Store 8 byte(s) from the accumulator to [RDI].",
+      "operands": [],
+      "effect": "[RDI] \u2190 accumulator, then RDI advances by 8",
+      "reads": [
+        "rax",
+        "rdi",
+        "DF"
+      ],
+      "writes": [
+        "rdi",
+        "memory"
+      ],
+      "flags_set": [],
+      "flags_read": [
+        "DF"
+      ],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "Combined with rep, this is the usual way to fill a buffer."
+    },
+    {
+      "mnemonic": "lodsb",
+      "group": "string",
+      "summary": "Load 1 byte(s) from [RSI] into the accumulator.",
+      "operands": [],
+      "effect": "accumulator \u2190 [RSI], then RSI advances by 1",
+      "reads": [
+        "rsi",
+        "memory",
+        "DF"
+      ],
+      "writes": [
+        "rax",
+        "rsi"
+      ],
+      "flags_set": [],
+      "flags_read": [
+        "DF"
+      ],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": null
+    },
+    {
+      "mnemonic": "lodsw",
+      "group": "string",
+      "summary": "Load 2 byte(s) from [RSI] into the accumulator.",
+      "operands": [],
+      "effect": "accumulator \u2190 [RSI], then RSI advances by 2",
+      "reads": [
+        "rsi",
+        "memory",
+        "DF"
+      ],
+      "writes": [
+        "rax",
+        "rsi"
+      ],
+      "flags_set": [],
+      "flags_read": [
+        "DF"
+      ],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": null
+    },
+    {
+      "mnemonic": "lodsd",
+      "group": "string",
+      "summary": "Load 4 byte(s) from [RSI] into the accumulator.",
+      "operands": [],
+      "effect": "accumulator \u2190 [RSI], then RSI advances by 4",
+      "reads": [
+        "rsi",
+        "memory",
+        "DF"
+      ],
+      "writes": [
+        "rax",
+        "rsi"
+      ],
+      "flags_set": [],
+      "flags_read": [
+        "DF"
+      ],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": null
+    },
+    {
+      "mnemonic": "lodsq",
+      "group": "string",
+      "summary": "Load 8 byte(s) from [RSI] into the accumulator.",
+      "operands": [],
+      "effect": "accumulator \u2190 [RSI], then RSI advances by 8",
+      "reads": [
+        "rsi",
+        "memory",
+        "DF"
+      ],
+      "writes": [
+        "rax",
+        "rsi"
+      ],
+      "flags_set": [],
+      "flags_read": [
+        "DF"
+      ],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": null
+    },
+    {
+      "mnemonic": "scasb",
+      "group": "string",
+      "summary": "Compare the accumulator with 1 byte(s) at [RDI].",
+      "operands": [],
+      "effect": "flags \u2190 accumulator - [RDI], then RDI advances by 1",
+      "reads": [
+        "rax",
+        "rdi",
+        "memory",
+        "DF"
+      ],
+      "writes": [
+        "rdi"
+      ],
+      "flags_set": [
+        "CF",
+        "PF",
+        "AF",
+        "ZF",
+        "SF",
+        "OF"
+      ],
+      "flags_read": [
+        "DF"
+      ],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "With repne this scans for a matching byte, which is how strlen is written by hand."
+    },
+    {
+      "mnemonic": "scasw",
+      "group": "string",
+      "summary": "Compare the accumulator with 2 byte(s) at [RDI].",
+      "operands": [],
+      "effect": "flags \u2190 accumulator - [RDI], then RDI advances by 2",
+      "reads": [
+        "rax",
+        "rdi",
+        "memory",
+        "DF"
+      ],
+      "writes": [
+        "rdi"
+      ],
+      "flags_set": [
+        "CF",
+        "PF",
+        "AF",
+        "ZF",
+        "SF",
+        "OF"
+      ],
+      "flags_read": [
+        "DF"
+      ],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "With repne this scans for a matching byte, which is how strlen is written by hand."
+    },
+    {
+      "mnemonic": "scasd",
+      "group": "string",
+      "summary": "Compare the accumulator with 4 byte(s) at [RDI].",
+      "operands": [],
+      "effect": "flags \u2190 accumulator - [RDI], then RDI advances by 4",
+      "reads": [
+        "rax",
+        "rdi",
+        "memory",
+        "DF"
+      ],
+      "writes": [
+        "rdi"
+      ],
+      "flags_set": [
+        "CF",
+        "PF",
+        "AF",
+        "ZF",
+        "SF",
+        "OF"
+      ],
+      "flags_read": [
+        "DF"
+      ],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "With repne this scans for a matching byte, which is how strlen is written by hand."
+    },
+    {
+      "mnemonic": "scasq",
+      "group": "string",
+      "summary": "Compare the accumulator with 8 byte(s) at [RDI].",
+      "operands": [],
+      "effect": "flags \u2190 accumulator - [RDI], then RDI advances by 8",
+      "reads": [
+        "rax",
+        "rdi",
+        "memory",
+        "DF"
+      ],
+      "writes": [
+        "rdi"
+      ],
+      "flags_set": [
+        "CF",
+        "PF",
+        "AF",
+        "ZF",
+        "SF",
+        "OF"
+      ],
+      "flags_read": [
+        "DF"
+      ],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "With repne this scans for a matching byte, which is how strlen is written by hand."
+    },
+    {
+      "mnemonic": "cmpsb",
+      "group": "string",
+      "summary": "Compare 1 byte(s) at [RSI] and [RDI].",
+      "operands": [],
+      "effect": "flags \u2190 [RSI] - [RDI], then RSI and RDI advance by 1",
+      "reads": [
+        "rsi",
+        "rdi",
+        "memory",
+        "DF"
+      ],
+      "writes": [
+        "rsi",
+        "rdi"
+      ],
+      "flags_set": [
+        "CF",
+        "PF",
+        "AF",
+        "ZF",
+        "SF",
+        "OF"
+      ],
+      "flags_read": [
+        "DF"
+      ],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": null
+    },
+    {
+      "mnemonic": "cmpsw",
+      "group": "string",
+      "summary": "Compare 2 byte(s) at [RSI] and [RDI].",
+      "operands": [],
+      "effect": "flags \u2190 [RSI] - [RDI], then RSI and RDI advance by 2",
+      "reads": [
+        "rsi",
+        "rdi",
+        "memory",
+        "DF"
+      ],
+      "writes": [
+        "rsi",
+        "rdi"
+      ],
+      "flags_set": [
+        "CF",
+        "PF",
+        "AF",
+        "ZF",
+        "SF",
+        "OF"
+      ],
+      "flags_read": [
+        "DF"
+      ],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": null
+    },
+    {
+      "mnemonic": "cmpsd",
+      "group": "string",
+      "summary": "Compare 4 byte(s) at [RSI] and [RDI].",
+      "operands": [],
+      "effect": "flags \u2190 [RSI] - [RDI], then RSI and RDI advance by 4",
+      "reads": [
+        "rsi",
+        "rdi",
+        "memory",
+        "DF"
+      ],
+      "writes": [
+        "rsi",
+        "rdi"
+      ],
+      "flags_set": [
+        "CF",
+        "PF",
+        "AF",
+        "ZF",
+        "SF",
+        "OF"
+      ],
+      "flags_read": [
+        "DF"
+      ],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": null
+    },
+    {
+      "mnemonic": "cmpsq",
+      "group": "string",
+      "summary": "Compare 8 byte(s) at [RSI] and [RDI].",
+      "operands": [],
+      "effect": "flags \u2190 [RSI] - [RDI], then RSI and RDI advance by 8",
+      "reads": [
+        "rsi",
+        "rdi",
+        "memory",
+        "DF"
+      ],
+      "writes": [
+        "rsi",
+        "rdi"
+      ],
+      "flags_set": [
+        "CF",
+        "PF",
+        "AF",
+        "ZF",
+        "SF",
+        "OF"
+      ],
+      "flags_read": [
+        "DF"
+      ],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": null
+    },
+    {
+      "mnemonic": "rep",
+      "group": "string",
+      "summary": "Repeat the following string instruction RCX times.",
+      "operands": [],
+      "effect": "while RCX \u2260 0: execute the instruction, RCX \u2190 RCX - 1",
+      "reads": [
+        "rcx"
+      ],
+      "writes": [
+        "rcx"
+      ],
+      "flags_set": [],
+      "flags_read": [],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "A prefix, not an instruction of its own."
+    },
+    {
+      "mnemonic": "repe",
+      "group": "string",
+      "summary": "Repeat while equal and RCX is non-zero.",
+      "operands": [],
+      "effect": "while RCX \u2260 0 and ZF = 1: execute, RCX \u2190 RCX - 1",
+      "reads": [
+        "rcx",
+        "ZF"
+      ],
+      "writes": [
+        "rcx"
+      ],
+      "flags_set": [],
+      "flags_read": [
+        "ZF"
+      ],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": null
+    },
+    {
+      "mnemonic": "repne",
+      "group": "string",
+      "summary": "Repeat while not equal and RCX is non-zero.",
+      "operands": [],
+      "effect": "while RCX \u2260 0 and ZF = 0: execute, RCX \u2190 RCX - 1",
+      "reads": [
+        "rcx",
+        "ZF"
+      ],
+      "writes": [
+        "rcx"
+      ],
+      "flags_set": [],
+      "flags_read": [
+        "ZF"
+      ],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": null
+    },
+    {
+      "mnemonic": "cld",
+      "group": "string",
+      "summary": "Clear the direction flag so string operations count upwards.",
+      "operands": [],
+      "effect": "DF \u2190 0",
+      "reads": [],
+      "writes": [],
+      "flags_set": [],
+      "flags_read": [],
+      "flags_cleared": [
+        "DF"
+      ],
+      "flags_undefined": [],
+      "notes": "The ABI requires DF to be clear on function entry and return."
+    },
+    {
+      "mnemonic": "std",
+      "group": "string",
+      "summary": "Set the direction flag so string operations count downwards.",
+      "operands": [],
+      "effect": "DF \u2190 1",
+      "reads": [],
+      "writes": [],
+      "flags_set": [
+        "DF"
+      ],
+      "flags_read": [],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "Must be cleared again with cld before returning."
+    },
+    {
+      "mnemonic": "clc",
+      "group": "bitwise",
+      "summary": "Clear the carry flag.",
+      "operands": [],
+      "effect": "CF \u2190 0",
+      "reads": [],
+      "writes": [],
+      "flags_set": [],
+      "flags_read": [],
+      "flags_cleared": [
+        "CF"
+      ],
+      "flags_undefined": [],
+      "notes": null
+    },
+    {
+      "mnemonic": "stc",
+      "group": "bitwise",
+      "summary": "Set the carry flag.",
+      "operands": [],
+      "effect": "CF \u2190 1",
+      "reads": [],
+      "writes": [],
+      "flags_set": [
+        "CF"
+      ],
+      "flags_read": [],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": null
+    },
+    {
+      "mnemonic": "cmc",
+      "group": "bitwise",
+      "summary": "Invert the carry flag.",
+      "operands": [],
+      "effect": "CF \u2190 NOT CF",
+      "reads": [
+        "CF"
+      ],
+      "writes": [],
+      "flags_set": [
+        "CF"
+      ],
+      "flags_read": [
+        "CF"
+      ],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": null
+    },
+    {
+      "mnemonic": "nop",
+      "group": "data-movement",
+      "summary": "Do nothing.",
+      "operands": [],
+      "effect": "no effect",
+      "reads": [],
+      "writes": [],
+      "flags_set": [],
+      "flags_read": [],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "Used for alignment padding. Multi-byte forms exist so one instruction can fill several bytes."
+    },
+    {
+      "mnemonic": "hlt",
+      "group": "system",
+      "summary": "Halt the processor.",
+      "operands": [],
+      "effect": "halt until an interrupt arrives",
+      "reads": [],
+      "writes": [],
+      "flags_set": [],
+      "flags_read": [],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "Privileged: executing it in user code raises SIGSEGV."
+    },
+    {
+      "mnemonic": "ud2",
+      "group": "system",
+      "summary": "Raise an invalid-opcode exception.",
+      "operands": [],
+      "effect": "raise #UD",
+      "reads": [],
+      "writes": [],
+      "flags_set": [],
+      "flags_read": [],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "A deliberate crash, used to mark unreachable code."
+    },
+    {
+      "mnemonic": "cpuid",
+      "group": "system",
+      "summary": "Query processor identification and features.",
+      "operands": [],
+      "effect": "EAX, EBX, ECX, EDX \u2190 processor information selected by EAX",
+      "reads": [
+        "eax",
+        "ecx"
+      ],
+      "writes": [
+        "eax",
+        "ebx",
+        "ecx",
+        "edx"
+      ],
+      "flags_set": [],
+      "flags_read": [],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": null
+    },
+    {
+      "mnemonic": "rdtsc",
+      "group": "system",
+      "summary": "Read the time-stamp counter.",
+      "operands": [],
+      "effect": "EDX:EAX \u2190 time-stamp counter",
+      "reads": [],
+      "writes": [
+        "eax",
+        "edx"
+      ],
+      "flags_set": [],
+      "flags_read": [],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": null
+    },
+    {
+      "mnemonic": "syscall",
+      "group": "syscall",
+      "summary": "Enter the kernel.",
+      "operands": [],
+      "effect": "kernel executes the call in RAX; RCX \u2190 RIP, R11 \u2190 RFLAGS",
+      "reads": [
+        "rax",
+        "rdi",
+        "rsi",
+        "rdx",
+        "r10",
+        "r8",
+        "r9"
+      ],
+      "writes": [
+        "rax",
+        "rcx",
+        "r11"
+      ],
+      "flags_set": [],
+      "flags_read": [],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "The number goes in RAX and the arguments in RDI, RSI, RDX, R10, R8, R9. The result comes back in RAX, with errors as small negative values. RCX and R11 are destroyed, which is why the fourth argument uses R10 rather than RCX."
+    },
+    {
+      "mnemonic": "int",
+      "group": "syscall",
+      "summary": "Raise a software interrupt.",
+      "operands": [
+        "vector"
+      ],
+      "effect": "raise interrupt {vector}",
+      "reads": [
+        "vector"
+      ],
+      "writes": [],
+      "flags_set": [],
+      "flags_read": [],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "`int 0x80` is the legacy 32-bit entry; 64-bit code uses the syscall instruction instead."
+    },
+    {
+      "mnemonic": "int3",
+      "group": "syscall",
+      "summary": "Raise a breakpoint trap.",
+      "operands": [],
+      "effect": "raise breakpoint",
+      "reads": [],
+      "writes": [],
+      "flags_set": [],
+      "flags_read": [],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "The one-byte encoding debuggers patch into code to implement breakpoints."
+    },
+    {
+      "mnemonic": "movaps",
+      "group": "simd",
+      "summary": "Move four packed single-precision values, aligned.",
+      "operands": [
+        "dst",
+        "src"
+      ],
+      "effect": "{dst} \u2190 simd operation on {src}",
+      "reads": [
+        "src"
+      ],
+      "writes": [
+        "dst"
+      ],
+      "flags_set": [],
+      "flags_read": [],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "Vector instruction. ratasm recognises it and names it, but does not model its per-lane effect."
+    },
+    {
+      "mnemonic": "movups",
+      "group": "simd",
+      "summary": "Move four packed single-precision values, unaligned.",
+      "operands": [
+        "dst",
+        "src"
+      ],
+      "effect": "{dst} \u2190 simd operation on {src}",
+      "reads": [
+        "src"
+      ],
+      "writes": [
+        "dst"
+      ],
+      "flags_set": [],
+      "flags_read": [],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "Vector instruction. ratasm recognises it and names it, but does not model its per-lane effect."
+    },
+    {
+      "mnemonic": "movapd",
+      "group": "simd",
+      "summary": "Move two packed double-precision values, aligned.",
+      "operands": [
+        "dst",
+        "src"
+      ],
+      "effect": "{dst} \u2190 simd operation on {src}",
+      "reads": [
+        "src"
+      ],
+      "writes": [
+        "dst"
+      ],
+      "flags_set": [],
+      "flags_read": [],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "Vector instruction. ratasm recognises it and names it, but does not model its per-lane effect."
+    },
+    {
+      "mnemonic": "movupd",
+      "group": "simd",
+      "summary": "Move two packed double-precision values, unaligned.",
+      "operands": [
+        "dst",
+        "src"
+      ],
+      "effect": "{dst} \u2190 simd operation on {src}",
+      "reads": [
+        "src"
+      ],
+      "writes": [
+        "dst"
+      ],
+      "flags_set": [],
+      "flags_read": [],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "Vector instruction. ratasm recognises it and names it, but does not model its per-lane effect."
+    },
+    {
+      "mnemonic": "movdqa",
+      "group": "simd",
+      "summary": "Move 16 bytes of packed integers, aligned.",
+      "operands": [
+        "dst",
+        "src"
+      ],
+      "effect": "{dst} \u2190 simd operation on {src}",
+      "reads": [
+        "src"
+      ],
+      "writes": [
+        "dst"
+      ],
+      "flags_set": [],
+      "flags_read": [],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "Vector instruction. ratasm recognises it and names it, but does not model its per-lane effect."
+    },
+    {
+      "mnemonic": "movdqu",
+      "group": "simd",
+      "summary": "Move 16 bytes of packed integers, unaligned.",
+      "operands": [
+        "dst",
+        "src"
+      ],
+      "effect": "{dst} \u2190 simd operation on {src}",
+      "reads": [
+        "src"
+      ],
+      "writes": [
+        "dst"
+      ],
+      "flags_set": [],
+      "flags_read": [],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "Vector instruction. ratasm recognises it and names it, but does not model its per-lane effect."
+    },
+    {
+      "mnemonic": "movd",
+      "group": "simd",
+      "summary": "Move 32 bits between a general register and an XMM register.",
+      "operands": [
+        "dst",
+        "src"
+      ],
+      "effect": "{dst} \u2190 simd operation on {src}",
+      "reads": [
+        "src"
+      ],
+      "writes": [
+        "dst"
+      ],
+      "flags_set": [],
+      "flags_read": [],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "Vector instruction. ratasm recognises it and names it, but does not model its per-lane effect."
+    },
+    {
+      "mnemonic": "movq",
+      "group": "simd",
+      "summary": "Move 64 bits between a general register and an XMM register.",
+      "operands": [
+        "dst",
+        "src"
+      ],
+      "effect": "{dst} \u2190 simd operation on {src}",
+      "reads": [
+        "src"
+      ],
+      "writes": [
+        "dst"
+      ],
+      "flags_set": [],
+      "flags_read": [],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "Vector instruction. ratasm recognises it and names it, but does not model its per-lane effect."
+    },
+    {
+      "mnemonic": "addps",
+      "group": "simd",
+      "summary": "Add four packed single-precision values.",
+      "operands": [
+        "dst",
+        "src"
+      ],
+      "effect": "{dst} \u2190 simd operation on {src}",
+      "reads": [
+        "src"
+      ],
+      "writes": [
+        "dst"
+      ],
+      "flags_set": [],
+      "flags_read": [],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "Vector instruction. ratasm recognises it and names it, but does not model its per-lane effect."
+    },
+    {
+      "mnemonic": "addpd",
+      "group": "simd",
+      "summary": "Add two packed double-precision values.",
+      "operands": [
+        "dst",
+        "src"
+      ],
+      "effect": "{dst} \u2190 simd operation on {src}",
+      "reads": [
+        "src"
+      ],
+      "writes": [
+        "dst"
+      ],
+      "flags_set": [],
+      "flags_read": [],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "Vector instruction. ratasm recognises it and names it, but does not model its per-lane effect."
+    },
+    {
+      "mnemonic": "subps",
+      "group": "simd",
+      "summary": "Subtract four packed single-precision values.",
+      "operands": [
+        "dst",
+        "src"
+      ],
+      "effect": "{dst} \u2190 simd operation on {src}",
+      "reads": [
+        "src"
+      ],
+      "writes": [
+        "dst"
+      ],
+      "flags_set": [],
+      "flags_read": [],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "Vector instruction. ratasm recognises it and names it, but does not model its per-lane effect."
+    },
+    {
+      "mnemonic": "mulps",
+      "group": "simd",
+      "summary": "Multiply four packed single-precision values.",
+      "operands": [
+        "dst",
+        "src"
+      ],
+      "effect": "{dst} \u2190 simd operation on {src}",
+      "reads": [
+        "src"
+      ],
+      "writes": [
+        "dst"
+      ],
+      "flags_set": [],
+      "flags_read": [],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "Vector instruction. ratasm recognises it and names it, but does not model its per-lane effect."
+    },
+    {
+      "mnemonic": "divps",
+      "group": "simd",
+      "summary": "Divide four packed single-precision values.",
+      "operands": [
+        "dst",
+        "src"
+      ],
+      "effect": "{dst} \u2190 simd operation on {src}",
+      "reads": [
+        "src"
+      ],
+      "writes": [
+        "dst"
+      ],
+      "flags_set": [],
+      "flags_read": [],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "Vector instruction. ratasm recognises it and names it, but does not model its per-lane effect."
+    },
+    {
+      "mnemonic": "xorps",
+      "group": "simd",
+      "summary": "Bitwise exclusive OR of packed single-precision values.",
+      "operands": [
+        "dst",
+        "src"
+      ],
+      "effect": "{dst} \u2190 simd operation on {src}",
+      "reads": [
+        "src"
+      ],
+      "writes": [
+        "dst"
+      ],
+      "flags_set": [],
+      "flags_read": [],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "Vector instruction. ratasm recognises it and names it, but does not model its per-lane effect."
+    },
+    {
+      "mnemonic": "pxor",
+      "group": "simd",
+      "summary": "Bitwise exclusive OR of packed integers.",
+      "operands": [
+        "dst",
+        "src"
+      ],
+      "effect": "{dst} \u2190 simd operation on {src}",
+      "reads": [
+        "src"
+      ],
+      "writes": [
+        "dst"
+      ],
+      "flags_set": [],
+      "flags_read": [],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "Vector instruction. ratasm recognises it and names it, but does not model its per-lane effect."
+    },
+    {
+      "mnemonic": "pand",
+      "group": "simd",
+      "summary": "Bitwise AND of packed integers.",
+      "operands": [
+        "dst",
+        "src"
+      ],
+      "effect": "{dst} \u2190 simd operation on {src}",
+      "reads": [
+        "src"
+      ],
+      "writes": [
+        "dst"
+      ],
+      "flags_set": [],
+      "flags_read": [],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "Vector instruction. ratasm recognises it and names it, but does not model its per-lane effect."
+    },
+    {
+      "mnemonic": "por",
+      "group": "simd",
+      "summary": "Bitwise OR of packed integers.",
+      "operands": [
+        "dst",
+        "src"
+      ],
+      "effect": "{dst} \u2190 simd operation on {src}",
+      "reads": [
+        "src"
+      ],
+      "writes": [
+        "dst"
+      ],
+      "flags_set": [],
+      "flags_read": [],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "Vector instruction. ratasm recognises it and names it, but does not model its per-lane effect."
+    },
+    {
+      "mnemonic": "paddb",
+      "group": "simd",
+      "summary": "Add packed bytes.",
+      "operands": [
+        "dst",
+        "src"
+      ],
+      "effect": "{dst} \u2190 simd operation on {src}",
+      "reads": [
+        "src"
+      ],
+      "writes": [
+        "dst"
+      ],
+      "flags_set": [],
+      "flags_read": [],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "Vector instruction. ratasm recognises it and names it, but does not model its per-lane effect."
+    },
+    {
+      "mnemonic": "paddd",
+      "group": "simd",
+      "summary": "Add packed doublewords.",
+      "operands": [
+        "dst",
+        "src"
+      ],
+      "effect": "{dst} \u2190 simd operation on {src}",
+      "reads": [
+        "src"
+      ],
+      "writes": [
+        "dst"
+      ],
+      "flags_set": [],
+      "flags_read": [],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "Vector instruction. ratasm recognises it and names it, but does not model its per-lane effect."
+    },
+    {
+      "mnemonic": "psubb",
+      "group": "simd",
+      "summary": "Subtract packed bytes.",
+      "operands": [
+        "dst",
+        "src"
+      ],
+      "effect": "{dst} \u2190 simd operation on {src}",
+      "reads": [
+        "src"
+      ],
+      "writes": [
+        "dst"
+      ],
+      "flags_set": [],
+      "flags_read": [],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "Vector instruction. ratasm recognises it and names it, but does not model its per-lane effect."
+    },
+    {
+      "mnemonic": "pcmpeqb",
+      "group": "simd",
+      "summary": "Compare packed bytes for equality.",
+      "operands": [
+        "dst",
+        "src"
+      ],
+      "effect": "{dst} \u2190 simd operation on {src}",
+      "reads": [
+        "src"
+      ],
+      "writes": [
+        "dst"
+      ],
+      "flags_set": [],
+      "flags_read": [],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "Vector instruction. ratasm recognises it and names it, but does not model its per-lane effect."
+    },
+    {
+      "mnemonic": "punpcklbw",
+      "group": "simd",
+      "summary": "Interleave the low bytes of two operands.",
+      "operands": [
+        "dst",
+        "src"
+      ],
+      "effect": "{dst} \u2190 simd operation on {src}",
+      "reads": [
+        "src"
+      ],
+      "writes": [
+        "dst"
+      ],
+      "flags_set": [],
+      "flags_read": [],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "Vector instruction. ratasm recognises it and names it, but does not model its per-lane effect."
+    },
+    {
+      "mnemonic": "pshufd",
+      "group": "simd",
+      "summary": "Shuffle packed doublewords.",
+      "operands": [
+        "dst",
+        "src"
+      ],
+      "effect": "{dst} \u2190 simd operation on {src}",
+      "reads": [
+        "src"
+      ],
+      "writes": [
+        "dst"
+      ],
+      "flags_set": [],
+      "flags_read": [],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "Vector instruction. ratasm recognises it and names it, but does not model its per-lane effect."
+    },
+    {
+      "mnemonic": "cvtsi2sd",
+      "group": "simd",
+      "summary": "Convert an integer to a double-precision value.",
+      "operands": [
+        "dst",
+        "src"
+      ],
+      "effect": "{dst} \u2190 simd operation on {src}",
+      "reads": [
+        "src"
+      ],
+      "writes": [
+        "dst"
+      ],
+      "flags_set": [],
+      "flags_read": [],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "Vector instruction. ratasm recognises it and names it, but does not model its per-lane effect."
+    },
+    {
+      "mnemonic": "cvtsd2si",
+      "group": "simd",
+      "summary": "Convert a double-precision value to an integer.",
+      "operands": [
+        "dst",
+        "src"
+      ],
+      "effect": "{dst} \u2190 simd operation on {src}",
+      "reads": [
+        "src"
+      ],
+      "writes": [
+        "dst"
+      ],
+      "flags_set": [],
+      "flags_read": [],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "Vector instruction. ratasm recognises it and names it, but does not model its per-lane effect."
+    },
+    {
+      "mnemonic": "jo",
+      "group": "conditional-jump",
+      "summary": "Jump if signed overflow occurred.",
+      "operands": [
+        "target"
+      ],
+      "effect": "if OF = 1 then RIP \u2190 {target}",
+      "reads": [
+        "target",
+        "OF"
+      ],
+      "writes": [
+        "rip"
+      ],
+      "flags_set": [],
+      "flags_read": [
+        "OF"
+      ],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "Taken when OF = 1."
+    },
+    {
+      "mnemonic": "seto",
+      "group": "comparison",
+      "summary": "Set the operand to 1 if signed overflow occurred, otherwise 0.",
+      "operands": [
+        "dst"
+      ],
+      "effect": "{dst} \u2190 1 if OF = 1 else 0",
+      "reads": [
+        "OF"
+      ],
+      "writes": [
+        "dst"
+      ],
+      "flags_set": [],
+      "flags_read": [
+        "OF"
+      ],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "Writes a single byte."
+    },
+    {
+      "mnemonic": "cmovo",
+      "group": "data-movement",
+      "summary": "Copy the source if signed overflow occurred.",
+      "operands": [
+        "dst",
+        "src"
+      ],
+      "effect": "if OF = 1 then {dst} \u2190 {src}",
+      "reads": [
+        "src",
+        "OF"
+      ],
+      "writes": [
+        "dst"
+      ],
+      "flags_set": [],
+      "flags_read": [
+        "OF"
+      ],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "Branchless conditional move. Both operands are always read, so it must not be used to guard an invalid memory access."
+    },
+    {
+      "mnemonic": "jno",
+      "group": "conditional-jump",
+      "summary": "Jump if no signed overflow occurred.",
+      "operands": [
+        "target"
+      ],
+      "effect": "if OF = 0 then RIP \u2190 {target}",
+      "reads": [
+        "target",
+        "OF"
+      ],
+      "writes": [
+        "rip"
+      ],
+      "flags_set": [],
+      "flags_read": [
+        "OF"
+      ],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "Taken when OF = 0."
+    },
+    {
+      "mnemonic": "setno",
+      "group": "comparison",
+      "summary": "Set the operand to 1 if no signed overflow occurred, otherwise 0.",
+      "operands": [
+        "dst"
+      ],
+      "effect": "{dst} \u2190 1 if OF = 0 else 0",
+      "reads": [
+        "OF"
+      ],
+      "writes": [
+        "dst"
+      ],
+      "flags_set": [],
+      "flags_read": [
+        "OF"
+      ],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "Writes a single byte."
+    },
+    {
+      "mnemonic": "cmovno",
+      "group": "data-movement",
+      "summary": "Copy the source if no signed overflow occurred.",
+      "operands": [
+        "dst",
+        "src"
+      ],
+      "effect": "if OF = 0 then {dst} \u2190 {src}",
+      "reads": [
+        "src",
+        "OF"
+      ],
+      "writes": [
+        "dst"
+      ],
+      "flags_set": [],
+      "flags_read": [
+        "OF"
+      ],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "Branchless conditional move. Both operands are always read, so it must not be used to guard an invalid memory access."
+    },
+    {
+      "mnemonic": "jb",
+      "group": "conditional-jump",
+      "summary": "Jump if unsigned less than.",
+      "operands": [
+        "target"
+      ],
+      "effect": "if CF = 1 then RIP \u2190 {target}",
+      "reads": [
+        "target",
+        "CF"
+      ],
+      "writes": [
+        "rip"
+      ],
+      "flags_set": [],
+      "flags_read": [
+        "CF"
+      ],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "Taken when CF = 1. Unsigned comparison; the signed counterpart tests SF and OF instead."
+    },
+    {
+      "mnemonic": "setb",
+      "group": "comparison",
+      "summary": "Set the operand to 1 if unsigned less than, otherwise 0.",
+      "operands": [
+        "dst"
+      ],
+      "effect": "{dst} \u2190 1 if CF = 1 else 0",
+      "reads": [
+        "CF"
+      ],
+      "writes": [
+        "dst"
+      ],
+      "flags_set": [],
+      "flags_read": [
+        "CF"
+      ],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "Writes a single byte."
+    },
+    {
+      "mnemonic": "cmovb",
+      "group": "data-movement",
+      "summary": "Copy the source if unsigned less than.",
+      "operands": [
+        "dst",
+        "src"
+      ],
+      "effect": "if CF = 1 then {dst} \u2190 {src}",
+      "reads": [
+        "src",
+        "CF"
+      ],
+      "writes": [
+        "dst"
+      ],
+      "flags_set": [],
+      "flags_read": [
+        "CF"
+      ],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "Branchless conditional move. Both operands are always read, so it must not be used to guard an invalid memory access."
+    },
+    {
+      "mnemonic": "jae",
+      "group": "conditional-jump",
+      "summary": "Jump if unsigned greater than or equal.",
+      "operands": [
+        "target"
+      ],
+      "effect": "if CF = 0 then RIP \u2190 {target}",
+      "reads": [
+        "target",
+        "CF"
+      ],
+      "writes": [
+        "rip"
+      ],
+      "flags_set": [],
+      "flags_read": [
+        "CF"
+      ],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "Taken when CF = 0. Unsigned comparison; the signed counterpart tests SF and OF instead."
+    },
+    {
+      "mnemonic": "setae",
+      "group": "comparison",
+      "summary": "Set the operand to 1 if unsigned greater than or equal, otherwise 0.",
+      "operands": [
+        "dst"
+      ],
+      "effect": "{dst} \u2190 1 if CF = 0 else 0",
+      "reads": [
+        "CF"
+      ],
+      "writes": [
+        "dst"
+      ],
+      "flags_set": [],
+      "flags_read": [
+        "CF"
+      ],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "Writes a single byte."
+    },
+    {
+      "mnemonic": "cmovae",
+      "group": "data-movement",
+      "summary": "Copy the source if unsigned greater than or equal.",
+      "operands": [
+        "dst",
+        "src"
+      ],
+      "effect": "if CF = 0 then {dst} \u2190 {src}",
+      "reads": [
+        "src",
+        "CF"
+      ],
+      "writes": [
+        "dst"
+      ],
+      "flags_set": [],
+      "flags_read": [
+        "CF"
+      ],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "Branchless conditional move. Both operands are always read, so it must not be used to guard an invalid memory access."
+    },
+    {
+      "mnemonic": "je",
+      "group": "conditional-jump",
+      "summary": "Jump if equal.",
+      "operands": [
+        "target"
+      ],
+      "effect": "if ZF = 1 then RIP \u2190 {target}",
+      "reads": [
+        "target",
+        "ZF"
+      ],
+      "writes": [
+        "rip"
+      ],
+      "flags_set": [],
+      "flags_read": [
+        "ZF"
+      ],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "Taken when ZF = 1."
+    },
+    {
+      "mnemonic": "sete",
+      "group": "comparison",
+      "summary": "Set the operand to 1 if equal, otherwise 0.",
+      "operands": [
+        "dst"
+      ],
+      "effect": "{dst} \u2190 1 if ZF = 1 else 0",
+      "reads": [
+        "ZF"
+      ],
+      "writes": [
+        "dst"
+      ],
+      "flags_set": [],
+      "flags_read": [
+        "ZF"
+      ],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "Writes a single byte."
+    },
+    {
+      "mnemonic": "cmove",
+      "group": "data-movement",
+      "summary": "Copy the source if equal.",
+      "operands": [
+        "dst",
+        "src"
+      ],
+      "effect": "if ZF = 1 then {dst} \u2190 {src}",
+      "reads": [
+        "src",
+        "ZF"
+      ],
+      "writes": [
+        "dst"
+      ],
+      "flags_set": [],
+      "flags_read": [
+        "ZF"
+      ],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "Branchless conditional move. Both operands are always read, so it must not be used to guard an invalid memory access."
+    },
+    {
+      "mnemonic": "jne",
+      "group": "conditional-jump",
+      "summary": "Jump if not equal.",
+      "operands": [
+        "target"
+      ],
+      "effect": "if ZF = 0 then RIP \u2190 {target}",
+      "reads": [
+        "target",
+        "ZF"
+      ],
+      "writes": [
+        "rip"
+      ],
+      "flags_set": [],
+      "flags_read": [
+        "ZF"
+      ],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "Taken when ZF = 0."
+    },
+    {
+      "mnemonic": "setne",
+      "group": "comparison",
+      "summary": "Set the operand to 1 if not equal, otherwise 0.",
+      "operands": [
+        "dst"
+      ],
+      "effect": "{dst} \u2190 1 if ZF = 0 else 0",
+      "reads": [
+        "ZF"
+      ],
+      "writes": [
+        "dst"
+      ],
+      "flags_set": [],
+      "flags_read": [
+        "ZF"
+      ],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "Writes a single byte."
+    },
+    {
+      "mnemonic": "cmovne",
+      "group": "data-movement",
+      "summary": "Copy the source if not equal.",
+      "operands": [
+        "dst",
+        "src"
+      ],
+      "effect": "if ZF = 0 then {dst} \u2190 {src}",
+      "reads": [
+        "src",
+        "ZF"
+      ],
+      "writes": [
+        "dst"
+      ],
+      "flags_set": [],
+      "flags_read": [
+        "ZF"
+      ],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "Branchless conditional move. Both operands are always read, so it must not be used to guard an invalid memory access."
+    },
+    {
+      "mnemonic": "jbe",
+      "group": "conditional-jump",
+      "summary": "Jump if unsigned less than or equal.",
+      "operands": [
+        "target"
+      ],
+      "effect": "if CF = 1 or ZF = 1 then RIP \u2190 {target}",
+      "reads": [
+        "target",
+        "CF",
+        "ZF"
+      ],
+      "writes": [
+        "rip"
+      ],
+      "flags_set": [],
+      "flags_read": [
+        "CF",
+        "ZF"
+      ],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "Taken when CF = 1 or ZF = 1. Unsigned comparison; the signed counterpart tests SF and OF instead."
+    },
+    {
+      "mnemonic": "setbe",
+      "group": "comparison",
+      "summary": "Set the operand to 1 if unsigned less than or equal, otherwise 0.",
+      "operands": [
+        "dst"
+      ],
+      "effect": "{dst} \u2190 1 if CF = 1 or ZF = 1 else 0",
+      "reads": [
+        "CF",
+        "ZF"
+      ],
+      "writes": [
+        "dst"
+      ],
+      "flags_set": [],
+      "flags_read": [
+        "CF",
+        "ZF"
+      ],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "Writes a single byte."
+    },
+    {
+      "mnemonic": "cmovbe",
+      "group": "data-movement",
+      "summary": "Copy the source if unsigned less than or equal.",
+      "operands": [
+        "dst",
+        "src"
+      ],
+      "effect": "if CF = 1 or ZF = 1 then {dst} \u2190 {src}",
+      "reads": [
+        "src",
+        "CF",
+        "ZF"
+      ],
+      "writes": [
+        "dst"
+      ],
+      "flags_set": [],
+      "flags_read": [
+        "CF",
+        "ZF"
+      ],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "Branchless conditional move. Both operands are always read, so it must not be used to guard an invalid memory access."
+    },
+    {
+      "mnemonic": "ja",
+      "group": "conditional-jump",
+      "summary": "Jump if unsigned greater than.",
+      "operands": [
+        "target"
+      ],
+      "effect": "if CF = 0 and ZF = 0 then RIP \u2190 {target}",
+      "reads": [
+        "target",
+        "CF",
+        "ZF"
+      ],
+      "writes": [
+        "rip"
+      ],
+      "flags_set": [],
+      "flags_read": [
+        "CF",
+        "ZF"
+      ],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "Taken when CF = 0 and ZF = 0. Unsigned comparison; the signed counterpart tests SF and OF instead."
+    },
+    {
+      "mnemonic": "seta",
+      "group": "comparison",
+      "summary": "Set the operand to 1 if unsigned greater than, otherwise 0.",
+      "operands": [
+        "dst"
+      ],
+      "effect": "{dst} \u2190 1 if CF = 0 and ZF = 0 else 0",
+      "reads": [
+        "CF",
+        "ZF"
+      ],
+      "writes": [
+        "dst"
+      ],
+      "flags_set": [],
+      "flags_read": [
+        "CF",
+        "ZF"
+      ],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "Writes a single byte."
+    },
+    {
+      "mnemonic": "cmova",
+      "group": "data-movement",
+      "summary": "Copy the source if unsigned greater than.",
+      "operands": [
+        "dst",
+        "src"
+      ],
+      "effect": "if CF = 0 and ZF = 0 then {dst} \u2190 {src}",
+      "reads": [
+        "src",
+        "CF",
+        "ZF"
+      ],
+      "writes": [
+        "dst"
+      ],
+      "flags_set": [],
+      "flags_read": [
+        "CF",
+        "ZF"
+      ],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "Branchless conditional move. Both operands are always read, so it must not be used to guard an invalid memory access."
+    },
+    {
+      "mnemonic": "js",
+      "group": "conditional-jump",
+      "summary": "Jump if result is negative.",
+      "operands": [
+        "target"
+      ],
+      "effect": "if SF = 1 then RIP \u2190 {target}",
+      "reads": [
+        "target",
+        "SF"
+      ],
+      "writes": [
+        "rip"
+      ],
+      "flags_set": [],
+      "flags_read": [
+        "SF"
+      ],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "Taken when SF = 1."
+    },
+    {
+      "mnemonic": "sets",
+      "group": "comparison",
+      "summary": "Set the operand to 1 if result is negative, otherwise 0.",
+      "operands": [
+        "dst"
+      ],
+      "effect": "{dst} \u2190 1 if SF = 1 else 0",
+      "reads": [
+        "SF"
+      ],
+      "writes": [
+        "dst"
+      ],
+      "flags_set": [],
+      "flags_read": [
+        "SF"
+      ],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "Writes a single byte."
+    },
+    {
+      "mnemonic": "cmovs",
+      "group": "data-movement",
+      "summary": "Copy the source if result is negative.",
+      "operands": [
+        "dst",
+        "src"
+      ],
+      "effect": "if SF = 1 then {dst} \u2190 {src}",
+      "reads": [
+        "src",
+        "SF"
+      ],
+      "writes": [
+        "dst"
+      ],
+      "flags_set": [],
+      "flags_read": [
+        "SF"
+      ],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "Branchless conditional move. Both operands are always read, so it must not be used to guard an invalid memory access."
+    },
+    {
+      "mnemonic": "jns",
+      "group": "conditional-jump",
+      "summary": "Jump if result is not negative.",
+      "operands": [
+        "target"
+      ],
+      "effect": "if SF = 0 then RIP \u2190 {target}",
+      "reads": [
+        "target",
+        "SF"
+      ],
+      "writes": [
+        "rip"
+      ],
+      "flags_set": [],
+      "flags_read": [
+        "SF"
+      ],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "Taken when SF = 0."
+    },
+    {
+      "mnemonic": "setns",
+      "group": "comparison",
+      "summary": "Set the operand to 1 if result is not negative, otherwise 0.",
+      "operands": [
+        "dst"
+      ],
+      "effect": "{dst} \u2190 1 if SF = 0 else 0",
+      "reads": [
+        "SF"
+      ],
+      "writes": [
+        "dst"
+      ],
+      "flags_set": [],
+      "flags_read": [
+        "SF"
+      ],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "Writes a single byte."
+    },
+    {
+      "mnemonic": "cmovns",
+      "group": "data-movement",
+      "summary": "Copy the source if result is not negative.",
+      "operands": [
+        "dst",
+        "src"
+      ],
+      "effect": "if SF = 0 then {dst} \u2190 {src}",
+      "reads": [
+        "src",
+        "SF"
+      ],
+      "writes": [
+        "dst"
+      ],
+      "flags_set": [],
+      "flags_read": [
+        "SF"
+      ],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "Branchless conditional move. Both operands are always read, so it must not be used to guard an invalid memory access."
+    },
+    {
+      "mnemonic": "jp",
+      "group": "conditional-jump",
+      "summary": "Jump if even parity.",
+      "operands": [
+        "target"
+      ],
+      "effect": "if PF = 1 then RIP \u2190 {target}",
+      "reads": [
+        "target",
+        "PF"
+      ],
+      "writes": [
+        "rip"
+      ],
+      "flags_set": [],
+      "flags_read": [
+        "PF"
+      ],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "Taken when PF = 1."
+    },
+    {
+      "mnemonic": "setp",
+      "group": "comparison",
+      "summary": "Set the operand to 1 if even parity, otherwise 0.",
+      "operands": [
+        "dst"
+      ],
+      "effect": "{dst} \u2190 1 if PF = 1 else 0",
+      "reads": [
+        "PF"
+      ],
+      "writes": [
+        "dst"
+      ],
+      "flags_set": [],
+      "flags_read": [
+        "PF"
+      ],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "Writes a single byte."
+    },
+    {
+      "mnemonic": "cmovp",
+      "group": "data-movement",
+      "summary": "Copy the source if even parity.",
+      "operands": [
+        "dst",
+        "src"
+      ],
+      "effect": "if PF = 1 then {dst} \u2190 {src}",
+      "reads": [
+        "src",
+        "PF"
+      ],
+      "writes": [
+        "dst"
+      ],
+      "flags_set": [],
+      "flags_read": [
+        "PF"
+      ],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "Branchless conditional move. Both operands are always read, so it must not be used to guard an invalid memory access."
+    },
+    {
+      "mnemonic": "jnp",
+      "group": "conditional-jump",
+      "summary": "Jump if odd parity.",
+      "operands": [
+        "target"
+      ],
+      "effect": "if PF = 0 then RIP \u2190 {target}",
+      "reads": [
+        "target",
+        "PF"
+      ],
+      "writes": [
+        "rip"
+      ],
+      "flags_set": [],
+      "flags_read": [
+        "PF"
+      ],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "Taken when PF = 0."
+    },
+    {
+      "mnemonic": "setnp",
+      "group": "comparison",
+      "summary": "Set the operand to 1 if odd parity, otherwise 0.",
+      "operands": [
+        "dst"
+      ],
+      "effect": "{dst} \u2190 1 if PF = 0 else 0",
+      "reads": [
+        "PF"
+      ],
+      "writes": [
+        "dst"
+      ],
+      "flags_set": [],
+      "flags_read": [
+        "PF"
+      ],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "Writes a single byte."
+    },
+    {
+      "mnemonic": "cmovnp",
+      "group": "data-movement",
+      "summary": "Copy the source if odd parity.",
+      "operands": [
+        "dst",
+        "src"
+      ],
+      "effect": "if PF = 0 then {dst} \u2190 {src}",
+      "reads": [
+        "src",
+        "PF"
+      ],
+      "writes": [
+        "dst"
+      ],
+      "flags_set": [],
+      "flags_read": [
+        "PF"
+      ],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "Branchless conditional move. Both operands are always read, so it must not be used to guard an invalid memory access."
+    },
+    {
+      "mnemonic": "jl",
+      "group": "conditional-jump",
+      "summary": "Jump if signed less than.",
+      "operands": [
+        "target"
+      ],
+      "effect": "if SF <> OF then RIP \u2190 {target}",
+      "reads": [
+        "target",
+        "SF",
+        "OF"
+      ],
+      "writes": [
+        "rip"
+      ],
+      "flags_set": [],
+      "flags_read": [
+        "SF",
+        "OF"
+      ],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "Taken when SF <> OF. Signed comparison; the unsigned counterpart tests CF and ZF instead."
+    },
+    {
+      "mnemonic": "setl",
+      "group": "comparison",
+      "summary": "Set the operand to 1 if signed less than, otherwise 0.",
+      "operands": [
+        "dst"
+      ],
+      "effect": "{dst} \u2190 1 if SF <> OF else 0",
+      "reads": [
+        "SF",
+        "OF"
+      ],
+      "writes": [
+        "dst"
+      ],
+      "flags_set": [],
+      "flags_read": [
+        "SF",
+        "OF"
+      ],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "Writes a single byte."
+    },
+    {
+      "mnemonic": "cmovl",
+      "group": "data-movement",
+      "summary": "Copy the source if signed less than.",
+      "operands": [
+        "dst",
+        "src"
+      ],
+      "effect": "if SF <> OF then {dst} \u2190 {src}",
+      "reads": [
+        "src",
+        "SF",
+        "OF"
+      ],
+      "writes": [
+        "dst"
+      ],
+      "flags_set": [],
+      "flags_read": [
+        "SF",
+        "OF"
+      ],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "Branchless conditional move. Both operands are always read, so it must not be used to guard an invalid memory access."
+    },
+    {
+      "mnemonic": "jge",
+      "group": "conditional-jump",
+      "summary": "Jump if signed greater than or equal.",
+      "operands": [
+        "target"
+      ],
+      "effect": "if SF = OF then RIP \u2190 {target}",
+      "reads": [
+        "target",
+        "SF",
+        "OF"
+      ],
+      "writes": [
+        "rip"
+      ],
+      "flags_set": [],
+      "flags_read": [
+        "SF",
+        "OF"
+      ],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "Taken when SF = OF. Signed comparison; the unsigned counterpart tests CF and ZF instead."
+    },
+    {
+      "mnemonic": "setge",
+      "group": "comparison",
+      "summary": "Set the operand to 1 if signed greater than or equal, otherwise 0.",
+      "operands": [
+        "dst"
+      ],
+      "effect": "{dst} \u2190 1 if SF = OF else 0",
+      "reads": [
+        "SF",
+        "OF"
+      ],
+      "writes": [
+        "dst"
+      ],
+      "flags_set": [],
+      "flags_read": [
+        "SF",
+        "OF"
+      ],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "Writes a single byte."
+    },
+    {
+      "mnemonic": "cmovge",
+      "group": "data-movement",
+      "summary": "Copy the source if signed greater than or equal.",
+      "operands": [
+        "dst",
+        "src"
+      ],
+      "effect": "if SF = OF then {dst} \u2190 {src}",
+      "reads": [
+        "src",
+        "SF",
+        "OF"
+      ],
+      "writes": [
+        "dst"
+      ],
+      "flags_set": [],
+      "flags_read": [
+        "SF",
+        "OF"
+      ],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "Branchless conditional move. Both operands are always read, so it must not be used to guard an invalid memory access."
+    },
+    {
+      "mnemonic": "jle",
+      "group": "conditional-jump",
+      "summary": "Jump if signed less than or equal.",
+      "operands": [
+        "target"
+      ],
+      "effect": "if ZF = 1 or SF <> OF then RIP \u2190 {target}",
+      "reads": [
+        "target",
+        "ZF",
+        "SF",
+        "OF"
+      ],
+      "writes": [
+        "rip"
+      ],
+      "flags_set": [],
+      "flags_read": [
+        "ZF",
+        "SF",
+        "OF"
+      ],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "Taken when ZF = 1 or SF <> OF. Signed comparison; the unsigned counterpart tests CF and ZF instead."
+    },
+    {
+      "mnemonic": "setle",
+      "group": "comparison",
+      "summary": "Set the operand to 1 if signed less than or equal, otherwise 0.",
+      "operands": [
+        "dst"
+      ],
+      "effect": "{dst} \u2190 1 if ZF = 1 or SF <> OF else 0",
+      "reads": [
+        "ZF",
+        "SF",
+        "OF"
+      ],
+      "writes": [
+        "dst"
+      ],
+      "flags_set": [],
+      "flags_read": [
+        "ZF",
+        "SF",
+        "OF"
+      ],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "Writes a single byte."
+    },
+    {
+      "mnemonic": "cmovle",
+      "group": "data-movement",
+      "summary": "Copy the source if signed less than or equal.",
+      "operands": [
+        "dst",
+        "src"
+      ],
+      "effect": "if ZF = 1 or SF <> OF then {dst} \u2190 {src}",
+      "reads": [
+        "src",
+        "ZF",
+        "SF",
+        "OF"
+      ],
+      "writes": [
+        "dst"
+      ],
+      "flags_set": [],
+      "flags_read": [
+        "ZF",
+        "SF",
+        "OF"
+      ],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "Branchless conditional move. Both operands are always read, so it must not be used to guard an invalid memory access."
+    },
+    {
+      "mnemonic": "jg",
+      "group": "conditional-jump",
+      "summary": "Jump if signed greater than.",
+      "operands": [
+        "target"
+      ],
+      "effect": "if ZF = 0 and SF = OF then RIP \u2190 {target}",
+      "reads": [
+        "target",
+        "ZF",
+        "SF",
+        "OF"
+      ],
+      "writes": [
+        "rip"
+      ],
+      "flags_set": [],
+      "flags_read": [
+        "ZF",
+        "SF",
+        "OF"
+      ],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "Taken when ZF = 0 and SF = OF. Signed comparison; the unsigned counterpart tests CF and ZF instead."
+    },
+    {
+      "mnemonic": "setg",
+      "group": "comparison",
+      "summary": "Set the operand to 1 if signed greater than, otherwise 0.",
+      "operands": [
+        "dst"
+      ],
+      "effect": "{dst} \u2190 1 if ZF = 0 and SF = OF else 0",
+      "reads": [
+        "ZF",
+        "SF",
+        "OF"
+      ],
+      "writes": [
+        "dst"
+      ],
+      "flags_set": [],
+      "flags_read": [
+        "ZF",
+        "SF",
+        "OF"
+      ],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "Writes a single byte."
+    },
+    {
+      "mnemonic": "cmovg",
+      "group": "data-movement",
+      "summary": "Copy the source if signed greater than.",
+      "operands": [
+        "dst",
+        "src"
+      ],
+      "effect": "if ZF = 0 and SF = OF then {dst} \u2190 {src}",
+      "reads": [
+        "src",
+        "ZF",
+        "SF",
+        "OF"
+      ],
+      "writes": [
+        "dst"
+      ],
+      "flags_set": [],
+      "flags_read": [
+        "ZF",
+        "SF",
+        "OF"
+      ],
+      "flags_cleared": [],
+      "flags_undefined": [],
+      "notes": "Branchless conditional move. Both operands are always read, so it must not be used to guard an invalid memory access."
+    }
+  ]
+}
