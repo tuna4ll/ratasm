@@ -2,3 +2,6 @@
 //! behind the register, memory and breakpoint panels.
 
 pub mod mi;
+pub mod state;
+
+pub use state::{DebuggerState, InvalidTransition, StateMachine, Transition};
