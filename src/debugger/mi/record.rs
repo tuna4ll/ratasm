@@ -193,6 +193,43 @@ impl Record {
         )
     }
 
+    /// The `reason` field of a stop record.
+    pub fn stop_reason(&self) -> Option<&str> {
+        if self.is_stopped() {
+            self.get_str("reason")
+        } else {
+            None
+        }
+    }
+
+    /// Whether this record reports that the program finished.
+    ///
+    /// Program exit is not a record class of its own: GDB reports it as an
+    /// ordinary `*stopped` whose reason is `exited`, `exited-normally` or
+    /// `exited-signalled`. Treating "stopped" as "paused and inspectable"
+    /// without checking the reason would leave the debugger waiting to step a
+    /// process that no longer exists.
+    pub fn is_program_exit(&self) -> bool {
+        self.stop_reason()
+            .is_some_and(|reason| reason.starts_with("exited"))
+    }
+
+    /// The program's exit status, when this record reports an exit.
+    ///
+    /// GDB writes this field in **octal**: a program exiting with status 9 is
+    /// reported as `exit-code="011"`. Reading it as decimal is a silent
+    /// off-by-a-lot, so the conversion happens here once.
+    pub fn exit_code(&self) -> Option<i32> {
+        if !self.is_program_exit() {
+            return None;
+        }
+        match self.get_str("exit-code") {
+            Some(text) => i32::from_str_radix(text.trim(), 8).ok(),
+            // `exited-normally` carries no code and means zero.
+            None => (self.stop_reason() == Some("exited-normally")).then_some(0),
+        }
+    }
+
     /// Whether this record reports that the program resumed.
     pub fn is_running(&self) -> bool {
         matches!(
@@ -564,6 +601,63 @@ mod tests {
         assert_eq!(bkpt.get_str("enabled"), Some("y"));
         assert_eq!(bkpt.get_address("addr"), Some(0x0040_00b4));
         assert_eq!(bkpt.get_int("line"), Some(12));
+    }
+
+    #[test]
+    fn a_normal_exit_is_recognised_as_an_exit_not_a_pause() {
+        // Verbatim from GDB 17.2.
+        let record = parse(r#"*stopped,reason="exited-normally""#);
+        assert!(record.is_stopped(), "it is still a stop record");
+        assert!(record.is_program_exit(), "but the program has finished");
+        assert_eq!(record.exit_code(), Some(0));
+    }
+
+    #[test]
+    fn an_exit_code_is_decoded_from_octal() {
+        // GDB writes the status in octal: 011 is 9, not 11. Verified against
+        // GDB 17.2 with a program exiting with status 9.
+        let record = parse(r#"*stopped,reason="exited",exit-code="011""#);
+        assert!(record.is_program_exit());
+        assert_eq!(record.exit_code(), Some(9));
+    }
+
+    #[test]
+    fn a_breakpoint_stop_is_not_an_exit() {
+        let record = parse(r#"*stopped,reason="breakpoint-hit",bkptno="1""#);
+        assert!(record.is_stopped());
+        assert!(!record.is_program_exit());
+        assert_eq!(record.exit_code(), None);
+        assert_eq!(record.stop_reason(), Some("breakpoint-hit"));
+    }
+
+    #[test]
+    fn a_signalled_exit_is_recognised() {
+        let record = parse(
+            r#"*stopped,reason="exited-signalled",signal-name="SIGSEGV",signal-meaning="Segmentation fault""#,
+        );
+        assert!(record.is_program_exit());
+        assert_eq!(record.get_str("signal-name"), Some("SIGSEGV"));
+    }
+
+    #[test]
+    fn a_signal_stop_is_a_pause_not_an_exit() {
+        // A caught SIGSEGV stops the program without ending it, which is
+        // exactly the case a debugger exists to inspect.
+        let record = parse(
+            r#"*stopped,reason="signal-received",signal-name="SIGSEGV",frame={addr="0x004000b4"}"#,
+        );
+        assert!(!record.is_program_exit());
+        assert_eq!(record.stop_reason(), Some("signal-received"));
+        assert_eq!(
+            record.get("frame").and_then(|f| f.get_address("addr")),
+            Some(0x0040_00b4)
+        );
+    }
+
+    #[test]
+    fn a_non_stop_record_has_no_stop_reason() {
+        assert_eq!(parse("^done").stop_reason(), None);
+        assert!(!parse("^done").is_program_exit());
     }
 
     #[test]
