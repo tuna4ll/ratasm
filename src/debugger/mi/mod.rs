@@ -4,8 +4,10 @@
 //! output into a typed [`Record`]. Neither knows anything about processes, so
 //! both are exercised entirely from fixtures.
 
+pub mod command;
 pub mod record;
 pub mod value;
 
+pub use command::Command;
 pub use record::{parse_line, AsyncKind, Record, ResultClass, StreamKind};
 pub use value::{parse_address, ParseError, Parser, Value};
