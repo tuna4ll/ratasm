@@ -1,0 +1,5641 @@
+{
+  "architecture": "x86_64",
+  "abi": {
+    "number": "rax",
+    "arguments": [
+      "rdi",
+      "rsi",
+      "rdx",
+      "r10",
+      "r8",
+      "r9"
+    ],
+    "return": "rax",
+    "clobbered": [
+      "rcx",
+      "r11"
+    ],
+    "instruction": "syscall",
+    "note": "The syscall instruction destroys RCX and R11, which is why the fourth argument travels in R10 rather than RCX as it would in a normal function call."
+  },
+  "source": "Numbers taken from the kernel's asm/unistd_64.h. Entries marked detailed=false carry the name and number only; their arguments are not modelled.",
+  "syscalls": [
+    {
+      "number": 0,
+      "name": "read",
+      "summary": "Read bytes from a file descriptor into a buffer.",
+      "signature": "ssize_t read(int fd, void *buf, size_t count)",
+      "group": "file",
+      "args": [
+        {
+          "register": "rdi",
+          "name": "fd",
+          "type": "int",
+          "description": "file descriptor to read from"
+        },
+        {
+          "register": "rsi",
+          "name": "buf",
+          "type": "void *",
+          "description": "buffer that receives the data"
+        },
+        {
+          "register": "rdx",
+          "name": "count",
+          "type": "size_t",
+          "description": "maximum number of bytes to read"
+        }
+      ],
+      "returns": "Number of bytes read, 0 at end of file, or a negative errno.",
+      "errors": [
+        "-EBADF: fd is not a valid open descriptor",
+        "-EFAULT: buf points outside the accessible address space",
+        "-EINTR: interrupted by a signal before any data was read",
+        "-EAGAIN: the descriptor is non-blocking and no data was ready"
+      ],
+      "example": "    mov     rax, 0              ; read\n    mov     rdi, 0              ; stdin\n    lea     rsi, [rel buffer]\n    mov     rdx, 64\n    syscall",
+      "detailed": true
+    },
+    {
+      "number": 1,
+      "name": "write",
+      "summary": "Write bytes from a buffer to a file descriptor.",
+      "signature": "ssize_t write(int fd, const void *buf, size_t count)",
+      "group": "file",
+      "args": [
+        {
+          "register": "rdi",
+          "name": "fd",
+          "type": "int",
+          "description": "file descriptor to write to"
+        },
+        {
+          "register": "rsi",
+          "name": "buf",
+          "type": "const void *",
+          "description": "buffer holding the data"
+        },
+        {
+          "register": "rdx",
+          "name": "count",
+          "type": "size_t",
+          "description": "number of bytes to write"
+        }
+      ],
+      "returns": "Number of bytes written, or a negative errno.",
+      "errors": [
+        "-EBADF: fd is not a valid open descriptor",
+        "-EFAULT: buf points outside the accessible address space",
+        "-EPIPE: the reading end of the pipe or socket is closed",
+        "-ENOSPC: the device holding the file has no room left"
+      ],
+      "example": "    mov     rax, 1              ; write\n    mov     rdi, 1              ; stdout\n    lea     rsi, [rel message]\n    mov     rdx, message_len\n    syscall",
+      "detailed": true
+    },
+    {
+      "number": 2,
+      "name": "open",
+      "summary": "Open a file, returning a file descriptor.",
+      "signature": "int open(const char *pathname, int flags, mode_t mode)",
+      "group": "file",
+      "args": [
+        {
+          "register": "rdi",
+          "name": "pathname",
+          "type": "const char *",
+          "description": "NUL-terminated path"
+        },
+        {
+          "register": "rsi",
+          "name": "flags",
+          "type": "int",
+          "description": "O_RDONLY 0, O_WRONLY 1, O_RDWR 2, bitwise-ORed with O_CREAT 0o100, O_TRUNC 0o1000, O_APPEND 0o2000"
+        },
+        {
+          "register": "rdx",
+          "name": "mode",
+          "type": "mode_t",
+          "description": "permission bits, used only when O_CREAT is set"
+        }
+      ],
+      "returns": "A new file descriptor, or a negative errno.",
+      "errors": [
+        "-ENOENT: the file does not exist and O_CREAT was not set",
+        "-EACCES: the requested access is not permitted",
+        "-EISDIR: the path is a directory opened for writing",
+        "-EMFILE: the process has too many open files"
+      ],
+      "example": "    mov     rax, 2              ; open\n    lea     rdi, [rel path]\n    mov     rsi, 0              ; O_RDONLY\n    xor     edx, edx\n    syscall",
+      "detailed": true
+    },
+    {
+      "number": 3,
+      "name": "close",
+      "summary": "Close a file descriptor.",
+      "signature": "int close(int fd)",
+      "group": "file",
+      "args": [
+        {
+          "register": "rdi",
+          "name": "fd",
+          "type": "int",
+          "description": "descriptor to close"
+        }
+      ],
+      "returns": "0 on success, or a negative errno.",
+      "errors": [
+        "-EBADF: fd is not a valid open descriptor"
+      ],
+      "example": "    mov     rax, 3              ; close\n    mov     rdi, rbx            ; the descriptor\n    syscall",
+      "detailed": true
+    },
+    {
+      "number": 4,
+      "name": "stat",
+      "summary": "Get file status by path.",
+      "signature": "int stat(const char *pathname, struct stat *statbuf)",
+      "group": "file",
+      "args": [
+        {
+          "register": "rdi",
+          "name": "pathname",
+          "type": "const char *",
+          "description": "path to inspect"
+        },
+        {
+          "register": "rsi",
+          "name": "statbuf",
+          "type": "struct stat *",
+          "description": "buffer receiving the status"
+        }
+      ],
+      "returns": "0 on success, or a negative errno.",
+      "errors": [
+        "-ENOENT: the path does not exist",
+        "-EFAULT: a pointer is invalid"
+      ],
+      "example": null,
+      "detailed": true
+    },
+    {
+      "number": 5,
+      "name": "fstat",
+      "summary": "Get file status by descriptor.",
+      "signature": "int fstat(int fd, struct stat *statbuf)",
+      "group": "file",
+      "args": [
+        {
+          "register": "rdi",
+          "name": "fd",
+          "type": "int",
+          "description": "open descriptor"
+        },
+        {
+          "register": "rsi",
+          "name": "statbuf",
+          "type": "struct stat *",
+          "description": "buffer receiving the status"
+        }
+      ],
+      "returns": "0 on success, or a negative errno.",
+      "errors": [
+        "-EBADF: fd is not valid",
+        "-EFAULT: statbuf is invalid"
+      ],
+      "example": null,
+      "detailed": true
+    },
+    {
+      "number": 6,
+      "name": "lstat",
+      "summary": "Linux system call lstat. See the man page: man 2 lstat.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 7,
+      "name": "poll",
+      "summary": "Wait for events on a set of descriptors.",
+      "signature": "int poll(struct pollfd *fds, nfds_t nfds, int timeout)",
+      "group": "file",
+      "args": [
+        {
+          "register": "rdi",
+          "name": "fds",
+          "type": "struct pollfd *",
+          "description": "array of descriptors and requested events"
+        },
+        {
+          "register": "rsi",
+          "name": "nfds",
+          "type": "nfds_t",
+          "description": "number of entries in the array"
+        },
+        {
+          "register": "rdx",
+          "name": "timeout",
+          "type": "int",
+          "description": "milliseconds to wait, -1 to block, 0 to poll"
+        }
+      ],
+      "returns": "The number of ready descriptors, 0 on timeout, or a negative errno.",
+      "errors": [
+        "-EINTR: interrupted by a signal",
+        "-EFAULT: fds is invalid"
+      ],
+      "example": null,
+      "detailed": true
+    },
+    {
+      "number": 8,
+      "name": "lseek",
+      "summary": "Reposition the file offset.",
+      "signature": "off_t lseek(int fd, off_t offset, int whence)",
+      "group": "file",
+      "args": [
+        {
+          "register": "rdi",
+          "name": "fd",
+          "type": "int",
+          "description": "open descriptor"
+        },
+        {
+          "register": "rsi",
+          "name": "offset",
+          "type": "off_t",
+          "description": "byte offset"
+        },
+        {
+          "register": "rdx",
+          "name": "whence",
+          "type": "int",
+          "description": "SEEK_SET 0, SEEK_CUR 1, SEEK_END 2"
+        }
+      ],
+      "returns": "The resulting offset from the start of the file, or a negative errno.",
+      "errors": [
+        "-EBADF: fd is not valid",
+        "-EINVAL: whence is invalid or the offset is negative",
+        "-ESPIPE: fd refers to a pipe, socket or FIFO"
+      ],
+      "example": null,
+      "detailed": true
+    },
+    {
+      "number": 9,
+      "name": "mmap",
+      "summary": "Map files or anonymous memory into the address space.",
+      "signature": "void *mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset)",
+      "group": "memory",
+      "args": [
+        {
+          "register": "rdi",
+          "name": "addr",
+          "type": "void *",
+          "description": "preferred address, or 0 to let the kernel choose"
+        },
+        {
+          "register": "rsi",
+          "name": "length",
+          "type": "size_t",
+          "description": "number of bytes to map"
+        },
+        {
+          "register": "rdx",
+          "name": "prot",
+          "type": "int",
+          "description": "PROT_READ 1, PROT_WRITE 2, PROT_EXEC 4"
+        },
+        {
+          "register": "r10",
+          "name": "flags",
+          "type": "int",
+          "description": "MAP_SHARED 1, MAP_PRIVATE 2, MAP_ANONYMOUS 0x20"
+        },
+        {
+          "register": "r8",
+          "name": "fd",
+          "type": "int",
+          "description": "descriptor to map, or -1 for anonymous memory"
+        },
+        {
+          "register": "r9",
+          "name": "offset",
+          "type": "off_t",
+          "description": "offset within the file, a multiple of the page size"
+        }
+      ],
+      "returns": "The address of the mapping, or a negative errno.",
+      "errors": [
+        "-ENOMEM: no memory is available or the map count was exceeded",
+        "-EINVAL: length is zero, or addr or offset is misaligned",
+        "-EACCES: the descriptor does not permit the requested protection"
+      ],
+      "example": "    mov     rax, 9              ; mmap\n    xor     edi, edi            ; let the kernel choose\n    mov     rsi, 4096\n    mov     rdx, 3              ; PROT_READ|PROT_WRITE\n    mov     r10, 0x22           ; MAP_PRIVATE|MAP_ANONYMOUS\n    mov     r8, -1\n    xor     r9d, r9d\n    syscall",
+      "detailed": true
+    },
+    {
+      "number": 10,
+      "name": "mprotect",
+      "summary": "Change the protection of a memory region.",
+      "signature": "int mprotect(void *addr, size_t len, int prot)",
+      "group": "memory",
+      "args": [
+        {
+          "register": "rdi",
+          "name": "addr",
+          "type": "void *",
+          "description": "page-aligned start address"
+        },
+        {
+          "register": "rsi",
+          "name": "len",
+          "type": "size_t",
+          "description": "length in bytes"
+        },
+        {
+          "register": "rdx",
+          "name": "prot",
+          "type": "int",
+          "description": "PROT_NONE 0, PROT_READ 1, PROT_WRITE 2, PROT_EXEC 4"
+        }
+      ],
+      "returns": "0 on success, or a negative errno.",
+      "errors": [
+        "-EACCES: the requested protection is not permitted",
+        "-EINVAL: addr is not page-aligned"
+      ],
+      "example": null,
+      "detailed": true
+    },
+    {
+      "number": 11,
+      "name": "munmap",
+      "summary": "Remove a memory mapping.",
+      "signature": "int munmap(void *addr, size_t length)",
+      "group": "memory",
+      "args": [
+        {
+          "register": "rdi",
+          "name": "addr",
+          "type": "void *",
+          "description": "page-aligned start address"
+        },
+        {
+          "register": "rsi",
+          "name": "length",
+          "type": "size_t",
+          "description": "length in bytes"
+        }
+      ],
+      "returns": "0 on success, or a negative errno.",
+      "errors": [
+        "-EINVAL: addr is not page-aligned or length is zero"
+      ],
+      "example": null,
+      "detailed": true
+    },
+    {
+      "number": 12,
+      "name": "brk",
+      "summary": "Set the end of the data segment.",
+      "signature": "int brk(void *addr)",
+      "group": "memory",
+      "args": [
+        {
+          "register": "rdi",
+          "name": "addr",
+          "type": "void *",
+          "description": "requested new program break, or 0 to query it"
+        }
+      ],
+      "returns": "The new program break. Note that the raw syscall returns the break itself, not 0/-1 as the C wrapper does.",
+      "errors": [
+        "-ENOMEM: the request could not be satisfied"
+      ],
+      "example": null,
+      "detailed": true
+    },
+    {
+      "number": 13,
+      "name": "rt_sigaction",
+      "summary": "Examine or change a signal handler.",
+      "signature": "int rt_sigaction(int signum, const struct sigaction *act, struct sigaction *oldact, size_t sigsetsize)",
+      "group": "signal",
+      "args": [
+        {
+          "register": "rdi",
+          "name": "signum",
+          "type": "int",
+          "description": "signal number"
+        },
+        {
+          "register": "rsi",
+          "name": "act",
+          "type": "const struct sigaction *",
+          "description": "new action, may be 0"
+        },
+        {
+          "register": "rdx",
+          "name": "oldact",
+          "type": "struct sigaction *",
+          "description": "receives the previous action, may be 0"
+        },
+        {
+          "register": "r10",
+          "name": "sigsetsize",
+          "type": "size_t",
+          "description": "size of the signal set, normally 8"
+        }
+      ],
+      "returns": "0 on success, or a negative errno.",
+      "errors": [
+        "-EINVAL: the signal cannot be caught",
+        "-EFAULT: a pointer is invalid"
+      ],
+      "example": null,
+      "detailed": true
+    },
+    {
+      "number": 14,
+      "name": "rt_sigprocmask",
+      "summary": "Examine or change the blocked signal mask.",
+      "signature": "int rt_sigprocmask(int how, const sigset_t *set, sigset_t *oldset, size_t sigsetsize)",
+      "group": "signal",
+      "args": [
+        {
+          "register": "rdi",
+          "name": "how",
+          "type": "int",
+          "description": "SIG_BLOCK 0, SIG_UNBLOCK 1, SIG_SETMASK 2"
+        },
+        {
+          "register": "rsi",
+          "name": "set",
+          "type": "const sigset_t *",
+          "description": "new mask, may be 0"
+        },
+        {
+          "register": "rdx",
+          "name": "oldset",
+          "type": "sigset_t *",
+          "description": "receives the previous mask, may be 0"
+        },
+        {
+          "register": "r10",
+          "name": "sigsetsize",
+          "type": "size_t",
+          "description": "size of the signal set, normally 8"
+        }
+      ],
+      "returns": "0 on success, or a negative errno.",
+      "errors": [
+        "-EINVAL: how is invalid",
+        "-EFAULT: a pointer is invalid"
+      ],
+      "example": null,
+      "detailed": true
+    },
+    {
+      "number": 15,
+      "name": "rt_sigreturn",
+      "summary": "Linux system call rt_sigreturn. See the man page: man 2 rt_sigreturn.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 16,
+      "name": "ioctl",
+      "summary": "Control a device.",
+      "signature": "int ioctl(int fd, unsigned long request, ...)",
+      "group": "device",
+      "args": [
+        {
+          "register": "rdi",
+          "name": "fd",
+          "type": "int",
+          "description": "open descriptor"
+        },
+        {
+          "register": "rsi",
+          "name": "request",
+          "type": "unsigned long",
+          "description": "device-specific request code"
+        },
+        {
+          "register": "rdx",
+          "name": "argp",
+          "type": "void *",
+          "description": "request-specific argument"
+        }
+      ],
+      "returns": "0 or a positive device-specific value on success, or a negative errno.",
+      "errors": [
+        "-EBADF: fd is not valid",
+        "-ENOTTY: fd does not refer to a suitable device",
+        "-EINVAL: the request or argument is invalid"
+      ],
+      "example": null,
+      "detailed": true
+    },
+    {
+      "number": 17,
+      "name": "pread64",
+      "summary": "Linux system call pread64. See the man page: man 2 pread64.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 18,
+      "name": "pwrite64",
+      "summary": "Linux system call pwrite64. See the man page: man 2 pwrite64.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 19,
+      "name": "readv",
+      "summary": "Read into multiple buffers.",
+      "signature": "ssize_t readv(int fd, const struct iovec *iov, int iovcnt)",
+      "group": "file",
+      "args": [
+        {
+          "register": "rdi",
+          "name": "fd",
+          "type": "int",
+          "description": "open descriptor"
+        },
+        {
+          "register": "rsi",
+          "name": "iov",
+          "type": "const struct iovec *",
+          "description": "array of buffers"
+        },
+        {
+          "register": "rdx",
+          "name": "iovcnt",
+          "type": "int",
+          "description": "number of buffers"
+        }
+      ],
+      "returns": "The number of bytes read, or a negative errno.",
+      "errors": [
+        "-EBADF: fd is not valid",
+        "-EINVAL: iovcnt is out of range"
+      ],
+      "example": null,
+      "detailed": true
+    },
+    {
+      "number": 20,
+      "name": "writev",
+      "summary": "Write from multiple buffers.",
+      "signature": "ssize_t writev(int fd, const struct iovec *iov, int iovcnt)",
+      "group": "file",
+      "args": [
+        {
+          "register": "rdi",
+          "name": "fd",
+          "type": "int",
+          "description": "open descriptor"
+        },
+        {
+          "register": "rsi",
+          "name": "iov",
+          "type": "const struct iovec *",
+          "description": "array of buffers"
+        },
+        {
+          "register": "rdx",
+          "name": "iovcnt",
+          "type": "int",
+          "description": "number of buffers"
+        }
+      ],
+      "returns": "The number of bytes written, or a negative errno.",
+      "errors": [
+        "-EBADF: fd is not valid",
+        "-EINVAL: iovcnt is out of range"
+      ],
+      "example": null,
+      "detailed": true
+    },
+    {
+      "number": 21,
+      "name": "access",
+      "summary": "Check a file's accessibility.",
+      "signature": "int access(const char *pathname, int mode)",
+      "group": "file",
+      "args": [
+        {
+          "register": "rdi",
+          "name": "pathname",
+          "type": "const char *",
+          "description": "path to check"
+        },
+        {
+          "register": "rsi",
+          "name": "mode",
+          "type": "int",
+          "description": "F_OK 0, X_OK 1, W_OK 2, R_OK 4"
+        }
+      ],
+      "returns": "0 if the access is permitted, or a negative errno.",
+      "errors": [
+        "-EACCES: the access is not permitted",
+        "-ENOENT: the path does not exist"
+      ],
+      "example": null,
+      "detailed": true
+    },
+    {
+      "number": 22,
+      "name": "pipe",
+      "summary": "Create a pipe.",
+      "signature": "int pipe(int pipefd[2])",
+      "group": "ipc",
+      "args": [
+        {
+          "register": "rdi",
+          "name": "pipefd",
+          "type": "int *",
+          "description": "array receiving the read and write descriptors"
+        }
+      ],
+      "returns": "0 on success, or a negative errno.",
+      "errors": [
+        "-EFAULT: pipefd is invalid",
+        "-EMFILE: too many open descriptors"
+      ],
+      "example": null,
+      "detailed": true
+    },
+    {
+      "number": 23,
+      "name": "select",
+      "summary": "Linux system call select. See the man page: man 2 select.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 24,
+      "name": "sched_yield",
+      "summary": "Yield the processor.",
+      "signature": "int sched_yield(void)",
+      "group": "process",
+      "args": [],
+      "returns": "0 on success.",
+      "errors": [],
+      "example": null,
+      "detailed": true
+    },
+    {
+      "number": 25,
+      "name": "mremap",
+      "summary": "Linux system call mremap. See the man page: man 2 mremap.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 26,
+      "name": "msync",
+      "summary": "Linux system call msync. See the man page: man 2 msync.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 27,
+      "name": "mincore",
+      "summary": "Linux system call mincore. See the man page: man 2 mincore.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 28,
+      "name": "madvise",
+      "summary": "Linux system call madvise. See the man page: man 2 madvise.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 29,
+      "name": "shmget",
+      "summary": "Linux system call shmget. See the man page: man 2 shmget.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 30,
+      "name": "shmat",
+      "summary": "Linux system call shmat. See the man page: man 2 shmat.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 31,
+      "name": "shmctl",
+      "summary": "Linux system call shmctl. See the man page: man 2 shmctl.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 32,
+      "name": "dup",
+      "summary": "Duplicate a file descriptor.",
+      "signature": "int dup(int oldfd)",
+      "group": "file",
+      "args": [
+        {
+          "register": "rdi",
+          "name": "oldfd",
+          "type": "int",
+          "description": "descriptor to duplicate"
+        }
+      ],
+      "returns": "The new descriptor, or a negative errno.",
+      "errors": [
+        "-EBADF: oldfd is not valid",
+        "-EMFILE: too many open descriptors"
+      ],
+      "example": null,
+      "detailed": true
+    },
+    {
+      "number": 33,
+      "name": "dup2",
+      "summary": "Duplicate a file descriptor onto a specific number.",
+      "signature": "int dup2(int oldfd, int newfd)",
+      "group": "file",
+      "args": [
+        {
+          "register": "rdi",
+          "name": "oldfd",
+          "type": "int",
+          "description": "descriptor to duplicate"
+        },
+        {
+          "register": "rsi",
+          "name": "newfd",
+          "type": "int",
+          "description": "descriptor number to reuse"
+        }
+      ],
+      "returns": "The new descriptor, or a negative errno.",
+      "errors": [
+        "-EBADF: oldfd is not valid",
+        "-EINTR: interrupted by a signal"
+      ],
+      "example": null,
+      "detailed": true
+    },
+    {
+      "number": 34,
+      "name": "pause",
+      "summary": "Wait for a signal.",
+      "signature": "int pause(void)",
+      "group": "signal",
+      "args": [],
+      "returns": "Always returns -EINTR once a signal handler has run.",
+      "errors": [
+        "-EINTR: a signal was caught"
+      ],
+      "example": null,
+      "detailed": true
+    },
+    {
+      "number": 35,
+      "name": "nanosleep",
+      "summary": "Suspend execution for a precise interval.",
+      "signature": "int nanosleep(const struct timespec *req, struct timespec *rem)",
+      "group": "time",
+      "args": [
+        {
+          "register": "rdi",
+          "name": "req",
+          "type": "const struct timespec *",
+          "description": "requested duration"
+        },
+        {
+          "register": "rsi",
+          "name": "rem",
+          "type": "struct timespec *",
+          "description": "receives the remaining time if interrupted, may be 0"
+        }
+      ],
+      "returns": "0 on success, or a negative errno.",
+      "errors": [
+        "-EINTR: interrupted by a signal",
+        "-EINVAL: the nanoseconds field is out of range"
+      ],
+      "example": null,
+      "detailed": true
+    },
+    {
+      "number": 36,
+      "name": "getitimer",
+      "summary": "Linux system call getitimer. See the man page: man 2 getitimer.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 37,
+      "name": "alarm",
+      "summary": "Linux system call alarm. See the man page: man 2 alarm.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 38,
+      "name": "setitimer",
+      "summary": "Linux system call setitimer. See the man page: man 2 setitimer.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 39,
+      "name": "getpid",
+      "summary": "Get the process ID.",
+      "signature": "pid_t getpid(void)",
+      "group": "process",
+      "args": [],
+      "returns": "The caller's process ID. This call always succeeds.",
+      "errors": [],
+      "example": "    mov     rax, 39             ; getpid\n    syscall\n    ; the pid is now in rax",
+      "detailed": true
+    },
+    {
+      "number": 40,
+      "name": "sendfile",
+      "summary": "Linux system call sendfile. See the man page: man 2 sendfile.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 41,
+      "name": "socket",
+      "summary": "Create a communication endpoint.",
+      "signature": "int socket(int domain, int type, int protocol)",
+      "group": "network",
+      "args": [
+        {
+          "register": "rdi",
+          "name": "domain",
+          "type": "int",
+          "description": "AF_UNIX 1, AF_INET 2, AF_INET6 10"
+        },
+        {
+          "register": "rsi",
+          "name": "type",
+          "type": "int",
+          "description": "SOCK_STREAM 1, SOCK_DGRAM 2"
+        },
+        {
+          "register": "rdx",
+          "name": "protocol",
+          "type": "int",
+          "description": "protocol number, usually 0"
+        }
+      ],
+      "returns": "A new socket descriptor, or a negative errno.",
+      "errors": [
+        "-EAFNOSUPPORT: the address family is not supported",
+        "-EMFILE: too many open descriptors",
+        "-EACCES: permission denied"
+      ],
+      "example": null,
+      "detailed": true
+    },
+    {
+      "number": 42,
+      "name": "connect",
+      "summary": "Connect a socket to an address.",
+      "signature": "int connect(int sockfd, const struct sockaddr *addr, socklen_t addrlen)",
+      "group": "network",
+      "args": [
+        {
+          "register": "rdi",
+          "name": "sockfd",
+          "type": "int",
+          "description": "socket descriptor"
+        },
+        {
+          "register": "rsi",
+          "name": "addr",
+          "type": "const struct sockaddr *",
+          "description": "address to connect to"
+        },
+        {
+          "register": "rdx",
+          "name": "addrlen",
+          "type": "socklen_t",
+          "description": "size of the address structure"
+        }
+      ],
+      "returns": "0 on success, or a negative errno.",
+      "errors": [
+        "-ECONNREFUSED: nothing is listening",
+        "-ETIMEDOUT: the attempt timed out",
+        "-ENETUNREACH: the network is unreachable"
+      ],
+      "example": null,
+      "detailed": true
+    },
+    {
+      "number": 43,
+      "name": "accept",
+      "summary": "Accept a connection on a listening socket.",
+      "signature": "int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen)",
+      "group": "network",
+      "args": [
+        {
+          "register": "rdi",
+          "name": "sockfd",
+          "type": "int",
+          "description": "listening socket"
+        },
+        {
+          "register": "rsi",
+          "name": "addr",
+          "type": "struct sockaddr *",
+          "description": "receives the peer address, may be 0"
+        },
+        {
+          "register": "rdx",
+          "name": "addrlen",
+          "type": "socklen_t *",
+          "description": "in/out size of the address buffer"
+        }
+      ],
+      "returns": "A descriptor for the accepted connection, or a negative errno.",
+      "errors": [
+        "-EAGAIN: no connections are waiting on a non-blocking socket",
+        "-EINTR: interrupted by a signal"
+      ],
+      "example": null,
+      "detailed": true
+    },
+    {
+      "number": 44,
+      "name": "sendto",
+      "summary": "Linux system call sendto. See the man page: man 2 sendto.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 45,
+      "name": "recvfrom",
+      "summary": "Linux system call recvfrom. See the man page: man 2 recvfrom.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 46,
+      "name": "sendmsg",
+      "summary": "Linux system call sendmsg. See the man page: man 2 sendmsg.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 47,
+      "name": "recvmsg",
+      "summary": "Linux system call recvmsg. See the man page: man 2 recvmsg.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 48,
+      "name": "shutdown",
+      "summary": "Linux system call shutdown. See the man page: man 2 shutdown.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 49,
+      "name": "bind",
+      "summary": "Bind a socket to a local address.",
+      "signature": "int bind(int sockfd, const struct sockaddr *addr, socklen_t addrlen)",
+      "group": "network",
+      "args": [
+        {
+          "register": "rdi",
+          "name": "sockfd",
+          "type": "int",
+          "description": "socket descriptor"
+        },
+        {
+          "register": "rsi",
+          "name": "addr",
+          "type": "const struct sockaddr *",
+          "description": "local address"
+        },
+        {
+          "register": "rdx",
+          "name": "addrlen",
+          "type": "socklen_t",
+          "description": "size of the address structure"
+        }
+      ],
+      "returns": "0 on success, or a negative errno.",
+      "errors": [
+        "-EADDRINUSE: the address is already in use",
+        "-EACCES: permission denied"
+      ],
+      "example": null,
+      "detailed": true
+    },
+    {
+      "number": 50,
+      "name": "listen",
+      "summary": "Mark a socket as accepting connections.",
+      "signature": "int listen(int sockfd, int backlog)",
+      "group": "network",
+      "args": [
+        {
+          "register": "rdi",
+          "name": "sockfd",
+          "type": "int",
+          "description": "socket descriptor"
+        },
+        {
+          "register": "rsi",
+          "name": "backlog",
+          "type": "int",
+          "description": "queue length for pending connections"
+        }
+      ],
+      "returns": "0 on success, or a negative errno.",
+      "errors": [
+        "-EADDRINUSE: the address is already in use",
+        "-ENOTSOCK: fd is not a socket"
+      ],
+      "example": null,
+      "detailed": true
+    },
+    {
+      "number": 51,
+      "name": "getsockname",
+      "summary": "Linux system call getsockname. See the man page: man 2 getsockname.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 52,
+      "name": "getpeername",
+      "summary": "Linux system call getpeername. See the man page: man 2 getpeername.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 53,
+      "name": "socketpair",
+      "summary": "Linux system call socketpair. See the man page: man 2 socketpair.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 54,
+      "name": "setsockopt",
+      "summary": "Linux system call setsockopt. See the man page: man 2 setsockopt.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 55,
+      "name": "getsockopt",
+      "summary": "Linux system call getsockopt. See the man page: man 2 getsockopt.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 56,
+      "name": "clone",
+      "summary": "Create a child process or thread.",
+      "signature": "long clone(unsigned long flags, void *stack, int *parent_tid, int *child_tid, unsigned long tls)",
+      "group": "process",
+      "args": [
+        {
+          "register": "rdi",
+          "name": "flags",
+          "type": "unsigned long",
+          "description": "CLONE_* flags controlling what is shared"
+        },
+        {
+          "register": "rsi",
+          "name": "stack",
+          "type": "void *",
+          "description": "stack for the child, or 0"
+        },
+        {
+          "register": "rdx",
+          "name": "parent_tid",
+          "type": "int *",
+          "description": "receives the child TID in the parent"
+        },
+        {
+          "register": "r10",
+          "name": "child_tid",
+          "type": "int *",
+          "description": "receives the child TID in the child"
+        },
+        {
+          "register": "r8",
+          "name": "tls",
+          "type": "unsigned long",
+          "description": "new thread-local storage descriptor"
+        }
+      ],
+      "returns": "The child's thread ID in the parent, 0 in the child, or a negative errno.",
+      "errors": [
+        "-EAGAIN: too many processes",
+        "-ENOMEM: not enough memory",
+        "-EINVAL: incompatible flags"
+      ],
+      "example": null,
+      "detailed": true
+    },
+    {
+      "number": 57,
+      "name": "fork",
+      "summary": "Create a child process.",
+      "signature": "pid_t fork(void)",
+      "group": "process",
+      "args": [],
+      "returns": "The child's PID in the parent, 0 in the child, or a negative errno.",
+      "errors": [
+        "-EAGAIN: too many processes",
+        "-ENOMEM: not enough memory"
+      ],
+      "example": null,
+      "detailed": true
+    },
+    {
+      "number": 58,
+      "name": "vfork",
+      "summary": "Linux system call vfork. See the man page: man 2 vfork.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 59,
+      "name": "execve",
+      "summary": "Replace the process image with a new program.",
+      "signature": "int execve(const char *pathname, char *const argv[], char *const envp[])",
+      "group": "process",
+      "args": [
+        {
+          "register": "rdi",
+          "name": "pathname",
+          "type": "const char *",
+          "description": "path of the program to run"
+        },
+        {
+          "register": "rsi",
+          "name": "argv",
+          "type": "char *const []",
+          "description": "NULL-terminated argument vector"
+        },
+        {
+          "register": "rdx",
+          "name": "envp",
+          "type": "char *const []",
+          "description": "NULL-terminated environment vector"
+        }
+      ],
+      "returns": "Does not return on success; returns a negative errno on failure.",
+      "errors": [
+        "-ENOENT: the program does not exist",
+        "-EACCES: the file is not executable",
+        "-ENOEXEC: the file is not in a recognised format"
+      ],
+      "example": null,
+      "detailed": true
+    },
+    {
+      "number": 60,
+      "name": "exit",
+      "summary": "Terminate the calling thread.",
+      "signature": "void exit(int status)",
+      "group": "process",
+      "args": [
+        {
+          "register": "rdi",
+          "name": "status",
+          "type": "int",
+          "description": "exit status, of which only the low 8 bits are kept"
+        }
+      ],
+      "returns": "Never returns.",
+      "errors": [],
+      "example": "    mov     rax, 60             ; exit\n    xor     edi, edi            ; status 0\n    syscall",
+      "detailed": true
+    },
+    {
+      "number": 61,
+      "name": "wait4",
+      "summary": "Wait for a child to change state.",
+      "signature": "pid_t wait4(pid_t pid, int *wstatus, int options, struct rusage *rusage)",
+      "group": "process",
+      "args": [
+        {
+          "register": "rdi",
+          "name": "pid",
+          "type": "pid_t",
+          "description": "child to wait for, or -1 for any"
+        },
+        {
+          "register": "rsi",
+          "name": "wstatus",
+          "type": "int *",
+          "description": "receives the status, may be 0"
+        },
+        {
+          "register": "rdx",
+          "name": "options",
+          "type": "int",
+          "description": "WNOHANG 1, WUNTRACED 2"
+        },
+        {
+          "register": "r10",
+          "name": "rusage",
+          "type": "struct rusage *",
+          "description": "receives resource usage, may be 0"
+        }
+      ],
+      "returns": "The PID of the child that changed state, 0 with WNOHANG, or a negative errno.",
+      "errors": [
+        "-ECHILD: there are no children to wait for",
+        "-EINTR: interrupted by a signal"
+      ],
+      "example": null,
+      "detailed": true
+    },
+    {
+      "number": 62,
+      "name": "kill",
+      "summary": "Send a signal to a process.",
+      "signature": "int kill(pid_t pid, int sig)",
+      "group": "signal",
+      "args": [
+        {
+          "register": "rdi",
+          "name": "pid",
+          "type": "pid_t",
+          "description": "target process"
+        },
+        {
+          "register": "rsi",
+          "name": "sig",
+          "type": "int",
+          "description": "signal number"
+        }
+      ],
+      "returns": "0 on success, or a negative errno.",
+      "errors": [
+        "-ESRCH: no such process",
+        "-EPERM: permission denied",
+        "-EINVAL: invalid signal"
+      ],
+      "example": null,
+      "detailed": true
+    },
+    {
+      "number": 63,
+      "name": "uname",
+      "summary": "Get system information.",
+      "signature": "int uname(struct utsname *buf)",
+      "group": "system",
+      "args": [
+        {
+          "register": "rdi",
+          "name": "buf",
+          "type": "struct utsname *",
+          "description": "buffer receiving the system name and release"
+        }
+      ],
+      "returns": "0 on success, or a negative errno.",
+      "errors": [
+        "-EFAULT: buf is invalid"
+      ],
+      "example": null,
+      "detailed": true
+    },
+    {
+      "number": 64,
+      "name": "semget",
+      "summary": "Linux system call semget. See the man page: man 2 semget.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 65,
+      "name": "semop",
+      "summary": "Linux system call semop. See the man page: man 2 semop.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 66,
+      "name": "semctl",
+      "summary": "Linux system call semctl. See the man page: man 2 semctl.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 67,
+      "name": "shmdt",
+      "summary": "Linux system call shmdt. See the man page: man 2 shmdt.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 68,
+      "name": "msgget",
+      "summary": "Linux system call msgget. See the man page: man 2 msgget.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 69,
+      "name": "msgsnd",
+      "summary": "Linux system call msgsnd. See the man page: man 2 msgsnd.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 70,
+      "name": "msgrcv",
+      "summary": "Linux system call msgrcv. See the man page: man 2 msgrcv.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 71,
+      "name": "msgctl",
+      "summary": "Linux system call msgctl. See the man page: man 2 msgctl.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 72,
+      "name": "fcntl",
+      "summary": "Manipulate a file descriptor.",
+      "signature": "int fcntl(int fd, int cmd, ... )",
+      "group": "file",
+      "args": [
+        {
+          "register": "rdi",
+          "name": "fd",
+          "type": "int",
+          "description": "open descriptor"
+        },
+        {
+          "register": "rsi",
+          "name": "cmd",
+          "type": "int",
+          "description": "operation, such as F_GETFL 3 or F_SETFL 4"
+        },
+        {
+          "register": "rdx",
+          "name": "arg",
+          "type": "unsigned long",
+          "description": "command-specific argument"
+        }
+      ],
+      "returns": "Command-specific on success, or a negative errno.",
+      "errors": [
+        "-EBADF: fd is not valid",
+        "-EINVAL: the command or argument is invalid"
+      ],
+      "example": null,
+      "detailed": true
+    },
+    {
+      "number": 73,
+      "name": "flock",
+      "summary": "Linux system call flock. See the man page: man 2 flock.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 74,
+      "name": "fsync",
+      "summary": "Flush a file's data to storage.",
+      "signature": "int fsync(int fd)",
+      "group": "file",
+      "args": [
+        {
+          "register": "rdi",
+          "name": "fd",
+          "type": "int",
+          "description": "open descriptor"
+        }
+      ],
+      "returns": "0 on success, or a negative errno.",
+      "errors": [
+        "-EBADF: fd is not valid",
+        "-EIO: an error occurred while writing"
+      ],
+      "example": null,
+      "detailed": true
+    },
+    {
+      "number": 75,
+      "name": "fdatasync",
+      "summary": "Linux system call fdatasync. See the man page: man 2 fdatasync.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 76,
+      "name": "truncate",
+      "summary": "Set the length of a file by path.",
+      "signature": "int truncate(const char *path, off_t length)",
+      "group": "file",
+      "args": [
+        {
+          "register": "rdi",
+          "name": "path",
+          "type": "const char *",
+          "description": "file to resize"
+        },
+        {
+          "register": "rsi",
+          "name": "length",
+          "type": "off_t",
+          "description": "new length in bytes"
+        }
+      ],
+      "returns": "0 on success, or a negative errno.",
+      "errors": [
+        "-EACCES: permission denied",
+        "-ENOENT: the path does not exist"
+      ],
+      "example": null,
+      "detailed": true
+    },
+    {
+      "number": 77,
+      "name": "ftruncate",
+      "summary": "Set the length of a file by descriptor.",
+      "signature": "int ftruncate(int fd, off_t length)",
+      "group": "file",
+      "args": [
+        {
+          "register": "rdi",
+          "name": "fd",
+          "type": "int",
+          "description": "open descriptor"
+        },
+        {
+          "register": "rsi",
+          "name": "length",
+          "type": "off_t",
+          "description": "new length in bytes"
+        }
+      ],
+      "returns": "0 on success, or a negative errno.",
+      "errors": [
+        "-EBADF: fd is not valid",
+        "-EINVAL: fd is not open for writing"
+      ],
+      "example": null,
+      "detailed": true
+    },
+    {
+      "number": 78,
+      "name": "getdents",
+      "summary": "Linux system call getdents. See the man page: man 2 getdents.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 79,
+      "name": "getcwd",
+      "summary": "Get the current working directory.",
+      "signature": "long getcwd(char *buf, size_t size)",
+      "group": "file",
+      "args": [
+        {
+          "register": "rdi",
+          "name": "buf",
+          "type": "char *",
+          "description": "buffer receiving the path"
+        },
+        {
+          "register": "rsi",
+          "name": "size",
+          "type": "size_t",
+          "description": "size of the buffer"
+        }
+      ],
+      "returns": "The length of the path including the terminating NUL, or a negative errno.",
+      "errors": [
+        "-ERANGE: the buffer is too small",
+        "-EFAULT: buf is invalid"
+      ],
+      "example": null,
+      "detailed": true
+    },
+    {
+      "number": 80,
+      "name": "chdir",
+      "summary": "Change the working directory.",
+      "signature": "int chdir(const char *path)",
+      "group": "file",
+      "args": [
+        {
+          "register": "rdi",
+          "name": "path",
+          "type": "const char *",
+          "description": "new working directory"
+        }
+      ],
+      "returns": "0 on success, or a negative errno.",
+      "errors": [
+        "-ENOENT: the directory does not exist",
+        "-ENOTDIR: a component is not a directory",
+        "-EACCES: permission denied"
+      ],
+      "example": null,
+      "detailed": true
+    },
+    {
+      "number": 81,
+      "name": "fchdir",
+      "summary": "Linux system call fchdir. See the man page: man 2 fchdir.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 82,
+      "name": "rename",
+      "summary": "Rename or move a file.",
+      "signature": "int rename(const char *oldpath, const char *newpath)",
+      "group": "file",
+      "args": [
+        {
+          "register": "rdi",
+          "name": "oldpath",
+          "type": "const char *",
+          "description": "existing path"
+        },
+        {
+          "register": "rsi",
+          "name": "newpath",
+          "type": "const char *",
+          "description": "new path"
+        }
+      ],
+      "returns": "0 on success, or a negative errno.",
+      "errors": [
+        "-ENOENT: oldpath does not exist",
+        "-EXDEV: the paths are on different filesystems",
+        "-EACCES: permission denied"
+      ],
+      "example": null,
+      "detailed": true
+    },
+    {
+      "number": 83,
+      "name": "mkdir",
+      "summary": "Create a directory.",
+      "signature": "int mkdir(const char *pathname, mode_t mode)",
+      "group": "file",
+      "args": [
+        {
+          "register": "rdi",
+          "name": "pathname",
+          "type": "const char *",
+          "description": "directory to create"
+        },
+        {
+          "register": "rsi",
+          "name": "mode",
+          "type": "mode_t",
+          "description": "permission bits"
+        }
+      ],
+      "returns": "0 on success, or a negative errno.",
+      "errors": [
+        "-EEXIST: the path already exists",
+        "-EACCES: permission denied",
+        "-ENOSPC: no space left on the device"
+      ],
+      "example": null,
+      "detailed": true
+    },
+    {
+      "number": 84,
+      "name": "rmdir",
+      "summary": "Remove an empty directory.",
+      "signature": "int rmdir(const char *pathname)",
+      "group": "file",
+      "args": [
+        {
+          "register": "rdi",
+          "name": "pathname",
+          "type": "const char *",
+          "description": "directory to remove"
+        }
+      ],
+      "returns": "0 on success, or a negative errno.",
+      "errors": [
+        "-ENOTEMPTY: the directory is not empty",
+        "-ENOENT: the path does not exist"
+      ],
+      "example": null,
+      "detailed": true
+    },
+    {
+      "number": 85,
+      "name": "creat",
+      "summary": "Linux system call creat. See the man page: man 2 creat.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 86,
+      "name": "link",
+      "summary": "Linux system call link. See the man page: man 2 link.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 87,
+      "name": "unlink",
+      "summary": "Remove a name from the filesystem.",
+      "signature": "int unlink(const char *pathname)",
+      "group": "file",
+      "args": [
+        {
+          "register": "rdi",
+          "name": "pathname",
+          "type": "const char *",
+          "description": "file to remove"
+        }
+      ],
+      "returns": "0 on success, or a negative errno.",
+      "errors": [
+        "-ENOENT: the path does not exist",
+        "-EISDIR: the path is a directory",
+        "-EACCES: permission denied"
+      ],
+      "example": null,
+      "detailed": true
+    },
+    {
+      "number": 88,
+      "name": "symlink",
+      "summary": "Linux system call symlink. See the man page: man 2 symlink.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 89,
+      "name": "readlink",
+      "summary": "Read the target of a symbolic link.",
+      "signature": "ssize_t readlink(const char *pathname, char *buf, size_t bufsiz)",
+      "group": "file",
+      "args": [
+        {
+          "register": "rdi",
+          "name": "pathname",
+          "type": "const char *",
+          "description": "symbolic link to read"
+        },
+        {
+          "register": "rsi",
+          "name": "buf",
+          "type": "char *",
+          "description": "buffer receiving the target"
+        },
+        {
+          "register": "rdx",
+          "name": "bufsiz",
+          "type": "size_t",
+          "description": "size of the buffer"
+        }
+      ],
+      "returns": "The number of bytes placed in buf, or a negative errno. The result is not NUL-terminated.",
+      "errors": [
+        "-EINVAL: the path is not a symbolic link",
+        "-ENOENT: the path does not exist"
+      ],
+      "example": null,
+      "detailed": true
+    },
+    {
+      "number": 90,
+      "name": "chmod",
+      "summary": "Change file permissions.",
+      "signature": "int chmod(const char *pathname, mode_t mode)",
+      "group": "file",
+      "args": [
+        {
+          "register": "rdi",
+          "name": "pathname",
+          "type": "const char *",
+          "description": "file to change"
+        },
+        {
+          "register": "rsi",
+          "name": "mode",
+          "type": "mode_t",
+          "description": "new permission bits"
+        }
+      ],
+      "returns": "0 on success, or a negative errno.",
+      "errors": [
+        "-EPERM: the caller does not own the file",
+        "-ENOENT: the path does not exist"
+      ],
+      "example": null,
+      "detailed": true
+    },
+    {
+      "number": 91,
+      "name": "fchmod",
+      "summary": "Linux system call fchmod. See the man page: man 2 fchmod.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 92,
+      "name": "chown",
+      "summary": "Linux system call chown. See the man page: man 2 chown.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 93,
+      "name": "fchown",
+      "summary": "Linux system call fchown. See the man page: man 2 fchown.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 94,
+      "name": "lchown",
+      "summary": "Linux system call lchown. See the man page: man 2 lchown.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 95,
+      "name": "umask",
+      "summary": "Linux system call umask. See the man page: man 2 umask.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 96,
+      "name": "gettimeofday",
+      "summary": "Get the wall-clock time.",
+      "signature": "int gettimeofday(struct timeval *tv, struct timezone *tz)",
+      "group": "time",
+      "args": [
+        {
+          "register": "rdi",
+          "name": "tv",
+          "type": "struct timeval *",
+          "description": "receives the time"
+        },
+        {
+          "register": "rsi",
+          "name": "tz",
+          "type": "struct timezone *",
+          "description": "obsolete, pass 0"
+        }
+      ],
+      "returns": "0 on success, or a negative errno.",
+      "errors": [
+        "-EFAULT: a pointer is invalid"
+      ],
+      "example": null,
+      "detailed": true
+    },
+    {
+      "number": 97,
+      "name": "getrlimit",
+      "summary": "Linux system call getrlimit. See the man page: man 2 getrlimit.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 98,
+      "name": "getrusage",
+      "summary": "Linux system call getrusage. See the man page: man 2 getrusage.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 99,
+      "name": "sysinfo",
+      "summary": "Linux system call sysinfo. See the man page: man 2 sysinfo.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 100,
+      "name": "times",
+      "summary": "Linux system call times. See the man page: man 2 times.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 101,
+      "name": "ptrace",
+      "summary": "Linux system call ptrace. See the man page: man 2 ptrace.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 102,
+      "name": "getuid",
+      "summary": "Get the real user ID.",
+      "signature": "uid_t getuid(void)",
+      "group": "process",
+      "args": [],
+      "returns": "The real user ID. This call always succeeds.",
+      "errors": [],
+      "example": null,
+      "detailed": true
+    },
+    {
+      "number": 103,
+      "name": "syslog",
+      "summary": "Linux system call syslog. See the man page: man 2 syslog.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 104,
+      "name": "getgid",
+      "summary": "Get the real group ID.",
+      "signature": "gid_t getgid(void)",
+      "group": "process",
+      "args": [],
+      "returns": "The real group ID. This call always succeeds.",
+      "errors": [],
+      "example": null,
+      "detailed": true
+    },
+    {
+      "number": 105,
+      "name": "setuid",
+      "summary": "Linux system call setuid. See the man page: man 2 setuid.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 106,
+      "name": "setgid",
+      "summary": "Linux system call setgid. See the man page: man 2 setgid.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 107,
+      "name": "geteuid",
+      "summary": "Get the effective user ID.",
+      "signature": "uid_t geteuid(void)",
+      "group": "process",
+      "args": [],
+      "returns": "The effective user ID. This call always succeeds.",
+      "errors": [],
+      "example": null,
+      "detailed": true
+    },
+    {
+      "number": 108,
+      "name": "getegid",
+      "summary": "Linux system call getegid. See the man page: man 2 getegid.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 109,
+      "name": "setpgid",
+      "summary": "Linux system call setpgid. See the man page: man 2 setpgid.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 110,
+      "name": "getppid",
+      "summary": "Get the parent process ID.",
+      "signature": "pid_t getppid(void)",
+      "group": "process",
+      "args": [],
+      "returns": "The parent's process ID. This call always succeeds.",
+      "errors": [],
+      "example": null,
+      "detailed": true
+    },
+    {
+      "number": 111,
+      "name": "getpgrp",
+      "summary": "Linux system call getpgrp. See the man page: man 2 getpgrp.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 112,
+      "name": "setsid",
+      "summary": "Linux system call setsid. See the man page: man 2 setsid.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 113,
+      "name": "setreuid",
+      "summary": "Linux system call setreuid. See the man page: man 2 setreuid.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 114,
+      "name": "setregid",
+      "summary": "Linux system call setregid. See the man page: man 2 setregid.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 115,
+      "name": "getgroups",
+      "summary": "Linux system call getgroups. See the man page: man 2 getgroups.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 116,
+      "name": "setgroups",
+      "summary": "Linux system call setgroups. See the man page: man 2 setgroups.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 117,
+      "name": "setresuid",
+      "summary": "Linux system call setresuid. See the man page: man 2 setresuid.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 118,
+      "name": "getresuid",
+      "summary": "Linux system call getresuid. See the man page: man 2 getresuid.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 119,
+      "name": "setresgid",
+      "summary": "Linux system call setresgid. See the man page: man 2 setresgid.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 120,
+      "name": "getresgid",
+      "summary": "Linux system call getresgid. See the man page: man 2 getresgid.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 121,
+      "name": "getpgid",
+      "summary": "Linux system call getpgid. See the man page: man 2 getpgid.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 122,
+      "name": "setfsuid",
+      "summary": "Linux system call setfsuid. See the man page: man 2 setfsuid.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 123,
+      "name": "setfsgid",
+      "summary": "Linux system call setfsgid. See the man page: man 2 setfsgid.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 124,
+      "name": "getsid",
+      "summary": "Linux system call getsid. See the man page: man 2 getsid.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 125,
+      "name": "capget",
+      "summary": "Linux system call capget. See the man page: man 2 capget.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 126,
+      "name": "capset",
+      "summary": "Linux system call capset. See the man page: man 2 capset.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 127,
+      "name": "rt_sigpending",
+      "summary": "Linux system call rt_sigpending. See the man page: man 2 rt_sigpending.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 128,
+      "name": "rt_sigtimedwait",
+      "summary": "Linux system call rt_sigtimedwait. See the man page: man 2 rt_sigtimedwait.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 129,
+      "name": "rt_sigqueueinfo",
+      "summary": "Linux system call rt_sigqueueinfo. See the man page: man 2 rt_sigqueueinfo.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 130,
+      "name": "rt_sigsuspend",
+      "summary": "Linux system call rt_sigsuspend. See the man page: man 2 rt_sigsuspend.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 131,
+      "name": "sigaltstack",
+      "summary": "Linux system call sigaltstack. See the man page: man 2 sigaltstack.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 132,
+      "name": "utime",
+      "summary": "Linux system call utime. See the man page: man 2 utime.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 133,
+      "name": "mknod",
+      "summary": "Linux system call mknod. See the man page: man 2 mknod.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 134,
+      "name": "uselib",
+      "summary": "Linux system call uselib. See the man page: man 2 uselib.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 135,
+      "name": "personality",
+      "summary": "Linux system call personality. See the man page: man 2 personality.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 136,
+      "name": "ustat",
+      "summary": "Linux system call ustat. See the man page: man 2 ustat.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 137,
+      "name": "statfs",
+      "summary": "Linux system call statfs. See the man page: man 2 statfs.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 138,
+      "name": "fstatfs",
+      "summary": "Linux system call fstatfs. See the man page: man 2 fstatfs.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 139,
+      "name": "sysfs",
+      "summary": "Linux system call sysfs. See the man page: man 2 sysfs.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 140,
+      "name": "getpriority",
+      "summary": "Linux system call getpriority. See the man page: man 2 getpriority.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 141,
+      "name": "setpriority",
+      "summary": "Linux system call setpriority. See the man page: man 2 setpriority.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 142,
+      "name": "sched_setparam",
+      "summary": "Linux system call sched_setparam. See the man page: man 2 sched_setparam.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 143,
+      "name": "sched_getparam",
+      "summary": "Linux system call sched_getparam. See the man page: man 2 sched_getparam.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 144,
+      "name": "sched_setscheduler",
+      "summary": "Linux system call sched_setscheduler. See the man page: man 2 sched_setscheduler.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 145,
+      "name": "sched_getscheduler",
+      "summary": "Linux system call sched_getscheduler. See the man page: man 2 sched_getscheduler.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 146,
+      "name": "sched_get_priority_max",
+      "summary": "Linux system call sched_get_priority_max. See the man page: man 2 sched_get_priority_max.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 147,
+      "name": "sched_get_priority_min",
+      "summary": "Linux system call sched_get_priority_min. See the man page: man 2 sched_get_priority_min.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 148,
+      "name": "sched_rr_get_interval",
+      "summary": "Linux system call sched_rr_get_interval. See the man page: man 2 sched_rr_get_interval.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 149,
+      "name": "mlock",
+      "summary": "Linux system call mlock. See the man page: man 2 mlock.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 150,
+      "name": "munlock",
+      "summary": "Linux system call munlock. See the man page: man 2 munlock.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 151,
+      "name": "mlockall",
+      "summary": "Linux system call mlockall. See the man page: man 2 mlockall.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 152,
+      "name": "munlockall",
+      "summary": "Linux system call munlockall. See the man page: man 2 munlockall.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 153,
+      "name": "vhangup",
+      "summary": "Linux system call vhangup. See the man page: man 2 vhangup.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 154,
+      "name": "modify_ldt",
+      "summary": "Linux system call modify_ldt. See the man page: man 2 modify_ldt.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 155,
+      "name": "pivot_root",
+      "summary": "Linux system call pivot_root. See the man page: man 2 pivot_root.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 156,
+      "name": "_sysctl",
+      "summary": "Linux system call _sysctl. See the man page: man 2 _sysctl.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 157,
+      "name": "prctl",
+      "summary": "Linux system call prctl. See the man page: man 2 prctl.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 158,
+      "name": "arch_prctl",
+      "summary": "Set architecture-specific thread state.",
+      "signature": "int arch_prctl(int code, unsigned long addr)",
+      "group": "process",
+      "args": [
+        {
+          "register": "rdi",
+          "name": "code",
+          "type": "int",
+          "description": "ARCH_SET_FS 0x1002, ARCH_GET_FS 0x1003, ARCH_SET_GS 0x1001"
+        },
+        {
+          "register": "rsi",
+          "name": "addr",
+          "type": "unsigned long",
+          "description": "value to set, or a pointer that receives the value"
+        }
+      ],
+      "returns": "0 on success, or a negative errno.",
+      "errors": [
+        "-EINVAL: the code is unknown",
+        "-EFAULT: addr is invalid"
+      ],
+      "example": null,
+      "detailed": true
+    },
+    {
+      "number": 159,
+      "name": "adjtimex",
+      "summary": "Linux system call adjtimex. See the man page: man 2 adjtimex.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 160,
+      "name": "setrlimit",
+      "summary": "Linux system call setrlimit. See the man page: man 2 setrlimit.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 161,
+      "name": "chroot",
+      "summary": "Linux system call chroot. See the man page: man 2 chroot.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 162,
+      "name": "sync",
+      "summary": "Linux system call sync. See the man page: man 2 sync.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 163,
+      "name": "acct",
+      "summary": "Linux system call acct. See the man page: man 2 acct.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 164,
+      "name": "settimeofday",
+      "summary": "Linux system call settimeofday. See the man page: man 2 settimeofday.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 165,
+      "name": "mount",
+      "summary": "Linux system call mount. See the man page: man 2 mount.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 166,
+      "name": "umount2",
+      "summary": "Linux system call umount2. See the man page: man 2 umount2.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 167,
+      "name": "swapon",
+      "summary": "Linux system call swapon. See the man page: man 2 swapon.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 168,
+      "name": "swapoff",
+      "summary": "Linux system call swapoff. See the man page: man 2 swapoff.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 169,
+      "name": "reboot",
+      "summary": "Linux system call reboot. See the man page: man 2 reboot.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 170,
+      "name": "sethostname",
+      "summary": "Linux system call sethostname. See the man page: man 2 sethostname.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 171,
+      "name": "setdomainname",
+      "summary": "Linux system call setdomainname. See the man page: man 2 setdomainname.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 172,
+      "name": "iopl",
+      "summary": "Linux system call iopl. See the man page: man 2 iopl.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 173,
+      "name": "ioperm",
+      "summary": "Linux system call ioperm. See the man page: man 2 ioperm.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 174,
+      "name": "create_module",
+      "summary": "Linux system call create_module. See the man page: man 2 create_module.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 175,
+      "name": "init_module",
+      "summary": "Linux system call init_module. See the man page: man 2 init_module.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 176,
+      "name": "delete_module",
+      "summary": "Linux system call delete_module. See the man page: man 2 delete_module.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 177,
+      "name": "get_kernel_syms",
+      "summary": "Linux system call get_kernel_syms. See the man page: man 2 get_kernel_syms.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 178,
+      "name": "query_module",
+      "summary": "Linux system call query_module. See the man page: man 2 query_module.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 179,
+      "name": "quotactl",
+      "summary": "Linux system call quotactl. See the man page: man 2 quotactl.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 180,
+      "name": "nfsservctl",
+      "summary": "Linux system call nfsservctl. See the man page: man 2 nfsservctl.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 181,
+      "name": "getpmsg",
+      "summary": "Linux system call getpmsg. See the man page: man 2 getpmsg.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 182,
+      "name": "putpmsg",
+      "summary": "Linux system call putpmsg. See the man page: man 2 putpmsg.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 183,
+      "name": "afs_syscall",
+      "summary": "Linux system call afs_syscall. See the man page: man 2 afs_syscall.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 184,
+      "name": "tuxcall",
+      "summary": "Linux system call tuxcall. See the man page: man 2 tuxcall.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 185,
+      "name": "security",
+      "summary": "Linux system call security. See the man page: man 2 security.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 186,
+      "name": "gettid",
+      "summary": "Linux system call gettid. See the man page: man 2 gettid.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 187,
+      "name": "readahead",
+      "summary": "Linux system call readahead. See the man page: man 2 readahead.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 188,
+      "name": "setxattr",
+      "summary": "Linux system call setxattr. See the man page: man 2 setxattr.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 189,
+      "name": "lsetxattr",
+      "summary": "Linux system call lsetxattr. See the man page: man 2 lsetxattr.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 190,
+      "name": "fsetxattr",
+      "summary": "Linux system call fsetxattr. See the man page: man 2 fsetxattr.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 191,
+      "name": "getxattr",
+      "summary": "Linux system call getxattr. See the man page: man 2 getxattr.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 192,
+      "name": "lgetxattr",
+      "summary": "Linux system call lgetxattr. See the man page: man 2 lgetxattr.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 193,
+      "name": "fgetxattr",
+      "summary": "Linux system call fgetxattr. See the man page: man 2 fgetxattr.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 194,
+      "name": "listxattr",
+      "summary": "Linux system call listxattr. See the man page: man 2 listxattr.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 195,
+      "name": "llistxattr",
+      "summary": "Linux system call llistxattr. See the man page: man 2 llistxattr.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 196,
+      "name": "flistxattr",
+      "summary": "Linux system call flistxattr. See the man page: man 2 flistxattr.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 197,
+      "name": "removexattr",
+      "summary": "Linux system call removexattr. See the man page: man 2 removexattr.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 198,
+      "name": "lremovexattr",
+      "summary": "Linux system call lremovexattr. See the man page: man 2 lremovexattr.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 199,
+      "name": "fremovexattr",
+      "summary": "Linux system call fremovexattr. See the man page: man 2 fremovexattr.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 200,
+      "name": "tkill",
+      "summary": "Linux system call tkill. See the man page: man 2 tkill.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 201,
+      "name": "time",
+      "summary": "Linux system call time. See the man page: man 2 time.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 202,
+      "name": "futex",
+      "summary": "Fast user-space locking primitive.",
+      "signature": "int futex(uint32_t *uaddr, int futex_op, uint32_t val, const struct timespec *timeout, uint32_t *uaddr2, uint32_t val3)",
+      "group": "ipc",
+      "args": [
+        {
+          "register": "rdi",
+          "name": "uaddr",
+          "type": "uint32_t *",
+          "description": "the futex word"
+        },
+        {
+          "register": "rsi",
+          "name": "futex_op",
+          "type": "int",
+          "description": "FUTEX_WAIT 0, FUTEX_WAKE 1"
+        },
+        {
+          "register": "rdx",
+          "name": "val",
+          "type": "uint32_t",
+          "description": "expected value for WAIT, or the number to wake"
+        },
+        {
+          "register": "r10",
+          "name": "timeout",
+          "type": "const struct timespec *",
+          "description": "timeout for WAIT, may be 0"
+        },
+        {
+          "register": "r8",
+          "name": "uaddr2",
+          "type": "uint32_t *",
+          "description": "second futex word for requeue operations"
+        },
+        {
+          "register": "r9",
+          "name": "val3",
+          "type": "uint32_t",
+          "description": "operation-specific value"
+        }
+      ],
+      "returns": "Operation-specific on success, or a negative errno.",
+      "errors": [
+        "-EAGAIN: the value did not match for WAIT",
+        "-ETIMEDOUT: the timeout expired",
+        "-EINTR: interrupted by a signal"
+      ],
+      "example": null,
+      "detailed": true
+    },
+    {
+      "number": 203,
+      "name": "sched_setaffinity",
+      "summary": "Linux system call sched_setaffinity. See the man page: man 2 sched_setaffinity.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 204,
+      "name": "sched_getaffinity",
+      "summary": "Linux system call sched_getaffinity. See the man page: man 2 sched_getaffinity.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 205,
+      "name": "set_thread_area",
+      "summary": "Linux system call set_thread_area. See the man page: man 2 set_thread_area.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 206,
+      "name": "io_setup",
+      "summary": "Linux system call io_setup. See the man page: man 2 io_setup.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 207,
+      "name": "io_destroy",
+      "summary": "Linux system call io_destroy. See the man page: man 2 io_destroy.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 208,
+      "name": "io_getevents",
+      "summary": "Linux system call io_getevents. See the man page: man 2 io_getevents.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 209,
+      "name": "io_submit",
+      "summary": "Linux system call io_submit. See the man page: man 2 io_submit.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 210,
+      "name": "io_cancel",
+      "summary": "Linux system call io_cancel. See the man page: man 2 io_cancel.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 211,
+      "name": "get_thread_area",
+      "summary": "Linux system call get_thread_area. See the man page: man 2 get_thread_area.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 212,
+      "name": "lookup_dcookie",
+      "summary": "Linux system call lookup_dcookie. See the man page: man 2 lookup_dcookie.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 213,
+      "name": "epoll_create",
+      "summary": "Linux system call epoll_create. See the man page: man 2 epoll_create.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 214,
+      "name": "epoll_ctl_old",
+      "summary": "Linux system call epoll_ctl_old. See the man page: man 2 epoll_ctl_old.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 215,
+      "name": "epoll_wait_old",
+      "summary": "Linux system call epoll_wait_old. See the man page: man 2 epoll_wait_old.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 216,
+      "name": "remap_file_pages",
+      "summary": "Linux system call remap_file_pages. See the man page: man 2 remap_file_pages.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 217,
+      "name": "getdents64",
+      "summary": "Linux system call getdents64. See the man page: man 2 getdents64.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 218,
+      "name": "set_tid_address",
+      "summary": "Linux system call set_tid_address. See the man page: man 2 set_tid_address.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 219,
+      "name": "restart_syscall",
+      "summary": "Linux system call restart_syscall. See the man page: man 2 restart_syscall.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 220,
+      "name": "semtimedop",
+      "summary": "Linux system call semtimedop. See the man page: man 2 semtimedop.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 221,
+      "name": "fadvise64",
+      "summary": "Linux system call fadvise64. See the man page: man 2 fadvise64.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 222,
+      "name": "timer_create",
+      "summary": "Linux system call timer_create. See the man page: man 2 timer_create.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 223,
+      "name": "timer_settime",
+      "summary": "Linux system call timer_settime. See the man page: man 2 timer_settime.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 224,
+      "name": "timer_gettime",
+      "summary": "Linux system call timer_gettime. See the man page: man 2 timer_gettime.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 225,
+      "name": "timer_getoverrun",
+      "summary": "Linux system call timer_getoverrun. See the man page: man 2 timer_getoverrun.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 226,
+      "name": "timer_delete",
+      "summary": "Linux system call timer_delete. See the man page: man 2 timer_delete.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 227,
+      "name": "clock_settime",
+      "summary": "Linux system call clock_settime. See the man page: man 2 clock_settime.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 228,
+      "name": "clock_gettime",
+      "summary": "Read a clock.",
+      "signature": "int clock_gettime(clockid_t clockid, struct timespec *tp)",
+      "group": "time",
+      "args": [
+        {
+          "register": "rdi",
+          "name": "clockid",
+          "type": "clockid_t",
+          "description": "CLOCK_REALTIME 0, CLOCK_MONOTONIC 1"
+        },
+        {
+          "register": "rsi",
+          "name": "tp",
+          "type": "struct timespec *",
+          "description": "receives the time"
+        }
+      ],
+      "returns": "0 on success, or a negative errno.",
+      "errors": [
+        "-EINVAL: the clock is not supported",
+        "-EFAULT: tp is invalid"
+      ],
+      "example": null,
+      "detailed": true
+    },
+    {
+      "number": 229,
+      "name": "clock_getres",
+      "summary": "Linux system call clock_getres. See the man page: man 2 clock_getres.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 230,
+      "name": "clock_nanosleep",
+      "summary": "Linux system call clock_nanosleep. See the man page: man 2 clock_nanosleep.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 231,
+      "name": "exit_group",
+      "summary": "Terminate every thread in the process.",
+      "signature": "void exit_group(int status)",
+      "group": "process",
+      "args": [
+        {
+          "register": "rdi",
+          "name": "status",
+          "type": "int",
+          "description": "exit status, of which only the low 8 bits are kept"
+        }
+      ],
+      "returns": "Never returns.",
+      "errors": [],
+      "example": "    mov     rax, 231            ; exit_group\n    xor     edi, edi\n    syscall",
+      "detailed": true
+    },
+    {
+      "number": 232,
+      "name": "epoll_wait",
+      "summary": "Linux system call epoll_wait. See the man page: man 2 epoll_wait.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 233,
+      "name": "epoll_ctl",
+      "summary": "Linux system call epoll_ctl. See the man page: man 2 epoll_ctl.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 234,
+      "name": "tgkill",
+      "summary": "Linux system call tgkill. See the man page: man 2 tgkill.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 235,
+      "name": "utimes",
+      "summary": "Linux system call utimes. See the man page: man 2 utimes.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 236,
+      "name": "vserver",
+      "summary": "Linux system call vserver. See the man page: man 2 vserver.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 237,
+      "name": "mbind",
+      "summary": "Linux system call mbind. See the man page: man 2 mbind.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 238,
+      "name": "set_mempolicy",
+      "summary": "Linux system call set_mempolicy. See the man page: man 2 set_mempolicy.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 239,
+      "name": "get_mempolicy",
+      "summary": "Linux system call get_mempolicy. See the man page: man 2 get_mempolicy.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 240,
+      "name": "mq_open",
+      "summary": "Linux system call mq_open. See the man page: man 2 mq_open.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 241,
+      "name": "mq_unlink",
+      "summary": "Linux system call mq_unlink. See the man page: man 2 mq_unlink.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 242,
+      "name": "mq_timedsend",
+      "summary": "Linux system call mq_timedsend. See the man page: man 2 mq_timedsend.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 243,
+      "name": "mq_timedreceive",
+      "summary": "Linux system call mq_timedreceive. See the man page: man 2 mq_timedreceive.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 244,
+      "name": "mq_notify",
+      "summary": "Linux system call mq_notify. See the man page: man 2 mq_notify.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 245,
+      "name": "mq_getsetattr",
+      "summary": "Linux system call mq_getsetattr. See the man page: man 2 mq_getsetattr.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 246,
+      "name": "kexec_load",
+      "summary": "Linux system call kexec_load. See the man page: man 2 kexec_load.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 247,
+      "name": "waitid",
+      "summary": "Linux system call waitid. See the man page: man 2 waitid.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 248,
+      "name": "add_key",
+      "summary": "Linux system call add_key. See the man page: man 2 add_key.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 249,
+      "name": "request_key",
+      "summary": "Linux system call request_key. See the man page: man 2 request_key.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 250,
+      "name": "keyctl",
+      "summary": "Linux system call keyctl. See the man page: man 2 keyctl.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 251,
+      "name": "ioprio_set",
+      "summary": "Linux system call ioprio_set. See the man page: man 2 ioprio_set.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 252,
+      "name": "ioprio_get",
+      "summary": "Linux system call ioprio_get. See the man page: man 2 ioprio_get.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 253,
+      "name": "inotify_init",
+      "summary": "Linux system call inotify_init. See the man page: man 2 inotify_init.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 254,
+      "name": "inotify_add_watch",
+      "summary": "Linux system call inotify_add_watch. See the man page: man 2 inotify_add_watch.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 255,
+      "name": "inotify_rm_watch",
+      "summary": "Linux system call inotify_rm_watch. See the man page: man 2 inotify_rm_watch.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 256,
+      "name": "migrate_pages",
+      "summary": "Linux system call migrate_pages. See the man page: man 2 migrate_pages.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 257,
+      "name": "openat",
+      "summary": "Open a file relative to a directory descriptor.",
+      "signature": "int openat(int dirfd, const char *pathname, int flags, mode_t mode)",
+      "group": "file",
+      "args": [
+        {
+          "register": "rdi",
+          "name": "dirfd",
+          "type": "int",
+          "description": "directory descriptor, or AT_FDCWD -100 for the working directory"
+        },
+        {
+          "register": "rsi",
+          "name": "pathname",
+          "type": "const char *",
+          "description": "path, absolute or relative to dirfd"
+        },
+        {
+          "register": "rdx",
+          "name": "flags",
+          "type": "int",
+          "description": "as for open"
+        },
+        {
+          "register": "r10",
+          "name": "mode",
+          "type": "mode_t",
+          "description": "permission bits when creating"
+        }
+      ],
+      "returns": "A new file descriptor, or a negative errno.",
+      "errors": [
+        "-ENOENT: the file does not exist",
+        "-EBADF: dirfd is not valid",
+        "-EACCES: permission denied"
+      ],
+      "example": null,
+      "detailed": true
+    },
+    {
+      "number": 258,
+      "name": "mkdirat",
+      "summary": "Linux system call mkdirat. See the man page: man 2 mkdirat.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 259,
+      "name": "mknodat",
+      "summary": "Linux system call mknodat. See the man page: man 2 mknodat.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 260,
+      "name": "fchownat",
+      "summary": "Linux system call fchownat. See the man page: man 2 fchownat.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 261,
+      "name": "futimesat",
+      "summary": "Linux system call futimesat. See the man page: man 2 futimesat.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 262,
+      "name": "newfstatat",
+      "summary": "Linux system call newfstatat. See the man page: man 2 newfstatat.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 263,
+      "name": "unlinkat",
+      "summary": "Linux system call unlinkat. See the man page: man 2 unlinkat.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 264,
+      "name": "renameat",
+      "summary": "Linux system call renameat. See the man page: man 2 renameat.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 265,
+      "name": "linkat",
+      "summary": "Linux system call linkat. See the man page: man 2 linkat.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 266,
+      "name": "symlinkat",
+      "summary": "Linux system call symlinkat. See the man page: man 2 symlinkat.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 267,
+      "name": "readlinkat",
+      "summary": "Linux system call readlinkat. See the man page: man 2 readlinkat.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 268,
+      "name": "fchmodat",
+      "summary": "Linux system call fchmodat. See the man page: man 2 fchmodat.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 269,
+      "name": "faccessat",
+      "summary": "Linux system call faccessat. See the man page: man 2 faccessat.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 270,
+      "name": "pselect6",
+      "summary": "Linux system call pselect6. See the man page: man 2 pselect6.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 271,
+      "name": "ppoll",
+      "summary": "Linux system call ppoll. See the man page: man 2 ppoll.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 272,
+      "name": "unshare",
+      "summary": "Linux system call unshare. See the man page: man 2 unshare.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 273,
+      "name": "set_robust_list",
+      "summary": "Linux system call set_robust_list. See the man page: man 2 set_robust_list.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 274,
+      "name": "get_robust_list",
+      "summary": "Linux system call get_robust_list. See the man page: man 2 get_robust_list.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 275,
+      "name": "splice",
+      "summary": "Linux system call splice. See the man page: man 2 splice.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 276,
+      "name": "tee",
+      "summary": "Linux system call tee. See the man page: man 2 tee.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 277,
+      "name": "sync_file_range",
+      "summary": "Linux system call sync_file_range. See the man page: man 2 sync_file_range.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 278,
+      "name": "vmsplice",
+      "summary": "Linux system call vmsplice. See the man page: man 2 vmsplice.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 279,
+      "name": "move_pages",
+      "summary": "Linux system call move_pages. See the man page: man 2 move_pages.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 280,
+      "name": "utimensat",
+      "summary": "Linux system call utimensat. See the man page: man 2 utimensat.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 281,
+      "name": "epoll_pwait",
+      "summary": "Linux system call epoll_pwait. See the man page: man 2 epoll_pwait.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 282,
+      "name": "signalfd",
+      "summary": "Linux system call signalfd. See the man page: man 2 signalfd.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 283,
+      "name": "timerfd_create",
+      "summary": "Linux system call timerfd_create. See the man page: man 2 timerfd_create.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 284,
+      "name": "eventfd",
+      "summary": "Linux system call eventfd. See the man page: man 2 eventfd.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 285,
+      "name": "fallocate",
+      "summary": "Linux system call fallocate. See the man page: man 2 fallocate.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 286,
+      "name": "timerfd_settime",
+      "summary": "Linux system call timerfd_settime. See the man page: man 2 timerfd_settime.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 287,
+      "name": "timerfd_gettime",
+      "summary": "Linux system call timerfd_gettime. See the man page: man 2 timerfd_gettime.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 288,
+      "name": "accept4",
+      "summary": "Linux system call accept4. See the man page: man 2 accept4.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 289,
+      "name": "signalfd4",
+      "summary": "Linux system call signalfd4. See the man page: man 2 signalfd4.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 290,
+      "name": "eventfd2",
+      "summary": "Linux system call eventfd2. See the man page: man 2 eventfd2.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 291,
+      "name": "epoll_create1",
+      "summary": "Linux system call epoll_create1. See the man page: man 2 epoll_create1.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 292,
+      "name": "dup3",
+      "summary": "Linux system call dup3. See the man page: man 2 dup3.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 293,
+      "name": "pipe2",
+      "summary": "Linux system call pipe2. See the man page: man 2 pipe2.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 294,
+      "name": "inotify_init1",
+      "summary": "Linux system call inotify_init1. See the man page: man 2 inotify_init1.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 295,
+      "name": "preadv",
+      "summary": "Linux system call preadv. See the man page: man 2 preadv.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 296,
+      "name": "pwritev",
+      "summary": "Linux system call pwritev. See the man page: man 2 pwritev.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 297,
+      "name": "rt_tgsigqueueinfo",
+      "summary": "Linux system call rt_tgsigqueueinfo. See the man page: man 2 rt_tgsigqueueinfo.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 298,
+      "name": "perf_event_open",
+      "summary": "Linux system call perf_event_open. See the man page: man 2 perf_event_open.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 299,
+      "name": "recvmmsg",
+      "summary": "Linux system call recvmmsg. See the man page: man 2 recvmmsg.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 300,
+      "name": "fanotify_init",
+      "summary": "Linux system call fanotify_init. See the man page: man 2 fanotify_init.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 301,
+      "name": "fanotify_mark",
+      "summary": "Linux system call fanotify_mark. See the man page: man 2 fanotify_mark.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 302,
+      "name": "prlimit64",
+      "summary": "Linux system call prlimit64. See the man page: man 2 prlimit64.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 303,
+      "name": "name_to_handle_at",
+      "summary": "Linux system call name_to_handle_at. See the man page: man 2 name_to_handle_at.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 304,
+      "name": "open_by_handle_at",
+      "summary": "Linux system call open_by_handle_at. See the man page: man 2 open_by_handle_at.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 305,
+      "name": "clock_adjtime",
+      "summary": "Linux system call clock_adjtime. See the man page: man 2 clock_adjtime.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 306,
+      "name": "syncfs",
+      "summary": "Linux system call syncfs. See the man page: man 2 syncfs.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 307,
+      "name": "sendmmsg",
+      "summary": "Linux system call sendmmsg. See the man page: man 2 sendmmsg.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 308,
+      "name": "setns",
+      "summary": "Linux system call setns. See the man page: man 2 setns.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 309,
+      "name": "getcpu",
+      "summary": "Linux system call getcpu. See the man page: man 2 getcpu.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 310,
+      "name": "process_vm_readv",
+      "summary": "Linux system call process_vm_readv. See the man page: man 2 process_vm_readv.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 311,
+      "name": "process_vm_writev",
+      "summary": "Linux system call process_vm_writev. See the man page: man 2 process_vm_writev.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 312,
+      "name": "kcmp",
+      "summary": "Linux system call kcmp. See the man page: man 2 kcmp.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 313,
+      "name": "finit_module",
+      "summary": "Linux system call finit_module. See the man page: man 2 finit_module.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 314,
+      "name": "sched_setattr",
+      "summary": "Linux system call sched_setattr. See the man page: man 2 sched_setattr.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 315,
+      "name": "sched_getattr",
+      "summary": "Linux system call sched_getattr. See the man page: man 2 sched_getattr.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 316,
+      "name": "renameat2",
+      "summary": "Linux system call renameat2. See the man page: man 2 renameat2.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 317,
+      "name": "seccomp",
+      "summary": "Linux system call seccomp. See the man page: man 2 seccomp.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 318,
+      "name": "getrandom",
+      "summary": "Obtain random bytes from the kernel.",
+      "signature": "ssize_t getrandom(void *buf, size_t buflen, unsigned int flags)",
+      "group": "system",
+      "args": [
+        {
+          "register": "rdi",
+          "name": "buf",
+          "type": "void *",
+          "description": "buffer receiving the random bytes"
+        },
+        {
+          "register": "rsi",
+          "name": "buflen",
+          "type": "size_t",
+          "description": "number of bytes"
+        },
+        {
+          "register": "rdx",
+          "name": "flags",
+          "type": "unsigned int",
+          "description": "GRND_NONBLOCK 1, GRND_RANDOM 2"
+        }
+      ],
+      "returns": "The number of bytes placed in buf, or a negative errno.",
+      "errors": [
+        "-EAGAIN: the entropy pool is not ready and GRND_NONBLOCK was set",
+        "-EINTR: interrupted by a signal",
+        "-EFAULT: buf is invalid"
+      ],
+      "example": null,
+      "detailed": true
+    },
+    {
+      "number": 319,
+      "name": "memfd_create",
+      "summary": "Linux system call memfd_create. See the man page: man 2 memfd_create.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 320,
+      "name": "kexec_file_load",
+      "summary": "Linux system call kexec_file_load. See the man page: man 2 kexec_file_load.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 321,
+      "name": "bpf",
+      "summary": "Linux system call bpf. See the man page: man 2 bpf.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 322,
+      "name": "execveat",
+      "summary": "Linux system call execveat. See the man page: man 2 execveat.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 323,
+      "name": "userfaultfd",
+      "summary": "Linux system call userfaultfd. See the man page: man 2 userfaultfd.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 324,
+      "name": "membarrier",
+      "summary": "Linux system call membarrier. See the man page: man 2 membarrier.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 325,
+      "name": "mlock2",
+      "summary": "Linux system call mlock2. See the man page: man 2 mlock2.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 326,
+      "name": "copy_file_range",
+      "summary": "Linux system call copy_file_range. See the man page: man 2 copy_file_range.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 327,
+      "name": "preadv2",
+      "summary": "Linux system call preadv2. See the man page: man 2 preadv2.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 328,
+      "name": "pwritev2",
+      "summary": "Linux system call pwritev2. See the man page: man 2 pwritev2.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 329,
+      "name": "pkey_mprotect",
+      "summary": "Linux system call pkey_mprotect. See the man page: man 2 pkey_mprotect.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 330,
+      "name": "pkey_alloc",
+      "summary": "Linux system call pkey_alloc. See the man page: man 2 pkey_alloc.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 331,
+      "name": "pkey_free",
+      "summary": "Linux system call pkey_free. See the man page: man 2 pkey_free.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 332,
+      "name": "statx",
+      "summary": "Linux system call statx. See the man page: man 2 statx.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 333,
+      "name": "io_pgetevents",
+      "summary": "Linux system call io_pgetevents. See the man page: man 2 io_pgetevents.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 334,
+      "name": "rseq",
+      "summary": "Linux system call rseq. See the man page: man 2 rseq.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 335,
+      "name": "uretprobe",
+      "summary": "Linux system call uretprobe. See the man page: man 2 uretprobe.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 336,
+      "name": "uprobe",
+      "summary": "Linux system call uprobe. See the man page: man 2 uprobe.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 424,
+      "name": "pidfd_send_signal",
+      "summary": "Linux system call pidfd_send_signal. See the man page: man 2 pidfd_send_signal.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 425,
+      "name": "io_uring_setup",
+      "summary": "Linux system call io_uring_setup. See the man page: man 2 io_uring_setup.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 426,
+      "name": "io_uring_enter",
+      "summary": "Linux system call io_uring_enter. See the man page: man 2 io_uring_enter.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 427,
+      "name": "io_uring_register",
+      "summary": "Linux system call io_uring_register. See the man page: man 2 io_uring_register.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 428,
+      "name": "open_tree",
+      "summary": "Linux system call open_tree. See the man page: man 2 open_tree.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 429,
+      "name": "move_mount",
+      "summary": "Linux system call move_mount. See the man page: man 2 move_mount.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 430,
+      "name": "fsopen",
+      "summary": "Linux system call fsopen. See the man page: man 2 fsopen.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 431,
+      "name": "fsconfig",
+      "summary": "Linux system call fsconfig. See the man page: man 2 fsconfig.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 432,
+      "name": "fsmount",
+      "summary": "Linux system call fsmount. See the man page: man 2 fsmount.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 433,
+      "name": "fspick",
+      "summary": "Linux system call fspick. See the man page: man 2 fspick.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 434,
+      "name": "pidfd_open",
+      "summary": "Linux system call pidfd_open. See the man page: man 2 pidfd_open.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 435,
+      "name": "clone3",
+      "summary": "Linux system call clone3. See the man page: man 2 clone3.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 436,
+      "name": "close_range",
+      "summary": "Linux system call close_range. See the man page: man 2 close_range.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 437,
+      "name": "openat2",
+      "summary": "Linux system call openat2. See the man page: man 2 openat2.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 438,
+      "name": "pidfd_getfd",
+      "summary": "Linux system call pidfd_getfd. See the man page: man 2 pidfd_getfd.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 439,
+      "name": "faccessat2",
+      "summary": "Linux system call faccessat2. See the man page: man 2 faccessat2.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 440,
+      "name": "process_madvise",
+      "summary": "Linux system call process_madvise. See the man page: man 2 process_madvise.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 441,
+      "name": "epoll_pwait2",
+      "summary": "Linux system call epoll_pwait2. See the man page: man 2 epoll_pwait2.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 442,
+      "name": "mount_setattr",
+      "summary": "Linux system call mount_setattr. See the man page: man 2 mount_setattr.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 443,
+      "name": "quotactl_fd",
+      "summary": "Linux system call quotactl_fd. See the man page: man 2 quotactl_fd.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 444,
+      "name": "landlock_create_ruleset",
+      "summary": "Linux system call landlock_create_ruleset. See the man page: man 2 landlock_create_ruleset.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 445,
+      "name": "landlock_add_rule",
+      "summary": "Linux system call landlock_add_rule. See the man page: man 2 landlock_add_rule.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 446,
+      "name": "landlock_restrict_self",
+      "summary": "Linux system call landlock_restrict_self. See the man page: man 2 landlock_restrict_self.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 447,
+      "name": "memfd_secret",
+      "summary": "Linux system call memfd_secret. See the man page: man 2 memfd_secret.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 448,
+      "name": "process_mrelease",
+      "summary": "Linux system call process_mrelease. See the man page: man 2 process_mrelease.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 449,
+      "name": "futex_waitv",
+      "summary": "Linux system call futex_waitv. See the man page: man 2 futex_waitv.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 450,
+      "name": "set_mempolicy_home_node",
+      "summary": "Linux system call set_mempolicy_home_node. See the man page: man 2 set_mempolicy_home_node.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 451,
+      "name": "cachestat",
+      "summary": "Linux system call cachestat. See the man page: man 2 cachestat.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 452,
+      "name": "fchmodat2",
+      "summary": "Linux system call fchmodat2. See the man page: man 2 fchmodat2.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 453,
+      "name": "map_shadow_stack",
+      "summary": "Linux system call map_shadow_stack. See the man page: man 2 map_shadow_stack.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 454,
+      "name": "futex_wake",
+      "summary": "Linux system call futex_wake. See the man page: man 2 futex_wake.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 455,
+      "name": "futex_wait",
+      "summary": "Linux system call futex_wait. See the man page: man 2 futex_wait.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 456,
+      "name": "futex_requeue",
+      "summary": "Linux system call futex_requeue. See the man page: man 2 futex_requeue.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 457,
+      "name": "statmount",
+      "summary": "Linux system call statmount. See the man page: man 2 statmount.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 458,
+      "name": "listmount",
+      "summary": "Linux system call listmount. See the man page: man 2 listmount.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 459,
+      "name": "lsm_get_self_attr",
+      "summary": "Linux system call lsm_get_self_attr. See the man page: man 2 lsm_get_self_attr.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 460,
+      "name": "lsm_set_self_attr",
+      "summary": "Linux system call lsm_set_self_attr. See the man page: man 2 lsm_set_self_attr.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 461,
+      "name": "lsm_list_modules",
+      "summary": "Linux system call lsm_list_modules. See the man page: man 2 lsm_list_modules.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 462,
+      "name": "mseal",
+      "summary": "Linux system call mseal. See the man page: man 2 mseal.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 463,
+      "name": "setxattrat",
+      "summary": "Linux system call setxattrat. See the man page: man 2 setxattrat.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 464,
+      "name": "getxattrat",
+      "summary": "Linux system call getxattrat. See the man page: man 2 getxattrat.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 465,
+      "name": "listxattrat",
+      "summary": "Linux system call listxattrat. See the man page: man 2 listxattrat.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 466,
+      "name": "removexattrat",
+      "summary": "Linux system call removexattrat. See the man page: man 2 removexattrat.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 467,
+      "name": "open_tree_attr",
+      "summary": "Linux system call open_tree_attr. See the man page: man 2 open_tree_attr.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 468,
+      "name": "file_getattr",
+      "summary": "Linux system call file_getattr. See the man page: man 2 file_getattr.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 469,
+      "name": "file_setattr",
+      "summary": "Linux system call file_setattr. See the man page: man 2 file_setattr.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 470,
+      "name": "listns",
+      "summary": "Linux system call listns. See the man page: man 2 listns.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    },
+    {
+      "number": 471,
+      "name": "rseq_slice_yield",
+      "summary": "Linux system call rseq_slice_yield. See the man page: man 2 rseq_slice_yield.",
+      "signature": null,
+      "group": "misc",
+      "args": [],
+      "returns": null,
+      "errors": [],
+      "example": null,
+      "detailed": false
+    }
+  ]
+}
