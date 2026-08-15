@@ -8,11 +8,15 @@
 //! have to reach into the debugger to get them.
 
 pub mod conditions;
+pub mod database;
+pub mod explain;
 pub mod flags;
 pub mod mnemonics;
 pub mod registers;
 
 pub use conditions::{satisfied_conditions, ConditionCode};
+pub use database::{Database, InstructionInfo};
+pub use explain::{explain_line, Explanation, Statement};
 pub use flags::{Flag, Flags};
 pub use mnemonics::is_mnemonic;
 pub use registers::{AbiRole, Register, RegisterWidth, SyscallRole};
