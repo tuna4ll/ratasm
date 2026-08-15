@@ -9,6 +9,7 @@
 //! - [`debugger`] speaks GDB/MI and never touches the terminal.
 //! - [`editor`] is pure text state with no rendering dependency.
 //! - [`instruction`] holds static ISA knowledge shared by every panel.
+//! - [`syscall`] embeds the Linux system call table taken from the kernel headers.
 //! - [`process`] runs external tools without a shell and without zombies.
 //! - [`logging`] redirects diagnostics to a file so the TUI keeps stdout.
 //!
@@ -24,4 +25,5 @@ pub mod instruction;
 pub mod logging;
 pub mod process;
 pub mod project;
+pub mod syscall;
 pub mod ui;
