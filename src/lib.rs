@@ -7,6 +7,7 @@
 //!   application state.
 //! - [`assembler`] drives the toolchain and parses what it says.
 //! - [`debugger`] speaks GDB/MI and never touches the terminal.
+//! - [`disassembler`] decodes machine code without needing a debugger.
 //! - [`editor`] is pure text state with no rendering dependency.
 //! - [`instruction`] holds static ISA knowledge shared by every panel.
 //! - [`syscall`] embeds the Linux system call table taken from the kernel headers.
@@ -20,6 +21,7 @@
 
 pub mod assembler;
 pub mod debugger;
+pub mod disassembler;
 pub mod editor;
 pub mod instruction;
 pub mod logging;
