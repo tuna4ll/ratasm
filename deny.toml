@@ -1,0 +1,42 @@
+# cargo-deny configuration.
+#
+#   cargo install cargo-deny
+#   cargo deny check
+
+[graph]
+targets = [{ triple = "x86_64-unknown-linux-gnu" }, { triple = "x86_64-unknown-linux-musl" }]
+all-features = true
+
+[advisories]
+version = 2
+yanked = "deny"
+ignore = []
+
+[licenses]
+version = 2
+# Permissive licences only, so that redistributing a built binary imposes no
+# obligations a user would be surprised by.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+    "Zlib",
+    "MPL-2.0",
+]
+confidence-threshold = 0.9
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+# A crate pulled in twice at different versions bloats the binary; warn rather
+# than deny, because it is usually a transitive dependency we cannot fix.
+skip = []
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
