@@ -1,0 +1,139 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# A new push to a branch makes the previous run's result irrelevant.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  # Deliberately no global RUSTFLAGS: "-D warnings" there would also apply to
+  # dependency crates, so an upstream warning would fail our build. Warnings in
+  # this crate are caught by the clippy step instead.
+
+jobs:
+  check:
+    name: Format and lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: cargo fmt --check
+        run: cargo fmt --all -- --check
+
+      - name: cargo clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+  test:
+    name: Test (${{ matrix.rust }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Stable is what users build with; the MSRV run catches accidental use
+        # of newer language features.
+        rust: [stable, "1.82"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust ${{ matrix.rust }}
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.rust }}
+
+      - uses: Swatinem/rust-cache@v2
+
+      # The build pipeline and debugger tests shell out to these. Without them
+      # those tests skip themselves, which would quietly reduce coverage.
+      - name: Install the assembly toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y nasm binutils gdb
+
+      - name: Confirm the toolchain is present
+        run: |
+          nasm -v
+          ld --version | head -1
+          gdb --version | head -1
+
+      - name: cargo test
+        run: cargo test --all-features --verbose
+
+      - name: cargo doc
+        run: cargo doc --no-deps --all-features
+        env:
+          RUSTDOCFLAGS: -D warnings
+
+  build:
+    name: Build release binary
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install musl tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools
+
+      - name: Build
+        run: cargo build --release --locked --target x86_64-unknown-linux-musl
+
+      - name: Confirm the binary starts
+        run: ./target/x86_64-unknown-linux-musl/release/ratasm --version
+
+  installer:
+    name: Check the install script
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: shellcheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+          shellcheck install.sh
+
+      - name: Install a synthetic release through the script
+        run: |
+          set -eu
+          mkdir -p /tmp/rel /tmp/bin
+          printf '#!/bin/sh\necho ok\n' > /tmp/rel/ratasm
+          chmod +x /tmp/rel/ratasm
+          tar -czf /tmp/rel/ratasm-x86_64-unknown-linux-musl.tar.gz -C /tmp/rel ratasm
+          ( cd /tmp/rel && sha256sum ratasm-x86_64-unknown-linux-musl.tar.gz \
+              > ratasm-x86_64-unknown-linux-musl.tar.gz.sha256 )
+          RATASM_BASE_URL="file:///tmp/rel" RATASM_INSTALL_DIR=/tmp/bin sh install.sh
+          test -x /tmp/bin/ratasm
+          /tmp/bin/ratasm
+
+      - name: Reject a tampered archive
+        run: |
+          set -eu
+          echo "0000000000000000000000000000000000000000000000000000000000000000  ratasm-x86_64-unknown-linux-musl.tar.gz" \
+            > /tmp/rel/ratasm-x86_64-unknown-linux-musl.tar.gz.sha256
+          rm -rf /tmp/bin2
+          if RATASM_BASE_URL="file:///tmp/rel" RATASM_INSTALL_DIR=/tmp/bin2 sh install.sh; then
+            echo "installer accepted a bad checksum" >&2
+            exit 1
+          fi
+          test ! -e /tmp/bin2/ratasm
