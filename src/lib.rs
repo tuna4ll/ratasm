@@ -5,6 +5,7 @@
 //!
 //! - [`ui`] owns terminal lifecycle, layout and widgets and never mutates
 //!   application state.
+//! - [`command`] names every action; nothing bypasses it.
 //! - [`assembler`] drives the toolchain and parses what it says.
 //! - [`debugger`] speaks GDB/MI and never touches the terminal.
 //! - [`disassembler`] decodes machine code without needing a debugger.
@@ -19,7 +20,10 @@
 
 #![warn(missing_docs)]
 
+pub mod app;
 pub mod assembler;
+pub mod command;
+pub mod config;
 pub mod debugger;
 pub mod disassembler;
 pub mod editor;
