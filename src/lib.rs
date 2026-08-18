@@ -27,6 +27,7 @@ pub mod config;
 pub mod debugger;
 pub mod disassembler;
 pub mod editor;
+pub mod event;
 pub mod instruction;
 pub mod logging;
 pub mod process;
