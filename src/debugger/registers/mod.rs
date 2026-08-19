@@ -298,6 +298,15 @@ pub fn parse_register_values(names: &Value, values: &Value) -> BTreeMap<String, 
         let Some(register) = registers::lookup(name) else {
             continue;
         };
+        // GDB publishes the narrow pseudo-registers too — `esp` and `eax` sit
+        // further down the same list as `rsp` and `rax`. They resolve to the
+        // same architectural register, so accepting them would overwrite the
+        // full 64-bit value with its low half: RSP 0x7fffffffdf30 would become
+        // 0xffffdf30, and every stack read would fail. Only the canonical
+        // 64-bit name is stored; the narrow views are derived on demand.
+        if name.trim().to_ascii_lowercase() != register.name {
+            continue;
+        }
         let Some(raw) = entry.get_str("value") else {
             continue;
         };
@@ -529,6 +538,49 @@ mod tests {
         assert_eq!(table.get("rax"), Some(&0x3c));
         assert_eq!(table.get("rcx"), Some(&0xcccc));
         assert_eq!(table.get("rbx"), None, "no value was reported for rbx");
+    }
+
+    #[test]
+    fn narrow_pseudo_registers_do_not_overwrite_the_full_value() {
+        // Reproduces a real failure: GDB lists esp after rsp, and taking both
+        // left RSP holding only its low 32 bits, breaking every stack read.
+        let names = Value::List(vec![
+            Value::String("rsp".to_owned()),
+            Value::String("esp".to_owned()),
+        ]);
+        let values = Value::List(vec![
+            Value::Tuple(vec![
+                ("number".to_owned(), Value::String("0".to_owned())),
+                (
+                    "value".to_owned(),
+                    Value::String("0x7fffffffdf30".to_owned()),
+                ),
+            ]),
+            Value::Tuple(vec![
+                ("number".to_owned(), Value::String("1".to_owned())),
+                ("value".to_owned(), Value::String("0xffffdf30".to_owned())),
+            ]),
+        ]);
+
+        let table = parse_register_values(&names, &values);
+        assert_eq!(
+            table.get("rsp"),
+            Some(&0x7fff_ffff_df30),
+            "the 64-bit value must survive the 32-bit alias"
+        );
+        assert_eq!(table.len(), 1);
+    }
+
+    #[test]
+    fn the_narrow_view_is_still_derivable_from_the_full_value() {
+        let mut file = RegisterFile::new();
+        file.update(
+            [("rsp".to_owned(), 0x7fff_ffff_df30u64)]
+                .into_iter()
+                .collect(),
+        );
+        assert_eq!(file.value_of("rsp"), Some(0x7fff_ffff_df30));
+        assert_eq!(file.value_of("esp"), Some(0xffff_df30));
     }
 
     #[test]
