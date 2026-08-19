@@ -199,6 +199,20 @@ pub fn break_insert_at_address(address: u64) -> Command {
     Command::new("-break-insert").arg(format!("*0x{address:x}"))
 }
 
+/// Sets a breakpoint that deletes itself the first time it is hit.
+///
+/// Used to stop at the entry point when a session starts.
+pub fn break_insert_temporary(location: &str) -> Command {
+    Command::new("-break-insert").arg("-t").arg(location)
+}
+
+/// Sets a self-deleting breakpoint at a raw address.
+pub fn break_insert_temporary_at_address(address: u64) -> Command {
+    Command::new("-break-insert")
+        .arg("-t")
+        .arg(format!("*0x{address:x}"))
+}
+
 /// Removes a breakpoint by number.
 pub fn break_delete(number: u32) -> Command {
     Command::new("-break-delete").arg(number.to_string())
@@ -381,6 +395,20 @@ mod tests {
         assert_eq!(break_enable(1).render(5), "5-break-enable 1");
         assert_eq!(break_disable(1).render(6), "6-break-disable 1");
         assert_eq!(break_list().render(7), "7-break-list");
+    }
+
+    #[test]
+    fn a_temporary_breakpoint_carries_the_delete_flag() {
+        // How a session stops at the entry point: -exec-run --start looks for
+        // `main` and runs a _start-only program to completion instead.
+        assert_eq!(
+            break_insert_temporary("_start").render(1),
+            "1-break-insert -t _start"
+        );
+        assert_eq!(
+            break_insert_temporary_at_address(0x401000).render(2),
+            "2-break-insert -t *0x401000"
+        );
     }
 
     #[test]
