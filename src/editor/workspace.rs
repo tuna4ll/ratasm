@@ -108,6 +108,19 @@ pub fn write_file_atomically(path: &Path, contents: &str) -> Result<(), FileErro
     Ok(())
 }
 
+/// Renders a path for a message, preferring the file name when it is long.
+///
+/// A full temporary path in a status bar pushes out the message itself.
+pub fn display_path(path: &Path) -> String {
+    let full = path.display().to_string();
+    if full.chars().count() <= 60 {
+        return full;
+    }
+    path.file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or(full)
+}
+
 /// The open documents and which one is active.
 ///
 /// Always holds at least one document, so "the active document" is never a
