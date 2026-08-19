@@ -249,19 +249,45 @@ fn doctor() -> ExitCode {
 
 /// Opens the terminal interface.
 async fn open_interface(path: Option<&Path>) -> Result<ExitCode> {
-    // The guard restores the terminal when it drops, whichever way this
-    // function returns.
-    let _guard = ratasm::ui::TerminalGuard::new()
+    let settings = ratasm::config::Settings::load_default().unwrap_or_else(|error| {
+        // A broken settings file must not stop the editor opening; the
+        // problem is reported once the status bar exists.
+        eprintln!("ratasm: {error}");
+        ratasm::config::Settings::default()
+    });
+
+    let project = match path {
+        Some(path) => Project::for_file_or_discover(path),
+        None => Project::discover(Path::new("."))
+            .unwrap_or_else(|_| Project::for_file(Path::new("main.asm"))),
+    };
+
+    let mut app =
+        ratasm::app::App::new(project, settings).context("cannot load the built-in databases")?;
+
+    // Report key binding problems where the user will see them.
+    let (keymap, errors) = app.settings.keymap();
+    app.keymap = keymap;
+    if let Some(error) = errors.first() {
+        app.status = ratasm::app::Status::warning(error.to_string());
+    }
+
+    match path {
+        Some(path) if path.is_file() => ratasm::app::run::open_initial_file(&mut app, path),
+        _ => ratasm::app::run::open_project_entry(&mut app),
+    }
+    app.workspace
+        .active_mut()
+        .set_indent_width(app.settings.indent_width());
+
+    // The guard restores the terminal on every path out, including a panic.
+    let mut guard = ratasm::ui::TerminalGuard::new()
         .context("cannot set up the terminal; is this running in a real terminal?")?;
 
-    let _project = path.map(Project::for_file_or_discover);
-
-    // The interface itself is still being assembled; until it lands, drop the
-    // guard immediately and say so rather than presenting an empty screen.
-    drop(_guard);
-    eprintln!("ratasm: the interactive interface is not finished yet.");
-    eprintln!("Meanwhile: `ratasm build`, `ratasm run`, `ratasm new` and `ratasm doctor` work.");
-    Ok(ExitCode::FAILURE)
+    let result = ratasm::app::run(app, guard.terminal_mut()).await;
+    drop(guard);
+    result?;
+    Ok(ExitCode::SUCCESS)
 }
 
 #[cfg(test)]
