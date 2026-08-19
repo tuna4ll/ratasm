@@ -38,5 +38,24 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Linux x86-64 syscall database generated from the kernel headers.
 - Themes for dark, light, sixteen-colour and colour-blind-safe terminals, with
   ASCII-safe glyphs for terminals without Unicode.
+- Terminal interface: editor, register, flag, stack, memory, disassembly,
+  breakpoint, output, explanation, syscall and explorer panels, with a
+  responsive layout that keeps the focused panel visible at any size.
+- Command palette with fuzzy search, and key bindings whose conflicts are
+  reported rather than silently shadowing one another.
+- Command-line interface: `new`, `build`, `run` and `doctor` work without a
+  terminal, so the toolchain composes with Make and CI.
+
+### Fixed
+
+- Register values no longer truncate to 32 bits. GDB lists the narrow
+  pseudo-registers (`esp`, `eax`) alongside the full ones, and taking both left
+  `RSP` holding only its low half, which broke every stack and memory read.
+- A debug session stops at the entry point of a `_start`-only program.
+  `-exec-run --start` breaks on `main`, which assembly programs do not have, so
+  the program ran to completion instead of stopping.
+- The disassembler resynchronises one byte after an undecodable byte, matching
+  `objdump`. Letting the decoder consume the following opcode's escape byte
+  discarded the next valid instruction.
 
 [Unreleased]: https://github.com/tuna4ll/ratasm/compare/main...HEAD

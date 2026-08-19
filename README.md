@@ -54,11 +54,12 @@ This is an honest account of what works today.
 | GDB/MI transport, breakpoints, stepping, registers, memory | Working |
 | Disassembler: ELF inspection and x86-64 decoding | Working |
 | Instruction explainer, syscall database, flag analysis | Working |
-| Terminal UI, command palette, learning mode, scratchpad | In progress |
+| Terminal UI: panels, responsive layout, command palette | Working |
+| Learning mode, scratchpad, clipboard | Not yet |
 
-The library and its 630+ tests are complete for everything marked *working*;
-the panels that present them are being assembled. Until the UI lands, the
-crate is usable as a library.
+Everything marked *working* is covered by the test suite — 860 tests, including
+ones that assemble and run real programs and drive a real GDB. The two
+unfinished features say so when you reach for them rather than doing nothing.
 
 ## Installing
 
