@@ -15,7 +15,7 @@
 //! of sync with the text.
 //!
 //! The buffer knows nothing about cursors, selections or rendering. Those live
-//! in [`crate::editor::Editor`], which keeps this type trivially testable.
+//! in [`crate::editor::Document`], which keeps this type trivially testable.
 
 use std::path::{Path, PathBuf};
 
