@@ -33,8 +33,9 @@ While learning, `F7` is usually what you want.
 | <kbd>Ctrl</kbd>+<kbd>F</kbd> | Search |
 | <kbd>Ctrl</kbd>+<kbd>G</kbd> | Go to line, or to an address |
 | <kbd>Ctrl</kbd>+<kbd>K</kbd> | Syscall finder |
-| <kbd>Tab</kbd> | Next panel |
-| <kbd>Shift</kbd>+<kbd>Tab</kbd> | Previous panel |
+| <kbd>Tab</kbd> | Next panel (indents inside the editor) |
+| <kbd>Shift</kbd>+<kbd>Tab</kbd> | Previous panel (dedents inside the editor) |
+| <kbd>Alt</kbd>+<kbd>1</kbd>…<kbd>9</kbd> | Focus a panel directly |
 
 ### Editing
 
@@ -45,6 +46,11 @@ While learning, `F7` is usually what you want.
 | <kbd>Ctrl</kbd>+<kbd>A</kbd> | Select all |
 | <kbd>Home</kbd> | First non-blank character, then column zero |
 | <kbd>Ctrl</kbd>+<kbd>←</kbd> / <kbd>→</kbd> | Word left / right |
+
+Inside the editor, <kbd>Tab</kbd> indents rather than changing panel — an
+editor that cannot insert an indent is not much of an editor. To leave the
+editor by keyboard use <kbd>Alt</kbd> plus a digit, which focuses a panel
+directly from anywhere.
 
 <kbd>Home</kbd> is deliberately two-stage: pressing it once goes to the start of
 the code, pressing it again to the start of the line. Indented assembly makes

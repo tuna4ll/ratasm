@@ -165,7 +165,8 @@ panels; <kbd>Tab</kbd> cycles between them.
 | <kbd>Ctrl</kbd>+<kbd>G</kbd> | Go to line or address |
 | <kbd>Ctrl</kbd>+<kbd>K</kbd> | Syscall finder |
 | <kbd>Ctrl</kbd>+<kbd>Q</kbd> | Quit |
-| <kbd>Tab</kbd> / <kbd>Shift</kbd>+<kbd>Tab</kbd> | Next / previous panel |
+| <kbd>Tab</kbd> / <kbd>Shift</kbd>+<kbd>Tab</kbd> | Next / previous panel (indent / dedent in the editor) |
+| <kbd>Alt</kbd>+<kbd>1</kbd>…<kbd>9</kbd> | Focus a panel directly |
 
 All of them are configurable, and conflicting bindings are reported at start-up
 rather than silently shadowing one another. See
