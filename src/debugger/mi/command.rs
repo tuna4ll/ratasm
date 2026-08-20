@@ -177,6 +177,48 @@ pub fn exec_next() -> Command {
     Command::new("-exec-next")
 }
 
+/// Executes one machine instruction backwards.
+pub fn exec_step_instruction_reverse() -> Command {
+    Command::new("-exec-step-instruction").arg("--reverse")
+}
+
+/// Executes one machine instruction backwards, over calls.
+pub fn exec_next_instruction_reverse() -> Command {
+    Command::new("-exec-next-instruction").arg("--reverse")
+}
+
+/// Executes one source line backwards.
+pub fn exec_step_reverse() -> Command {
+    Command::new("-exec-step").arg("--reverse")
+}
+
+/// Runs backwards until the previous breakpoint or the start of the recording.
+pub fn exec_continue_reverse() -> Command {
+    Command::new("-exec-continue").arg("--reverse")
+}
+
+/// Runs an ordinary GDB console command.
+///
+/// The escape hatch for the handful of things the machine interface has no
+/// command of its own for. Used sparingly: the reply comes back as console
+/// text rather than structured data, so anything with a real MI command uses
+/// that instead.
+pub fn console(command: &str) -> Command {
+    Command::new("-interpreter-exec")
+        .arg("console")
+        .arg(command)
+}
+
+/// Starts recording execution so it can be replayed backwards.
+///
+/// There is no MI command for this, so it goes through the console. Recording
+/// makes every instruction cost more, which is invisible for the small
+/// programs ratasm targets and would not be for a large one — hence the
+/// setting that turns it off.
+pub fn record_full() -> Command {
+    console("record full")
+}
+
 /// Runs until the current function returns.
 pub fn exec_finish() -> Command {
     Command::new("-exec-finish")
@@ -456,6 +498,38 @@ mod tests {
         assert_eq!(exec_next().render(6), "6-exec-next");
         assert_eq!(exec_finish().render(7), "7-exec-finish");
         assert_eq!(exec_interrupt().render(8), "8-exec-interrupt --all");
+    }
+
+    #[test]
+    fn reverse_execution_commands_carry_the_reverse_flag() {
+        assert_eq!(
+            exec_step_instruction_reverse().render(1),
+            "1-exec-step-instruction --reverse"
+        );
+        assert_eq!(
+            exec_next_instruction_reverse().render(2),
+            "2-exec-next-instruction --reverse"
+        );
+        assert_eq!(exec_step_reverse().render(3), "3-exec-step --reverse");
+        assert_eq!(
+            exec_continue_reverse().render(4),
+            "4-exec-continue --reverse"
+        );
+    }
+
+    #[test]
+    fn recording_goes_through_the_console_because_mi_has_no_command_for_it() {
+        assert_eq!(
+            record_full().render(1),
+            "1-interpreter-exec console \"record full\""
+        );
+    }
+
+    #[test]
+    fn a_console_command_with_spaces_is_quoted_as_one_argument() {
+        // Otherwise GDB would read the words as separate arguments.
+        let rendered = console("set confirm off").render(1);
+        assert_eq!(rendered, "1-interpreter-exec console \"set confirm off\"");
     }
 
     #[test]
