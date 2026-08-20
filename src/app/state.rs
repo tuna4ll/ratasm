@@ -176,6 +176,10 @@ pub struct App {
     pub memory_address: Option<u64>,
     /// Stack contents around the stack pointer.
     pub stack: MemoryBlock,
+    /// The call stack at the last stop, innermost frame first.
+    pub frames: Vec<crate::debugger::frames::Frame>,
+    /// Which frame the call stack panel highlights.
+    pub frame_selected: usize,
     /// The disassembly on show.
     pub disassembly: Vec<DisassemblyLine>,
     /// Where execution is stopped.
@@ -244,6 +248,8 @@ impl App {
             memory: MemoryBlock::default(),
             memory_address: None,
             stack: MemoryBlock::default(),
+            frames: Vec::new(),
+            frame_selected: 0,
             disassembly: Vec::new(),
             current_address: None,
             current_line: None,

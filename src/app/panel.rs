@@ -19,6 +19,8 @@ pub enum Panel {
     Flags,
     /// Memory around the stack pointer.
     Stack,
+    /// The chain of calls that reached the current instruction.
+    CallStack,
     /// A hex dump of an arbitrary address.
     Memory,
     /// Disassembled machine code.
@@ -41,11 +43,12 @@ impl Panel {
     /// The order follows how the work actually flows: write code, look at the
     /// registers and flags it changed, look at memory, then at the machine
     /// code, then at the supporting references.
-    pub const ALL: [Panel; 11] = [
+    pub const ALL: [Panel; 12] = [
         Panel::Editor,
         Panel::Registers,
         Panel::Flags,
         Panel::Stack,
+        Panel::CallStack,
         Panel::Memory,
         Panel::Disassembly,
         Panel::Breakpoints,
@@ -62,6 +65,7 @@ impl Panel {
             Panel::Registers => "registers",
             Panel::Flags => "flags",
             Panel::Stack => "stack",
+            Panel::CallStack => "call-stack",
             Panel::Memory => "memory",
             Panel::Disassembly => "disassembly",
             Panel::Breakpoints => "breakpoints",
@@ -79,6 +83,7 @@ impl Panel {
             Panel::Registers => "Registers",
             Panel::Flags => "Flags",
             Panel::Stack => "Stack",
+            Panel::CallStack => "Call stack",
             Panel::Memory => "Memory",
             Panel::Disassembly => "Disassembly",
             Panel::Breakpoints => "Breakpoints",
@@ -96,7 +101,7 @@ impl Panel {
     pub const fn needs_debug_session(self) -> bool {
         matches!(
             self,
-            Panel::Registers | Panel::Flags | Panel::Stack | Panel::Memory
+            Panel::Registers | Panel::Flags | Panel::Stack | Panel::CallStack | Panel::Memory
         )
     }
 

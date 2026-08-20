@@ -366,6 +366,7 @@ async fn stop_session(app: &mut App, session: &mut Option<GdbSession>) {
 
     app.registers.clear();
     app.breakpoints.detach();
+    app.frames.clear();
     app.stack = Default::default();
     app.memory = Default::default();
     app.current_address = None;
@@ -408,6 +409,7 @@ async fn handle_stop(app: &mut App, session: &mut Option<GdbSession>, record: &R
         let code = record.exit_code();
         let _ = app.debugger.exited(code);
         app.registers.clear();
+        app.frames.clear();
         app.current_address = None;
         app.current_line = None;
 
@@ -475,6 +477,21 @@ async fn refresh_state(app: &mut App, session: &mut Option<GdbSession>) {
         {
             app.registers.update(parse_register_values(names, values));
         }
+    }
+
+    // The call stack: how execution reached here, as distinct from the bytes
+    // around RSP that the stack memory panel shows.
+    match active.execute(&mi::stack_list_frames()).await {
+        Ok(record) => {
+            app.frames = record
+                .get("stack")
+                .map(crate::debugger::frames::parse_frames)
+                .unwrap_or_default();
+            app.frame_selected = 0;
+        }
+        // GDB cannot always walk the stack — early in _start there is no frame
+        // chain yet. That is normal, not a session failure.
+        Err(_) => app.frames.clear(),
     }
 
     if let Some(rsp) = app.registers.rsp() {
@@ -772,6 +789,51 @@ mod tests {
         )
         .await;
         assert_eq!(app.status.severity, crate::app::Severity::Error);
+    }
+
+    #[tokio::test]
+    async fn the_call_stack_shows_the_chain_of_calls() {
+        // The panel exists to answer "how did I get here?", so the test uses a
+        // program that actually calls into another function.
+        for tool in ["nasm", "ld", "gdb"] {
+            if !crate::process::is_available(Path::new(tool)) {
+                eprintln!("skipping: {tool} not installed");
+                return;
+            }
+        }
+
+        let dir = tempfile::tempdir().expect("temp dir");
+        let mut app = app_for(dir.path());
+        std::fs::write(
+            app.project.entry_path(),
+            "section .text\n    global _start\nhelper:\n    nop\n    ret\n_start:\n    \
+             call helper\n    mov rax, 60\n    xor edi, edi\n    syscall\n",
+        )
+        .expect("write");
+
+        // Break inside the callee so there is a caller above it.
+        app.breakpoints.add_symbol("helper");
+
+        let mut session = None;
+        start_session(&mut app, &mut session).await;
+        assert!(session.is_some(), "session: {}", app.status.text);
+
+        perform(&mut app, &mut session, Effect::DebugContinue).await;
+
+        assert!(
+            app.frames.len() >= 2,
+            "expected a caller above the callee, got {:?}",
+            app.frames.iter().map(|f| f.describe()).collect::<Vec<_>>()
+        );
+        assert_eq!(app.frames[0].function.as_deref(), Some("helper"));
+        assert_eq!(app.frames[1].function.as_deref(), Some("_start"));
+        assert!(app.frames[0].is_innermost());
+
+        perform(&mut app, &mut session, Effect::DebugStop).await;
+        assert!(
+            app.frames.is_empty(),
+            "frames must be cleared with the session"
+        );
     }
 
     #[tokio::test]

@@ -154,6 +154,7 @@ fn wide(body: Rect, document_bar: Rect, status_bar: Rect, focus: Panel) -> Layou
     // at takes it, so all four remain reachable without a tab strip.
     let shared = [
         Panel::Stack,
+        Panel::CallStack,
         Panel::Memory,
         Panel::Syscalls,
         Panel::Explorer,

@@ -95,6 +95,7 @@ pub fn draw_panel(frame: &mut Frame, app: &App, panel: Panel, area: Rect) {
         Panel::Registers => cpu::draw_registers(frame, app, area, focused),
         Panel::Flags => cpu::draw_flags(frame, app, area, focused),
         Panel::Stack => cpu::draw_stack(frame, app, area, focused),
+        Panel::CallStack => code::draw_call_stack(frame, app, area, focused),
         Panel::Memory => cpu::draw_memory(frame, app, area, focused),
         Panel::Disassembly => code::draw_disassembly(frame, app, area, focused),
         Panel::Explain => code::draw_explanation(frame, app, area, focused),

@@ -161,6 +161,73 @@ pub fn draw_explanation(frame: &mut Frame, app: &App, area: Rect, focused: bool)
     );
 }
 
+/// Draws the call stack.
+///
+/// This is the chain of calls, not the stack memory: the panel next door shows
+/// the bytes around `RSP`, and confusing the two is exactly what this panel
+/// exists to prevent.
+pub fn draw_call_stack(frame: &mut Frame, app: &App, area: Rect, focused: bool) {
+    let block = super::panel_block(&app.theme, Panel::CallStack, focused);
+
+    if app.frames.is_empty() {
+        let message = if app.debugger.state().can_inspect() {
+            "No frames reported.\n\nGDB could not walk the stack from here."
+        } else {
+            "No debug session.\n\nPress F12 to start one; the call stack shows how execution \
+             reached the current instruction."
+        };
+        super::draw_placeholder(frame, area, &app.theme, block, message);
+        return;
+    }
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    if inner.width == 0 || inner.height == 0 {
+        return;
+    }
+
+    let theme = &app.theme;
+    let symbols = theme.symbols();
+
+    let lines: Vec<Line> = app
+        .frames
+        .iter()
+        .enumerate()
+        .take(usize::from(inner.height))
+        .map(|(index, stack_frame)| {
+            let selected = index == app.frame_selected && focused;
+            let marker = if stack_frame.is_innermost() {
+                symbols.current_instruction
+            } else if selected {
+                symbols.selection
+            } else {
+                " "
+            };
+
+            let style = if selected {
+                theme.selection()
+            } else if stack_frame.is_innermost() {
+                theme.current_line()
+            } else {
+                theme.dim()
+            };
+
+            Line::from(vec![
+                Span::styled(format!("{marker} "), theme.accent()),
+                Span::styled(
+                    super::truncate(
+                        &stack_frame.describe(),
+                        usize::from(inner.width).saturating_sub(2),
+                        symbols.ellipsis,
+                    ),
+                    style,
+                ),
+            ])
+        })
+        .collect();
+
+    frame.render_widget(Paragraph::new(lines), inner);
+}
+
 /// Draws the breakpoint list.
 pub fn draw_breakpoints(frame: &mut Frame, app: &App, area: Rect, focused: bool) {
     let block = super::panel_block(&app.theme, Panel::Breakpoints, focused);
