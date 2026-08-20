@@ -184,6 +184,12 @@ pub struct Explanation {
     pub notes: Option<String>,
     /// Whether the effect is described only approximately.
     pub approximate: bool,
+    /// The effect with live register values substituted, when they are known.
+    ///
+    /// `RAX ← RAX + RBX` becomes `RAX ← 1 + 2`. This is the difference between
+    /// a reference card and watching the machine work, so it is computed
+    /// whenever the debugger is stopped and left `None` otherwise.
+    pub concrete: Option<String>,
 }
 
 impl Explanation {
@@ -258,7 +264,79 @@ fn build(info: &InstructionInfo, statement: &Statement) -> Explanation {
         flags_undefined: info.flags_left_undefined(),
         notes: info.notes.clone(),
         approximate: info.is_approximate(),
+        concrete: None,
     }
+}
+
+/// Anything that can supply the current value of a register.
+///
+/// A trait rather than a concrete type so this module stays independent of the
+/// debugger: `instruction` is static architectural knowledge and must not
+/// depend on a running program.
+pub trait RegisterValues {
+    /// The value of a register by any of its aliases, if it is known.
+    fn value_of(&self, name: &str) -> Option<u64>;
+}
+
+impl Explanation {
+    /// Fills in [`Explanation::concrete`] from live register values.
+    ///
+    /// Only operands that are plainly registers are substituted. An immediate
+    /// already shows its value, and a memory operand would need a memory read
+    /// to resolve — showing `[rbx+8]` unchanged is honest, whereas printing a
+    /// guessed address would not be.
+    pub fn with_values(mut self, values: &dyn RegisterValues) -> Self {
+        let mut concrete = self.effect.clone();
+        let mut substituted = false;
+
+        // Longest names first, so replacing RAX never corrupts a preceding
+        // match on a name that contains it.
+        let mut names: Vec<&'static str> = registers::all_alias_names();
+        names.sort_by_key(|name| std::cmp::Reverse(name.len()));
+
+        for name in names {
+            let upper = name.to_ascii_uppercase();
+            if !concrete.contains(&upper) {
+                continue;
+            }
+            let Some(value) = values.value_of(name) else {
+                continue;
+            };
+            concrete = replace_whole_words(&concrete, &upper, &format!("{value:#x}"));
+            substituted = true;
+        }
+
+        self.concrete = (substituted && concrete != self.effect).then_some(concrete);
+        self
+    }
+}
+
+/// Replaces `needle` in `text` where it is not part of a longer word.
+///
+/// Without the boundary check, substituting `AX` would corrupt `RAX`.
+fn replace_whole_words(text: &str, needle: &str, replacement: &str) -> String {
+    let is_word = |ch: char| ch.is_alphanumeric() || ch == '_';
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+
+    while let Some(index) = rest.find(needle) {
+        let before_ok = rest[..index]
+            .chars()
+            .next_back()
+            .is_none_or(|ch| !is_word(ch));
+        let after = &rest[index + needle.len()..];
+        let after_ok = after.chars().next().is_none_or(|ch| !is_word(ch));
+
+        out.push_str(&rest[..index]);
+        if before_ok && after_ok {
+            out.push_str(replacement);
+        } else {
+            out.push_str(needle);
+        }
+        rest = after;
+    }
+    out.push_str(rest);
+    out
 }
 
 /// Replaces `{slot}` placeholders with the operands actually written.
@@ -510,6 +588,89 @@ mod tests {
             .notes
             .unwrap_or_default()
             .contains("does not model"));
+    }
+
+    /// A stand-in for the debugger's register file.
+    struct Values(Vec<(&'static str, u64)>);
+
+    impl RegisterValues for Values {
+        fn value_of(&self, name: &str) -> Option<u64> {
+            let wanted = name.trim().to_ascii_lowercase();
+            self.0
+                .iter()
+                .find(|(candidate, _)| *candidate == wanted)
+                .map(|(_, value)| *value)
+        }
+    }
+
+    #[test]
+    fn live_values_replace_register_names() {
+        // The whole point: RAX ← RAX + RBX becomes RAX ← 0x1 + 0x2.
+        let values = Values(vec![("rax", 1), ("rbx", 2)]);
+        let explanation = explain("add rax, rbx").with_values(&values);
+
+        assert_eq!(
+            explanation.effect, "RAX ← RAX + RBX",
+            "symbolic form is kept"
+        );
+        assert_eq!(explanation.concrete.as_deref(), Some("0x1 ← 0x1 + 0x2"));
+    }
+
+    #[test]
+    fn a_register_with_no_known_value_is_left_symbolic() {
+        // Half the operands known is still worth showing; inventing the other
+        // half would not be.
+        let values = Values(vec![("rax", 1)]);
+        let explanation = explain("add rax, rbx").with_values(&values);
+        assert_eq!(explanation.concrete.as_deref(), Some("0x1 ← 0x1 + RBX"));
+    }
+
+    #[test]
+    fn nothing_known_means_no_concrete_form_at_all() {
+        let explanation = explain("add rax, rbx").with_values(&Values(Vec::new()));
+        assert!(explanation.concrete.is_none());
+    }
+
+    #[test]
+    fn substituting_a_short_name_does_not_corrupt_a_longer_one() {
+        // Replacing AX inside RAX would produce nonsense; the boundary check
+        // is what prevents it.
+        let values = Values(vec![("rax", 0x1122)]);
+        let explanation = explain("mov rax, rax").with_values(&values);
+        let concrete = explanation.concrete.expect("a concrete form");
+        assert_eq!(concrete, "0x1122 ← 0x1122");
+        assert!(
+            !concrete.contains('R'),
+            "no register name survived: {concrete}"
+        );
+    }
+
+    #[test]
+    fn an_immediate_operand_is_left_as_written() {
+        let values = Values(vec![("rax", 5)]);
+        let explanation = explain("mov rax, 60").with_values(&values);
+        assert_eq!(explanation.concrete.as_deref(), Some("0x5 ← 60"));
+    }
+
+    #[test]
+    fn a_memory_operand_is_not_guessed_at() {
+        // Resolving [rbx+8] would need a memory read; printing an address we
+        // did not read would be a fabrication.
+        let values = Values(vec![("rax", 1), ("rbx", 0x7fff)]);
+        let explanation = explain("mov rax, [rbx+8]").with_values(&values);
+        let concrete = explanation.concrete.expect("a concrete form");
+        assert!(
+            concrete.contains("[rbx+8]"),
+            "memory operand changed: {concrete}"
+        );
+    }
+
+    #[test]
+    fn word_replacement_respects_boundaries() {
+        assert_eq!(replace_whole_words("RAX + RBX", "RAX", "1"), "1 + RBX");
+        assert_eq!(replace_whole_words("RAX", "AX", "9"), "RAX");
+        assert_eq!(replace_whole_words("AX + RAX", "AX", "9"), "9 + RAX");
+        assert_eq!(replace_whole_words("no match", "ZZ", "1"), "no match");
     }
 
     #[test]

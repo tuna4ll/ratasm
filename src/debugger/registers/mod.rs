@@ -268,6 +268,12 @@ impl RegisterFile {
     }
 }
 
+impl crate::instruction::explain::RegisterValues for RegisterFile {
+    fn value_of(&self, name: &str) -> Option<u64> {
+        RegisterFile::value_of(self, name)
+    }
+}
+
 /// Builds a register map from GDB's `-data-list-register-names` and
 /// `-data-list-register-values` replies.
 ///
