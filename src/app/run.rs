@@ -792,6 +792,51 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn the_explanation_gains_real_values_once_the_program_stops() {
+        // End to end: build, stop, and check the explainer is reading the
+        // registers rather than only describing the instruction.
+        for tool in ["nasm", "ld", "gdb"] {
+            if !crate::process::is_available(Path::new(tool)) {
+                eprintln!("skipping: {tool} not installed");
+                return;
+            }
+        }
+
+        let dir = tempfile::tempdir().expect("temp dir");
+        let mut app = app_for(dir.path());
+        std::fs::write(
+            app.project.entry_path(),
+            "section .text\n    global _start\n_start:\n    mov rax, 1\n    mov rbx, 2\n    \
+             add rax, rbx\n    mov rax, 60\n    xor edi, edi\n    syscall\n",
+        )
+        .expect("write");
+        open_project_entry(&mut app);
+
+        let mut session = None;
+        start_session(&mut app, &mut session).await;
+        assert!(session.is_some(), "session: {}", app.status.text);
+
+        // Step past the two movs so RAX and RBX hold known values.
+        perform(&mut app, &mut session, Effect::Step(StepKind::Instruction)).await;
+        perform(&mut app, &mut session, Effect::Step(StepKind::Instruction)).await;
+
+        assert_eq!(app.registers.value_of("rax"), Some(1));
+        assert_eq!(app.registers.value_of("rbx"), Some(2));
+
+        // The cursor follows the program counter while stopped, so the
+        // explanation is for `add rax, rbx`.
+        let explanation = app.current_explanation().expect("an explanation");
+        assert_eq!(explanation.mnemonic, "add");
+        assert_eq!(
+            explanation.concrete.as_deref(),
+            Some("0x1 ← 0x1 + 0x2"),
+            "the explainer should be reading live registers"
+        );
+
+        perform(&mut app, &mut session, Effect::DebugStop).await;
+    }
+
+    #[tokio::test]
     async fn the_call_stack_shows_the_chain_of_calls() {
         // The panel exists to answer "how did I get here?", so the test uses a
         // program that actually calls into another function.

@@ -139,6 +139,19 @@ pub fn draw_explanation(frame: &mut Frame, app: &App, area: Rect, focused: bool)
             theme.dim(),
             theme.base(),
         ));
+
+        // Show the same effect with real values right under the symbolic one,
+        // so the relationship between them is obvious.
+        if label == "Effect" {
+            if let Some(concrete) = &explanation.concrete {
+                lines.push(super::field_line(
+                    format!("{:<16}", "  with values"),
+                    concrete.clone(),
+                    theme.dim(),
+                    theme.current_line(),
+                ));
+            }
+        }
     }
 
     // The limits of what is known are stated, not hidden.

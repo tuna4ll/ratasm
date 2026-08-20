@@ -857,18 +857,65 @@ impl App {
         self.syscalls.search(&self.syscall_query)
     }
 
-    /// The explanation for the line the cursor is on.
+    /// The explanation for the instruction currently in view.
     ///
-    /// When a debug session is stopped, the instruction at the program counter
-    /// takes priority: that is the one whose effects the other panels show.
+    /// While the program is stopped this is the instruction at the program
+    /// counter, because that is the one whose effects every other panel shows.
+    /// The source is taken from the file GDB reported, not from whichever
+    /// document happens to be active — otherwise looking at a second file
+    /// would silently explain the wrong line. When that file is not open, the
+    /// disassembled instruction is used instead, so the panel still works for
+    /// code with no source to hand.
     pub fn current_explanation(&self) -> Option<crate::instruction::Explanation> {
+        let explanation = self.explanation_source()?;
+        Some(if self.debugger.state().can_inspect() {
+            explanation.with_values(&self.registers)
+        } else {
+            explanation
+        })
+    }
+
+    /// Finds the text to explain and explains it.
+    fn explanation_source(&self) -> Option<crate::instruction::Explanation> {
+        let explain = |line: &str| crate::instruction::explain_line(&self.instructions, line);
+
+        if self.debugger.state().can_inspect() {
+            if let Some((file, line)) = &self.current_line {
+                if let Some(document) = self.document_for(file) {
+                    let text = document.buffer().line_or_empty(line.saturating_sub(1));
+                    return explain(text);
+                }
+            }
+
+            // No source for the stop location; fall back to the machine code,
+            // which is always available.
+            if let Some(address) = self.current_address {
+                if let Some(line) = self
+                    .disassembly
+                    .iter()
+                    .find(|line| line.instruction.address == address)
+                {
+                    return explain(&line.instruction.text());
+                }
+            }
+            return None;
+        }
+
         let document = self.workspace.active();
-        let line_index = match &self.current_line {
-            Some((_, line)) if self.debugger.state().can_inspect() => line.saturating_sub(1),
-            _ => document.cursor().line,
-        };
-        let line = document.buffer().line_or_empty(line_index);
-        crate::instruction::explain_line(&self.instructions, line)
+        explain(document.buffer().line_or_empty(document.cursor().line))
+    }
+
+    /// The open document for a path GDB reported.
+    ///
+    /// GDB reports the file name it was given, which may be relative where the
+    /// editor holds an absolute path, so the file names are compared when the
+    /// full paths do not match.
+    fn document_for(&self, path: &std::path::Path) -> Option<&crate::editor::Document> {
+        self.workspace.documents().iter().find(|document| {
+            document
+                .path()
+                .is_some_and(|open| open == path || open.file_name() == path.file_name())
+        })
     }
 }
 
@@ -1341,6 +1388,77 @@ mod tests {
 
         let explanation = app.current_explanation().expect("an explanation");
         assert_eq!(explanation.effect, "RAX ← RAX + RBX");
+    }
+
+    /// Puts the app in a stopped state at a given file and line.
+    fn stopped_at(app: &mut App, file: &str, line: usize) {
+        app.debugger.apply(Transition::BuildStarted).expect("build");
+        app.debugger.apply(Transition::BuildSucceeded).expect("ok");
+        app.debugger
+            .apply(Transition::LaunchRequested)
+            .expect("launch");
+        app.debugger
+            .apply(Transition::LaunchSucceeded)
+            .expect("running");
+        app.debugger.apply(Transition::Stopped).expect("paused");
+        app.current_line = Some((PathBuf::from(file), line));
+    }
+
+    #[test]
+    fn while_stopped_the_explanation_follows_the_program_counter() {
+        let mut app = app_with_source("    nop\n    add rax, rbx\n");
+        app.workspace.active_mut().set_path("/tmp/main.asm");
+        stopped_at(&mut app, "main.asm", 2);
+
+        // The cursor is on line 1, but execution is on line 2.
+        let explanation = app.current_explanation().expect("an explanation");
+        assert_eq!(explanation.mnemonic, "add");
+    }
+
+    #[test]
+    fn the_explanation_comes_from_the_file_execution_stopped_in() {
+        // Looking at a second file must not make the panel explain a line from
+        // it as though it were the one running.
+        let mut app = app_with_source("    nop\n    add rax, rbx\n");
+        app.workspace.active_mut().set_path("/tmp/main.asm");
+
+        let other = crate::editor::Document::from_file_contents(
+            "/tmp/other.asm",
+            "    xor rcx, rcx\n    mul rdx\n",
+        );
+        app.workspace.add_document(other);
+        assert_eq!(app.workspace.active().display_name(), "other.asm");
+
+        stopped_at(&mut app, "main.asm", 2);
+        let explanation = app.current_explanation().expect("an explanation");
+        assert_eq!(
+            explanation.mnemonic, "add",
+            "it must explain main.asm, not the document being viewed"
+        );
+    }
+
+    #[test]
+    fn without_the_source_the_disassembly_is_explained_instead() {
+        use crate::disassembler::{decode, DisassemblyLine, Syntax};
+
+        let mut app = app();
+        stopped_at(&mut app, "not-open.asm", 1);
+        app.current_address = Some(0x1000);
+        // `xor edi, edi`
+        app.disassembly = decode(&[0x31, 0xff], 0x1000, Syntax::Intel)
+            .into_iter()
+            .map(DisassemblyLine::bare)
+            .collect();
+
+        let explanation = app.current_explanation().expect("an explanation");
+        assert_eq!(explanation.mnemonic, "xor");
+    }
+
+    #[test]
+    fn with_neither_source_nor_disassembly_there_is_no_explanation() {
+        let mut app = app();
+        stopped_at(&mut app, "not-open.asm", 1);
+        assert!(app.current_explanation().is_none());
     }
 
     #[test]
