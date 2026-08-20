@@ -137,6 +137,9 @@ async fn perform(app: &mut App, session: &mut Option<GdbSession>, effect: Effect
                 StepKind::Over => mi::exec_next_instruction(),
                 StepKind::Line => mi::exec_step(),
                 StepKind::Out => mi::exec_finish(),
+                StepKind::Back => mi::exec_step_instruction_reverse(),
+                StepKind::BackOver => mi::exec_next_instruction_reverse(),
+                StepKind::ReverseContinue => mi::exec_continue_reverse(),
             };
             resume(app, session, &command, "stepping").await;
         }
@@ -345,6 +348,20 @@ async fn start_session(app: &mut App, session: &mut Option<GdbSession>) {
 
     match active.wait_for_stop(STOP_TIMEOUT).await {
         Ok(record) => {
+            // Recording needs a live process, so it can only start once the
+            // program has stopped at the entry point — asking any earlier
+            // gets "Target native does not support this command". Starting
+            // here means everything from the entry onwards is replayable.
+            if app.settings.debugger.record {
+                let recorded = active.execute(&mi::record_full()).await.is_ok();
+                if !recorded {
+                    tracing::warn!("execution recording unavailable");
+                }
+                app.recording = recorded;
+            } else {
+                app.recording = false;
+            }
+
             *session = Some(active);
             handle_stop(app, session, &record).await;
         }
@@ -364,6 +381,7 @@ async fn stop_session(app: &mut App, session: &mut Option<GdbSession>) {
     let _ = app.debugger.exited(None);
     let _ = app.debugger.apply(Transition::Reset);
 
+    app.recording = false;
     app.registers.clear();
     app.breakpoints.detach();
     app.frames.clear();
@@ -834,6 +852,66 @@ mod tests {
         );
 
         perform(&mut app, &mut session, Effect::DebugStop).await;
+    }
+
+    #[tokio::test]
+    async fn stepping_backwards_restores_the_previous_register_values() {
+        // The feature only means anything if the machine really goes back, so
+        // the test checks a register's value, not just the program counter.
+        for tool in ["nasm", "ld", "gdb"] {
+            if !crate::process::is_available(Path::new(tool)) {
+                eprintln!("skipping: {tool} not installed");
+                return;
+            }
+        }
+
+        let dir = tempfile::tempdir().expect("temp dir");
+        let mut app = app_for(dir.path());
+        std::fs::write(
+            app.project.entry_path(),
+            "section .text\n    global _start\n_start:\n    mov rax, 1\n    mov rax, 2\n    \
+             mov rax, 60\n    xor edi, edi\n    syscall\n",
+        )
+        .expect("write");
+
+        let mut session = None;
+        start_session(&mut app, &mut session).await;
+        assert!(session.is_some(), "session: {}", app.status.text);
+
+        perform(&mut app, &mut session, Effect::Step(StepKind::Instruction)).await;
+        assert_eq!(
+            app.registers.value_of("rax"),
+            Some(1),
+            "after the first mov"
+        );
+
+        perform(&mut app, &mut session, Effect::Step(StepKind::Instruction)).await;
+        assert_eq!(app.registers.value_of("rax"), Some(2), "after the second");
+
+        perform(&mut app, &mut session, Effect::Step(StepKind::Back)).await;
+        assert_eq!(
+            app.registers.value_of("rax"),
+            Some(1),
+            "stepping back must undo the write, not just move RIP: {}",
+            app.status.text
+        );
+
+        perform(&mut app, &mut session, Effect::DebugStop).await;
+    }
+
+    #[test]
+    fn stepping_backwards_without_recording_says_why() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let mut app = app_for(dir.path());
+        app.settings.debugger.record = false;
+
+        assert_eq!(app.apply(&crate::command::Command::StepBack), Effect::None);
+        assert_eq!(app.status.severity, crate::app::Severity::Warning);
+        assert!(
+            app.status.text.contains("record"),
+            "the message should name the setting: {}",
+            app.status.text
+        );
     }
 
     #[tokio::test]

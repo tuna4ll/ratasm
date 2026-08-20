@@ -169,6 +169,12 @@ pub enum Command {
     StepLine,
     /// Run until the current function returns.
     StepOut,
+    /// Undo one machine instruction.
+    StepBack,
+    /// Undo one instruction, over calls.
+    StepBackOver,
+    /// Run backwards to the previous breakpoint.
+    ReverseContinue,
     /// End the debug session.
     DebugStop,
     /// Add or remove a breakpoint on the current line.
@@ -241,6 +247,9 @@ impl Command {
             Command::StepOver,
             Command::StepLine,
             Command::StepOut,
+            Command::StepBack,
+            Command::StepBackOver,
+            Command::ReverseContinue,
             Command::DebugStop,
             Command::ToggleBreakpoint,
             Command::ClearBreakpoints,
@@ -306,6 +315,9 @@ impl Command {
             Command::StepOver => "debug.step-over".into(),
             Command::StepLine => "debug.step-line".into(),
             Command::StepOut => "debug.step-out".into(),
+            Command::StepBack => "debug.step-back".into(),
+            Command::StepBackOver => "debug.step-back-over".into(),
+            Command::ReverseContinue => "debug.reverse-continue".into(),
             Command::DebugStop => "debug.stop".into(),
             Command::ToggleBreakpoint => "debug.toggle-breakpoint".into(),
             Command::ClearBreakpoints => "debug.clear-breakpoints".into(),
@@ -368,6 +380,9 @@ impl Command {
             Command::StepOver => "Step over".into(),
             Command::StepLine => "Step line".into(),
             Command::StepOut => "Step out".into(),
+            Command::StepBack => "Step back".into(),
+            Command::StepBackOver => "Step back over".into(),
+            Command::ReverseContinue => "Run backwards".into(),
             Command::DebugStop => "Stop debugging".into(),
             Command::ToggleBreakpoint => "Toggle breakpoint".into(),
             Command::ClearBreakpoints => "Clear all breakpoints".into(),
@@ -401,6 +416,9 @@ impl Command {
                                   instructions"
                 .into(),
             Command::StepOut => "Run until the current function returns".into(),
+            Command::StepBack => "Undo the last instruction and put the registers back".into(),
+            Command::StepBackOver => "Undo the last instruction, skipping calls".into(),
+            Command::ReverseContinue => "Run backwards to the previous breakpoint".into(),
             Command::ToggleBreakpoint => "Add or remove a breakpoint on the current line".into(),
             Command::GoToAddress => "Show an address in the memory panel; accepts rsp-0x20".into(),
             Command::GoToDefinition => {
@@ -461,6 +479,9 @@ impl Command {
             | Command::StepOver
             | Command::StepLine
             | Command::StepOut
+            | Command::StepBack
+            | Command::StepBackOver
+            | Command::ReverseContinue
             | Command::DebugStop
             | Command::ToggleBreakpoint
             | Command::ClearBreakpoints => Category::Debug,
@@ -504,6 +525,9 @@ impl Command {
                 | Command::StepOver
                 | Command::StepLine
                 | Command::StepOut
+                | Command::StepBack
+                | Command::StepBackOver
+                | Command::ReverseContinue
                 | Command::DebugStop
         )
     }

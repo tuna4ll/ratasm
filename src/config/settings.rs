@@ -53,6 +53,12 @@ pub struct DebuggerSettings {
     pub memory_window: usize,
     /// How many stack slots to show around the stack pointer.
     pub stack_depth: usize,
+    /// Record execution so it can be stepped backwards.
+    ///
+    /// Recording makes every instruction cost more. That is invisible for the
+    /// small programs ratasm targets, and would not be for a large one, so it
+    /// can be turned off.
+    pub record: bool,
 }
 
 impl Default for DebuggerSettings {
@@ -62,6 +68,7 @@ impl Default for DebuggerSettings {
             timeout_ms: 10_000,
             memory_window: 256,
             stack_depth: 16,
+            record: true,
         }
     }
 }

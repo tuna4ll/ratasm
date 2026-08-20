@@ -81,6 +81,12 @@ pub enum StepKind {
     Line,
     /// Until the current function returns.
     Out,
+    /// One machine instruction backwards.
+    Back,
+    /// One machine instruction backwards, over calls.
+    BackOver,
+    /// Backwards until the previous breakpoint.
+    ReverseContinue,
 }
 
 /// How serious a status message is.
@@ -176,6 +182,12 @@ pub struct App {
     pub memory_address: Option<u64>,
     /// Stack contents around the stack pointer.
     pub stack: MemoryBlock,
+    /// Whether execution is being recorded, so it can be stepped backwards.
+    ///
+    /// Distinct from the setting that asks for it: GDB may refuse, and the
+    /// interface must report what is actually true rather than what was
+    /// requested.
+    pub recording: bool,
     /// The call stack at the last stop, innermost frame first.
     pub frames: Vec<crate::debugger::frames::Frame>,
     /// Which frame the call stack panel highlights.
@@ -248,6 +260,7 @@ impl App {
             memory: MemoryBlock::default(),
             memory_address: None,
             stack: MemoryBlock::default(),
+            recording: false,
             frames: Vec::new(),
             frame_selected: 0,
             disassembly: Vec::new(),
@@ -426,6 +439,9 @@ impl App {
             Command::StepOver => self.require_paused(Effect::Step(StepKind::Over)),
             Command::StepLine => self.require_paused(Effect::Step(StepKind::Line)),
             Command::StepOut => self.require_paused(Effect::Step(StepKind::Out)),
+            Command::StepBack => self.require_recording(StepKind::Back),
+            Command::StepBackOver => self.require_recording(StepKind::BackOver),
+            Command::ReverseContinue => self.require_recording(StepKind::ReverseContinue),
             Command::DebugStop => {
                 if self.debugger.state().can_stop() {
                     Effect::DebugStop
@@ -534,6 +550,20 @@ impl App {
             });
             Effect::None
         }
+    }
+
+    /// Refuses a reverse step when nothing was recorded, explaining why.
+    ///
+    /// Stepping backwards only works if execution was recorded, and recording
+    /// is a setting. Saying so is far better than the command appearing to do
+    /// nothing.
+    fn require_recording(&mut self, kind: StepKind) -> Effect {
+        if !self.settings.debugger.record {
+            self.status =
+                Status::warning("Stepping backwards needs recording; set debugger.record = true");
+            return Effect::None;
+        }
+        self.require_paused(Effect::Step(kind))
     }
 
     /// Cancels whatever overlay is open.

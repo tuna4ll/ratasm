@@ -284,6 +284,20 @@ impl Keymap {
         bind(KeyBinding::plain(KeyCode::F(9)), Command::ToggleBreakpoint);
         bind(KeyBinding::plain(KeyCode::F(10)), Command::StepLine);
         bind(KeyBinding::plain(KeyCode::F(11)), Command::StepOut);
+        // Shift with a step key reverses it, which is the mapping people
+        // already expect from step-into and step-over.
+        bind(
+            KeyBinding::new(KeyCode::F(7), KeyModifiers::SHIFT),
+            Command::StepBack,
+        );
+        bind(
+            KeyBinding::new(KeyCode::F(8), KeyModifiers::SHIFT),
+            Command::StepBackOver,
+        );
+        bind(
+            KeyBinding::new(KeyCode::F(5), KeyModifiers::SHIFT),
+            Command::ReverseContinue,
+        );
         bind(KeyBinding::plain(KeyCode::F(12)), Command::DebugStart);
 
         // Files.
