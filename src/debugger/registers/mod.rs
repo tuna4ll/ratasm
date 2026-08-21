@@ -284,12 +284,22 @@ impl crate::instruction::explain::RegisterValues for RegisterFile {
 pub fn parse_register_values(names: &Value, values: &Value) -> BTreeMap<String, u64> {
     let mut table = BTreeMap::new();
 
-    let Some(names) = names.as_list() else {
+    let (Some(names), Some(values)) = (names.as_list(), values.as_list()) else {
         return table;
     };
-    let Some(values) = values.as_list() else {
-        return table;
-    };
+
+    // Collect every reported alias with its value, then decide per register
+    // which one to keep. Two rules pull in opposite directions:
+    //
+    //  * GDB lists the narrow pseudo-registers alongside the full ones, so
+    //    `esp` must never displace `rsp` — taking the alias would leave RSP
+    //    holding its low 32 bits and break every stack read.
+    //  * GDB names the flags register `eflags` and never `rflags`, so an
+    //    alias is sometimes the only name on offer, and rejecting all
+    //    aliases would drop the flags entirely.
+    //
+    // Preferring the widest alias reported for each register satisfies both.
+    let mut widest: BTreeMap<&'static str, (RegisterWidth, u64)> = BTreeMap::new();
 
     for entry in values {
         let Some(number) = entry.get_int("number") else {
@@ -304,26 +314,33 @@ pub fn parse_register_values(names: &Value, values: &Value) -> BTreeMap<String, 
         let Some(register) = registers::lookup(name) else {
             continue;
         };
-        // GDB publishes the narrow pseudo-registers too — `esp` and `eax` sit
-        // further down the same list as `rsp` and `rax`. They resolve to the
-        // same architectural register, so accepting them would overwrite the
-        // full 64-bit value with its low half: RSP 0x7fffffffdf30 would become
-        // 0xffffdf30, and every stack read would fail. Only the canonical
-        // 64-bit name is stored; the narrow views are derived on demand.
-        if name.trim().to_ascii_lowercase() != register.name {
+        let lowered = name.trim().to_ascii_lowercase();
+        let Some(width) = register.width_of(&lowered) else {
             continue;
-        }
+        };
         let Some(raw) = entry.get_str("value") else {
             continue;
         };
-        // GDB writes register values as hexadecimal, but a value it cannot
-        // render numerically (a vector register, say) comes back as a tuple
-        // string; skipping those is better than storing a wrong number.
-        if let Some(value) = crate::debugger::mi::parse_address(raw) {
-            table.insert(register.name.to_owned(), value);
-        }
+        // A value GDB cannot render numerically — a vector register, say —
+        // comes back as a tuple string; skipping it beats storing a wrong
+        // number.
+        let Some(value) = crate::debugger::mi::parse_address(raw) else {
+            continue;
+        };
+
+        widest
+            .entry(register.name)
+            .and_modify(|held| {
+                if width > held.0 {
+                    *held = (width, value);
+                }
+            })
+            .or_insert((width, value));
     }
 
+    for (name, (_, value)) in widest {
+        table.insert(name.to_owned(), value);
+    }
     table
 }
 
@@ -548,8 +565,9 @@ mod tests {
 
     #[test]
     fn narrow_pseudo_registers_do_not_overwrite_the_full_value() {
-        // Reproduces a real failure: GDB lists esp after rsp, and taking both
-        // left RSP holding only its low 32 bits, breaking every stack read.
+        // Reproduces a real failure: GDB lists esp after rsp, and taking the
+        // narrower one left RSP holding only its low 32 bits, which broke
+        // every stack read.
         let names = Value::List(vec![
             Value::String("rsp".to_owned()),
             Value::String("esp".to_owned()),
@@ -575,6 +593,53 @@ mod tests {
             "the 64-bit value must survive the 32-bit alias"
         );
         assert_eq!(table.len(), 1);
+    }
+
+    #[test]
+    fn the_order_the_aliases_arrive_in_does_not_matter() {
+        // The narrow one arriving first must not win either.
+        let names = Value::List(vec![
+            Value::String("esp".to_owned()),
+            Value::String("rsp".to_owned()),
+        ]);
+        let values = Value::List(vec![
+            Value::Tuple(vec![
+                ("number".to_owned(), Value::String("0".to_owned())),
+                ("value".to_owned(), Value::String("0xffffdf30".to_owned())),
+            ]),
+            Value::Tuple(vec![
+                ("number".to_owned(), Value::String("1".to_owned())),
+                (
+                    "value".to_owned(),
+                    Value::String("0x7fffffffdf30".to_owned()),
+                ),
+            ]),
+        ]);
+        assert_eq!(
+            parse_register_values(&names, &values).get("rsp"),
+            Some(&0x7fff_ffff_df30)
+        );
+    }
+
+    #[test]
+    fn an_alias_is_used_when_it_is_the_only_name_reported() {
+        // GDB calls the flags register eflags and never rflags. Rejecting
+        // every alias dropped the flags entirely and blanked the flag panel.
+        let names = Value::List(vec![Value::String("eflags".to_owned())]);
+        let values = Value::List(vec![Value::Tuple(vec![
+            ("number".to_owned(), Value::String("0".to_owned())),
+            ("value".to_owned(), Value::String("0x246".to_owned())),
+        ])]);
+
+        let table = parse_register_values(&names, &values);
+        assert_eq!(table.get("rflags"), Some(&0x246));
+
+        let mut file = RegisterFile::new();
+        file.update(table);
+        assert_eq!(
+            file.flags().map(|flags| flags.summary()),
+            Some("PF ZF IF".to_owned())
+        );
     }
 
     #[test]
