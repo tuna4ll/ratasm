@@ -32,5 +32,6 @@ pub mod instruction;
 pub mod logging;
 pub mod process;
 pub mod project;
+pub mod scratchpad;
 pub mod syscall;
 pub mod ui;

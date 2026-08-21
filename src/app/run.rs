@@ -915,6 +915,44 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn the_flags_are_read_from_a_live_session() {
+        // A regression guard: GDB names the flags register `eflags`, and a
+        // filter that only accepted canonical names silently blanked the flag
+        // panel for every session.
+        for tool in ["nasm", "ld", "gdb"] {
+            if !crate::process::is_available(Path::new(tool)) {
+                eprintln!("skipping: {tool} not installed");
+                return;
+            }
+        }
+
+        let dir = tempfile::tempdir().expect("temp dir");
+        let mut app = app_for(dir.path());
+        std::fs::write(
+            app.project.entry_path(),
+            "section .text\n    global _start\n_start:\n    mov rax, 7\n    sub rax, rax\n    \
+             mov rax, 60\n    xor edi, edi\n    syscall\n",
+        )
+        .expect("write");
+
+        let mut session = None;
+        start_session(&mut app, &mut session).await;
+        assert!(session.is_some(), "session: {}", app.status.text);
+
+        perform(&mut app, &mut session, Effect::Step(StepKind::Instruction)).await;
+        perform(&mut app, &mut session, Effect::Step(StepKind::Instruction)).await;
+
+        let flags = app.registers.flags().expect("the flags must be readable");
+        assert!(
+            flags.has(crate::instruction::Flag::Zero),
+            "ZF should be set after sub rax, rax; got {}",
+            flags.summary()
+        );
+
+        perform(&mut app, &mut session, Effect::DebugStop).await;
+    }
+
+    #[tokio::test]
     async fn the_call_stack_shows_the_chain_of_calls() {
         // The panel exists to answer "how did I get here?", so the test uses a
         // program that actually calls into another function.
