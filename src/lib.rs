@@ -29,6 +29,7 @@ pub mod disassembler;
 pub mod editor;
 pub mod event;
 pub mod instruction;
+pub mod learning;
 pub mod logging;
 pub mod process;
 pub mod project;
