@@ -12,6 +12,7 @@ pub mod chrome;
 pub mod code;
 pub mod cpu;
 pub mod editor;
+pub mod learn;
 
 use ratatui::layout::Rect;
 use ratatui::style::Style;
@@ -103,6 +104,8 @@ pub fn draw_panel(frame: &mut Frame, app: &App, panel: Panel, area: Rect) {
         Panel::Output => chrome::draw_output(frame, app, area, focused),
         Panel::Syscalls => chrome::draw_syscalls(frame, app, area, focused),
         Panel::Explorer => chrome::draw_explorer(frame, app, area, focused),
+        Panel::Scratchpad => learn::draw_scratchpad(frame, app, area, focused),
+        Panel::Learn => learn::draw_learn(frame, app, area, focused),
     }
 }
 

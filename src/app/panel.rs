@@ -35,6 +35,10 @@ pub enum Panel {
     Syscalls,
     /// Files and symbols in the project.
     Explorer,
+    /// Trying one instruction without making a project.
+    Scratchpad,
+    /// Lessons and questions.
+    Learn,
 }
 
 impl Panel {
@@ -43,7 +47,7 @@ impl Panel {
     /// The order follows how the work actually flows: write code, look at the
     /// registers and flags it changed, look at memory, then at the machine
     /// code, then at the supporting references.
-    pub const ALL: [Panel; 12] = [
+    pub const ALL: [Panel; 14] = [
         Panel::Editor,
         Panel::Registers,
         Panel::Flags,
@@ -56,6 +60,8 @@ impl Panel {
         Panel::Explain,
         Panel::Syscalls,
         Panel::Explorer,
+        Panel::Scratchpad,
+        Panel::Learn,
     ];
 
     /// The stable identifier used in configuration and command names.
@@ -73,6 +79,8 @@ impl Panel {
             Panel::Explain => "explain",
             Panel::Syscalls => "syscalls",
             Panel::Explorer => "explorer",
+            Panel::Scratchpad => "scratchpad",
+            Panel::Learn => "learn",
         }
     }
 
@@ -91,6 +99,8 @@ impl Panel {
             Panel::Explain => "Explain",
             Panel::Syscalls => "Syscalls",
             Panel::Explorer => "Explorer",
+            Panel::Scratchpad => "Scratchpad",
+            Panel::Learn => "Learn",
         }
     }
 
@@ -110,7 +120,7 @@ impl Panel {
     /// The editor consumes ordinary characters; every other panel is free to
     /// use them as single-key shortcuts.
     pub const fn is_text_input(self) -> bool {
-        matches!(self, Panel::Editor)
+        matches!(self, Panel::Editor | Panel::Scratchpad)
     }
 
     /// Resolves a panel from its identifier.
@@ -189,10 +199,11 @@ mod tests {
     }
 
     #[test]
-    fn only_the_editor_consumes_typed_characters() {
+    fn only_the_text_panels_consume_typed_characters() {
         // Every other panel is free to use letters as shortcuts.
         for panel in Panel::ALL {
-            assert_eq!(panel.is_text_input(), panel == Panel::Editor, "{panel}");
+            let expected = matches!(panel, Panel::Editor | Panel::Scratchpad);
+            assert_eq!(panel.is_text_input(), expected, "{panel}");
         }
     }
 

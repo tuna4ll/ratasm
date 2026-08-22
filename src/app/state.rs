@@ -68,6 +68,8 @@ pub enum Effect {
     SaveFile(PathBuf),
     /// Read a file into a new buffer.
     OpenFile(PathBuf),
+    /// Assemble and run the scratchpad snippet.
+    RunScratchpad,
 }
 
 /// How far a step goes.
@@ -214,6 +216,12 @@ pub struct App {
     pub disassembly_syntax: Syntax,
     /// Whether the learning panel is showing.
     pub learning_mode: bool,
+    /// The snippet being tried, and the values it starts from.
+    pub scratchpad: crate::scratchpad::Scratchpad,
+    /// What the last snippet produced, or why it could not run.
+    pub scratchpad_result: Option<Result<crate::scratchpad::Outcome, String>>,
+    /// Where the reader is in the material.
+    pub learning: crate::learning::Progress,
 
     /// Instruction semantics, loaded once.
     pub instructions: InstructionDatabase,
@@ -275,6 +283,9 @@ impl App {
             register_format: Format::default(),
             disassembly_syntax: Syntax::default(),
             learning_mode: false,
+            scratchpad: crate::scratchpad::Scratchpad::new(),
+            scratchpad_result: None,
+            learning: crate::learning::Progress::new(),
 
             instructions: InstructionDatabase::load()?,
             syscalls: SyscallDatabase::load()?,
@@ -484,8 +495,11 @@ impl App {
             }
             Command::ToggleLearningMode => {
                 self.learning_mode = !self.learning_mode;
+                if self.learning_mode {
+                    self.focus = Panel::Learn;
+                }
                 self.status = Status::info(if self.learning_mode {
-                    "Learning mode on"
+                    "Learning mode on: ←→ moves through the material, ? jumps to the questions"
                 } else {
                     "Learning mode off"
                 });
@@ -502,7 +516,7 @@ impl App {
                 Effect::None
             }
             Command::OpenScratchpad => {
-                self.status = Status::warning("The scratchpad is not finished yet");
+                self.focus = Panel::Scratchpad;
                 Effect::None
             }
             Command::ShowKeybindings => {

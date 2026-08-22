@@ -161,6 +161,25 @@ async fn perform(app: &mut App, session: &mut Option<GdbSession>, effect: Effect
         Effect::SyncBreakpoints => sync_breakpoints(app, session).await,
 
         Effect::ReadMemory(address) => read_memory(app, session, address).await,
+
+        Effect::RunScratchpad => {
+            app.status = Status::info("Running the snippet…");
+            let gdb = app.settings.debugger.gdb.clone();
+            match app.scratchpad.run(&gdb).await {
+                Ok(outcome) => {
+                    app.status = if outcome.is_empty() {
+                        Status::info("The snippet changed nothing")
+                    } else {
+                        Status::success(format!("{} register(s) changed", outcome.changes.len()))
+                    };
+                    app.scratchpad_result = Some(Ok(outcome));
+                }
+                Err(error) => {
+                    app.status = Status::error(error.to_string());
+                    app.scratchpad_result = Some(Err(error.to_string()));
+                }
+            }
+        }
     }
 }
 
