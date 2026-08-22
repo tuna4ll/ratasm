@@ -327,6 +327,13 @@ impl Keymap {
             KeyBinding::ctrl(KeyCode::Char('d')),
             Command::GoToDefinition,
         );
+        // Learning and the scratchpad. F1 is where a reader looks for help,
+        // and the material is what ratasm has instead of a help screen.
+        bind(
+            KeyBinding::plain(KeyCode::F(1)),
+            Command::ToggleLearningMode,
+        );
+        bind(KeyBinding::plain(KeyCode::F(2)), Command::OpenScratchpad);
         bind(KeyBinding::plain(KeyCode::Tab), Command::NextPanel);
         bind(KeyBinding::plain(KeyCode::BackTab), Command::PreviousPanel);
         bind(KeyBinding::ctrl(KeyCode::PageDown), Command::NextDocument);
@@ -612,6 +619,11 @@ mod tests {
             ("F8", Command::StepOver),
             ("F9", Command::ToggleBreakpoint),
             ("F10", Command::StepLine),
+            ("F1", Command::ToggleLearningMode),
+            ("F2", Command::OpenScratchpad),
+            ("shift+F5", Command::ReverseContinue),
+            ("shift+F7", Command::StepBack),
+            ("shift+F8", Command::StepBackOver),
             ("ctrl+s", Command::SaveFile),
             ("ctrl+o", Command::OpenFile),
             ("ctrl+p", Command::OpenPalette),
