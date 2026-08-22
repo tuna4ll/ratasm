@@ -22,9 +22,10 @@ use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
 use crate::app::mode::Mode;
 use crate::app::panel::Panel;
-use crate::app::state::Effect;
-use crate::app::App;
 #[cfg(test)]
+use crate::app::state::Severity;
+use crate::app::state::{Effect, Status};
+use crate::app::App;
 use crate::command::Command;
 use crate::editor::{Movement, SelectionMode};
 
@@ -62,6 +63,8 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Effect {
         Panel::Editor => handle_editor(app, key),
         Panel::Syscalls => handle_syscalls(app, key),
         Panel::Breakpoints => handle_breakpoints(app, key),
+        Panel::Scratchpad => handle_scratchpad(app, key),
+        Panel::Learn => handle_learn(app, key),
         _ => Effect::None,
     }
 }
@@ -260,6 +263,109 @@ fn handle_breakpoints(app: &mut App, key: KeyEvent) -> Effect {
                 .is_some_and(|breakpoint| breakpoint.enabled);
             app.breakpoints.set_enabled(index, !enabled);
             return Effect::SyncBreakpoints;
+        }
+        _ => {}
+    }
+
+    Effect::None
+}
+
+/// Handles a key with the scratchpad focused.
+///
+/// The scratchpad is a one-line editor with a second job: a line of the form
+/// `rax=1` sets a starting value instead of being assembled, so both halves of
+/// an experiment can be typed into the same place.
+fn handle_scratchpad(app: &mut App, key: KeyEvent) -> Effect {
+    match key.code {
+        // The scratchpad claims printable keys, so Tab has to be handed back
+        // deliberately or there would be no way out of the panel.
+        KeyCode::Tab => return app.apply(&Command::NextPanel),
+        KeyCode::BackTab => return app.apply(&Command::PreviousPanel),
+        KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+            app.scratchpad.snippet.push(ch);
+        }
+        KeyCode::Backspace => {
+            app.scratchpad.snippet.pop();
+        }
+        KeyCode::Esc => {
+            app.scratchpad.snippet.clear();
+            app.scratchpad_result = None;
+        }
+        KeyCode::Enter => return submit_scratchpad(app),
+        _ => {}
+    }
+
+    Effect::None
+}
+
+/// Acts on the typed scratchpad line: either a starting value or a snippet.
+fn submit_scratchpad(app: &mut App) -> Effect {
+    let line = app.scratchpad.snippet.trim().to_owned();
+
+    let Some((name, value)) = parse_assignment(&line) else {
+        return Effect::RunScratchpad;
+    };
+
+    // `rax=` with nothing after it removes the starting value again.
+    if value.is_empty() {
+        let removed = app.scratchpad.initial.remove(&name.to_ascii_lowercase());
+        app.scratchpad.snippet.clear();
+        app.status = if removed.is_some() {
+            Status::info(format!("{} is no longer set", name.to_uppercase()))
+        } else {
+            Status::warning(format!("{} was not set", name.to_uppercase()))
+        };
+        return Effect::None;
+    }
+
+    let Some(parsed) = crate::learning::parse_answer(value) else {
+        app.status = Status::error(format!("'{value}' is not a number"));
+        return Effect::None;
+    };
+
+    match app.scratchpad.set(name, parsed) {
+        Ok(()) => {
+            app.scratchpad.snippet.clear();
+            app.status = Status::info(format!("{} starts at {parsed:#x}", name.to_uppercase()));
+        }
+        Err(error) => app.status = Status::error(error.to_string()),
+    }
+
+    Effect::None
+}
+
+/// Splits `name=value` into its halves, or returns `None` when there is no `=`.
+///
+/// The name must look like a register rather than merely be non-empty, so an
+/// instruction that happens to contain `=` is still assembled.
+fn parse_assignment(line: &str) -> Option<(&str, &str)> {
+    let (name, value) = line.split_once('=')?;
+    let name = name.trim();
+    if name.is_empty() || !name.chars().all(|ch| ch.is_ascii_alphanumeric()) {
+        return None;
+    }
+    Some((name, value.trim()))
+}
+
+/// Handles a key with the learning panel focused.
+///
+/// Tab is left alone here so it keeps moving between panels; the material is
+/// one sequence, so the arrow keys are enough to move through all of it.
+fn handle_learn(app: &mut App, key: KeyEvent) -> Effect {
+    match key.code {
+        KeyCode::Right | KeyCode::Down | KeyCode::PageDown => app.learning.next(),
+        KeyCode::Left | KeyCode::Up | KeyCode::PageUp => app.learning.previous(),
+        KeyCode::Char('?') => app.learning.jump_to_questions(),
+        KeyCode::Enter if app.learning.is_question() => app.learning.submit(),
+        KeyCode::Enter => app.learning.next(),
+        KeyCode::Esc => app.learning.reset_answer(),
+        KeyCode::Backspace if app.learning.is_question() => {
+            app.learning.typed.pop();
+        }
+        KeyCode::Char(ch)
+            if app.learning.is_question() && !key.modifiers.contains(KeyModifiers::CONTROL) =>
+        {
+            app.learning.typed.push(ch);
         }
         _ => {}
     }
@@ -646,5 +752,181 @@ mod tests {
             .buffer()
             .to_text()
             .starts_with("    "));
+    }
+
+    #[test]
+    fn typing_in_the_scratchpad_builds_a_snippet_and_enter_runs_it() {
+        let mut app = app();
+        app.focus = Panel::Scratchpad;
+        type_text(&mut app, "add rax, rbx");
+        assert_eq!(app.scratchpad.snippet, "add rax, rbx");
+
+        handle_key(&mut app, press(KeyCode::Backspace));
+        assert_eq!(app.scratchpad.snippet, "add rax, rb");
+
+        type_text(&mut app, "x");
+        assert_eq!(
+            handle_key(&mut app, press(KeyCode::Enter)),
+            Effect::RunScratchpad
+        );
+    }
+
+    #[test]
+    fn an_assignment_sets_a_starting_value_instead_of_running() {
+        let mut app = app();
+        app.focus = Panel::Scratchpad;
+        type_text(&mut app, "rax=0x10");
+
+        assert_eq!(handle_key(&mut app, press(KeyCode::Enter)), Effect::None);
+        assert_eq!(app.scratchpad.initial.get("rax"), Some(&0x10));
+        assert!(
+            app.scratchpad.snippet.is_empty(),
+            "the line is consumed so the next one can be typed"
+        );
+    }
+
+    #[test]
+    fn an_assignment_with_no_value_removes_the_starting_value() {
+        let mut app = app();
+        app.focus = Panel::Scratchpad;
+        app.scratchpad.set("rbx", 7).expect("rbx is a register");
+
+        type_text(&mut app, "rbx=");
+        handle_key(&mut app, press(KeyCode::Enter));
+        assert!(app.scratchpad.initial.is_empty());
+    }
+
+    #[test]
+    fn an_unknown_register_is_reported_rather_than_stored() {
+        let mut app = app();
+        app.focus = Panel::Scratchpad;
+        type_text(&mut app, "rzz=1");
+        handle_key(&mut app, press(KeyCode::Enter));
+
+        assert!(app.scratchpad.initial.is_empty());
+        assert_eq!(app.status.severity, Severity::Error);
+    }
+
+    #[test]
+    fn an_unparsable_value_is_reported_rather_than_stored() {
+        let mut app = app();
+        app.focus = Panel::Scratchpad;
+        type_text(&mut app, "rax=nonsense");
+        handle_key(&mut app, press(KeyCode::Enter));
+
+        assert!(app.scratchpad.initial.is_empty());
+        assert_eq!(app.status.severity, Severity::Error);
+    }
+
+    #[test]
+    fn escape_clears_the_scratchpad_line_and_its_result() {
+        let mut app = app();
+        app.focus = Panel::Scratchpad;
+        type_text(&mut app, "mov rax, 1");
+        app.scratchpad_result = Some(Err("boom".to_owned()));
+
+        handle_key(&mut app, press(KeyCode::Esc));
+        assert!(app.scratchpad.snippet.is_empty());
+        assert!(app.scratchpad_result.is_none());
+    }
+
+    #[test]
+    fn tab_still_leaves_the_scratchpad() {
+        let mut app = app();
+        app.focus = Panel::Scratchpad;
+        handle_key(&mut app, press(KeyCode::Tab));
+        assert_ne!(app.focus, Panel::Scratchpad);
+        assert!(
+            app.scratchpad.snippet.is_empty(),
+            "tab must not be typed into the snippet"
+        );
+    }
+
+    #[test]
+    fn arrows_move_through_the_learning_material() {
+        let mut app = app();
+        app.focus = Panel::Learn;
+        assert_eq!(app.learning.position(), 1);
+
+        handle_key(&mut app, press(KeyCode::Right));
+        assert_eq!(app.learning.position(), 2);
+
+        handle_key(&mut app, press(KeyCode::Left));
+        assert_eq!(app.learning.position(), 1);
+
+        // Moving back from the first item wraps to the last.
+        handle_key(&mut app, press(KeyCode::Left));
+        assert_eq!(app.learning.position(), crate::learning::item_count());
+    }
+
+    #[test]
+    fn a_question_mark_jumps_to_the_questions() {
+        let mut app = app();
+        app.focus = Panel::Learn;
+        handle_key(&mut app, press(KeyCode::Char('?')));
+
+        assert!(app.learning.is_question());
+        assert!(app.learning.current_question().is_some());
+    }
+
+    #[test]
+    fn a_correct_answer_is_typed_and_accepted() {
+        let mut app = app();
+        app.focus = Panel::Learn;
+        handle_key(&mut app, press(KeyCode::Char('?')));
+
+        let question = app.learning.current_question().expect("on a question");
+        let answer = format!("{:#x}", question.answer);
+        type_text(&mut app, &answer);
+        assert_eq!(app.learning.typed, answer);
+
+        handle_key(&mut app, press(KeyCode::Enter));
+        assert_eq!(app.learning.verdict, crate::learning::Verdict::Correct);
+        assert_eq!(app.learning.solved_count(), 1);
+    }
+
+    #[test]
+    fn a_wrong_answer_keeps_the_question_open() {
+        let mut app = app();
+        app.focus = Panel::Learn;
+        handle_key(&mut app, press(KeyCode::Char('?')));
+        let position = app.learning.position();
+
+        type_text(&mut app, "123456");
+        handle_key(&mut app, press(KeyCode::Backspace));
+        handle_key(&mut app, press(KeyCode::Enter));
+
+        assert_eq!(
+            app.learning.verdict,
+            crate::learning::Verdict::Wrong {
+                given: "12345".to_owned()
+            }
+        );
+        assert_eq!(
+            app.learning.position(),
+            position,
+            "a wrong answer must not skip past the explanation"
+        );
+        assert_eq!(app.learning.solved_count(), 0);
+    }
+
+    #[test]
+    fn escape_clears_a_typed_answer() {
+        let mut app = app();
+        app.focus = Panel::Learn;
+        handle_key(&mut app, press(KeyCode::Char('?')));
+        type_text(&mut app, "42");
+
+        handle_key(&mut app, press(KeyCode::Esc));
+        assert!(app.learning.typed.is_empty());
+        assert_eq!(app.learning.verdict, crate::learning::Verdict::Unanswered);
+    }
+
+    #[test]
+    fn tab_still_leaves_the_learning_panel() {
+        let mut app = app();
+        app.focus = Panel::Learn;
+        handle_key(&mut app, press(KeyCode::Tab));
+        assert_ne!(app.focus, Panel::Learn);
     }
 }
