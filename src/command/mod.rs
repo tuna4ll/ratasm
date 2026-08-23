@@ -701,4 +701,18 @@ mod tests {
             assert!(Command::from_id(id).is_some(), "{id} does not exist");
         }
     }
+
+    #[test]
+    fn every_command_identifier_is_documented() {
+        // The identifiers are what a user types into `[keys]`, so a command
+        // that is not written down is a command nobody can rebind.
+        let docs = include_str!("../../docs/keybindings.md");
+        for command in Command::all() {
+            let row = format!("| `{}` | {} |", command.id(), command.title());
+            assert!(
+                docs.contains(&row),
+                "docs/keybindings.md is missing the row: {row}"
+            );
+        }
+    }
 }

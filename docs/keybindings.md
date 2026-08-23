@@ -12,10 +12,36 @@
 | <kbd>F8</kbd> | Step over |
 | <kbd>F9</kbd> | Toggle breakpoint on the current line |
 | <kbd>F10</kbd> | Step one source line |
+| <kbd>F11</kbd> | Step out of the current call |
+| <kbd>F12</kbd> | Start a debug session |
+| <kbd>Shift</kbd>+<kbd>F5</kbd> | Continue *backwards* |
+| <kbd>Shift</kbd>+<kbd>F7</kbd> | Step one instruction backwards |
+| <kbd>Shift</kbd>+<kbd>F8</kbd> | Step backwards over a call |
 
 `F7` and `F10` differ in a way worth internalising: `F7` steps one *machine
 instruction*, `F10` steps one *source line*, which may be several instructions.
 While learning, `F7` is usually what you want.
+
+The <kbd>Shift</kbd> keys undo a step. They need GDB's process recording, which
+ratasm turns on when a session starts (`debugger.record` in `.ratasm.toml`
+switches it off). Stepping back past the start of the recording is refused
+rather than guessed at.
+
+### Learning and experimenting
+
+| Key | Action |
+| --- | --- |
+| <kbd>F1</kbd> | Learning panel: lessons and questions |
+| <kbd>F2</kbd> | Scratchpad: try one instruction |
+
+In the learning panel, <kbd>←</kbd> and <kbd>→</kbd> move through the material,
+<kbd>?</kbd> jumps to the questions, and on a question you type a value and
+press <kbd>Enter</kbd>. A wrong answer stays put and shows the worked
+explanation.
+
+In the scratchpad, you type an instruction and press <kbd>Enter</kbd> to run
+it. A line of the form `rax=0x10` sets a starting value instead of being
+assembled, and `rax=` removes it again. <kbd>Tab</kbd> still leaves the panel.
 
 ### Files
 
@@ -35,7 +61,7 @@ While learning, `F7` is usually what you want.
 | <kbd>Ctrl</kbd>+<kbd>K</kbd> | Syscall finder |
 | <kbd>Tab</kbd> | Next panel (indents inside the editor) |
 | <kbd>Shift</kbd>+<kbd>Tab</kbd> | Previous panel (dedents inside the editor) |
-| <kbd>Alt</kbd>+<kbd>1</kbd>…<kbd>9</kbd> | Focus a panel directly |
+| <kbd>Alt</kbd>+<kbd>1</kbd>…<kbd>9</kbd> | Focus one of the first nine panels directly |
 
 ### Editing
 
@@ -65,14 +91,14 @@ the palette teaches them.
 
 ## Configuring
 
-Bindings live in the `[keys]` section of your configuration file, naming a
-command:
+Bindings live in the `[keys]` section of your configuration file
+(`~/.config/ratasm/config.toml`), naming a command by its identifier:
 
 ```toml
 [keys]
-"F5" = "debugger.continue"
+"F5" = "debug.continue"
 "ctrl+s" = "file.save"
-"ctrl+shift+p" = "palette.open"
+"ctrl+shift+p" = "app.palette"
 ```
 
 Key names are case-insensitive. Modifiers are `ctrl`, `alt` and `shift`, joined
@@ -84,3 +110,76 @@ Conflicting bindings are reported at start-up rather than one silently shadowing
 the other.
 
 Run `ratasm` and open the command palette to see the full list of command names.
+
+## Command identifiers
+
+Every identifier accepted in `[keys]`. A test keeps this list in step with the
+code, so a command missing here is a build failure rather than a surprise.
+
+| Identifier | Command |
+| --- | --- |
+| `file.new` | New file |
+| `file.open` | Open file |
+| `file.save` | Save |
+| `file.save-as` | Save as |
+| `file.close` | Close file |
+| `app.quit` | Quit |
+| `edit.undo` | Undo |
+| `edit.redo` | Redo |
+| `edit.select-all` | Select all |
+| `edit.copy` | Copy |
+| `edit.cut` | Cut |
+| `edit.paste` | Paste |
+| `edit.indent` | Indent |
+| `edit.dedent` | Dedent |
+| `navigate.next-panel` | Next panel |
+| `navigate.previous-panel` | Previous panel |
+| `navigate.next-document` | Next document |
+| `navigate.previous-document` | Previous document |
+| `navigate.go-to-line` | Go to line |
+| `navigate.go-to-address` | Go to address |
+| `navigate.go-to-definition` | Go to definition |
+| `navigate.go-to-first-error` | Go to first error |
+| `search.find` | Find |
+| `search.next` | Find next |
+| `search.previous` | Find previous |
+| `search.replace` | Replace |
+| `build.build` | Build |
+| `build.build-debug` | Build with debug info |
+| `build.run` | Run |
+| `build.stop` | Stop the program |
+| `debug.start` | Start debugging |
+| `debug.continue` | Continue |
+| `debug.interrupt` | Interrupt |
+| `debug.step-instruction` | Step instruction |
+| `debug.step-over` | Step over |
+| `debug.step-line` | Step line |
+| `debug.step-out` | Step out |
+| `debug.step-back` | Step back |
+| `debug.step-back-over` | Step back over |
+| `debug.reverse-continue` | Run backwards |
+| `debug.stop` | Stop debugging |
+| `debug.toggle-breakpoint` | Toggle breakpoint |
+| `debug.clear-breakpoints` | Clear all breakpoints |
+| `view.cycle-register-format` | Change register format |
+| `view.toggle-disassembly-syntax` | Toggle Intel/AT&T syntax |
+| `view.cycle-theme` | Change theme |
+| `view.toggle-learning-mode` | Toggle learning mode |
+| `app.palette` | Command palette |
+| `app.syscalls` | Find a system call |
+| `app.scratchpad` | Open scratchpad |
+| `app.keybindings` | Show keyboard shortcuts |
+| `navigate.focus.editor` | Focus editor |
+| `navigate.focus.registers` | Focus registers |
+| `navigate.focus.flags` | Focus flags |
+| `navigate.focus.stack` | Focus stack |
+| `navigate.focus.call-stack` | Focus call stack |
+| `navigate.focus.memory` | Focus memory |
+| `navigate.focus.disassembly` | Focus disassembly |
+| `navigate.focus.breakpoints` | Focus breakpoints |
+| `navigate.focus.output` | Focus output |
+| `navigate.focus.explain` | Focus explain |
+| `navigate.focus.syscalls` | Focus syscalls |
+| `navigate.focus.explorer` | Focus explorer |
+| `navigate.focus.scratchpad` | Focus scratchpad |
+| `navigate.focus.learn` | Focus learn |
