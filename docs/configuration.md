@@ -95,6 +95,71 @@ identically either way.
 `ratasm` searches for a project file in the file's directory and then upwards,
 so a file deep inside a project still finds it.
 
+## User settings: `~/.config/ratasm/config.toml`
+
+Project settings describe *a project*; user settings describe *you*, and follow
+you between projects. The file lives at `$XDG_CONFIG_HOME/ratasm/config.toml`,
+falling back to `~/.config/ratasm/config.toml`. It is optional — most people
+never write one.
+
+```toml
+[appearance]
+theme = "dark"          # dark, light, ansi16, colorblind
+# unicode = false       # omit to detect from the locale
+
+[editor]
+indent_width = 4
+line_numbers = true
+highlight_current_line = true
+match_brackets = true
+
+[debugger]
+gdb = "gdb"
+timeout_ms = 10000
+memory_window = 256
+stack_depth = 16
+record = true
+
+[keys]
+"F5" = "debugger.continue"
+```
+
+### `[appearance]`
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `theme` | `"dark"` | One of `dark`, `light`, `ansi16`, `colorblind`. |
+| `unicode` | *(detected)* | Force the Unicode or the ASCII glyph set. |
+
+### `[editor]`
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `indent_width` | `4` | Spaces inserted by one indent. |
+| `line_numbers` | `true` | Show line numbers beside the source. |
+| `highlight_current_line` | `true` | Tint the line the cursor is on. |
+| `match_brackets` | `true` | Mark the bracket matching the one at the cursor. |
+
+### `[debugger]`
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `gdb` | `"gdb"` | The debugger executable, looked up on `PATH`. |
+| `timeout_ms` | `10000` | Milliseconds to wait for one GDB command. |
+| `memory_window` | `256` | Bytes the memory panel reads at a time. |
+| `stack_depth` | `16` | Stack slots shown around the stack pointer. |
+| `record` | `true` | Record execution so it can be stepped backwards. |
+
+Recording is what makes <kbd>Shift</kbd>+<kbd>F7</kbd> able to undo a step. It
+costs time per instruction, which is invisible for the small programs ratasm is
+for and would not be for a large one, so `record = false` turns it off.
+
+### `[keys]`
+
+Each entry rebinds one chord, by the command identifiers listed in
+[keybindings.md](keybindings.md). An unknown command name is a load error
+rather than a binding that quietly does nothing.
+
 ## Command-line options
 
 | Option | Meaning |
