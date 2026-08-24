@@ -23,6 +23,12 @@ const NO_SESSION: &str =
     "No debug session.\n\nPress F12 to start one, or F6 to build first.\nRegisters, flags, the \
      stack and memory are read from the running program.";
 
+/// Columns reserved for a register's name.
+///
+/// Wide enough for the longest name plus the space that separates it from its
+/// value; `RFLAGS` is six characters, so six is one too few.
+const NAME_WIDTH: usize = 7;
+
 /// Draws the register panel.
 pub fn draw_registers(frame: &mut Frame, app: &App, area: Rect, focused: bool) {
     let block = super::panel_block(&app.theme, Panel::Registers, focused);
@@ -47,7 +53,8 @@ pub fn draw_registers(frame: &mut Frame, app: &App, area: Rect, focused: bool) {
         crate::debugger::registers::Format::Hex => 18,
         _ => 20,
     };
-    let column_width = 7 + value_width + 2;
+    // One marker column, the name, the value, and a gap.
+    let column_width = 1 + NAME_WIDTH + value_width + 2;
     let columns = usize::from(inner.width).max(1) / column_width.max(1);
     let columns = columns.clamp(1, 2);
 
@@ -73,10 +80,16 @@ pub fn draw_registers(frame: &mut Frame, app: &App, area: Rect, focused: bool) {
         lines.push(Line::from(vec![
             Span::styled(format!("{} ", symbols.changed), theme.changed()),
             Span::styled(
-                format!(
-                    "{} changed: {}",
-                    entry.register.display_name(),
-                    entry.register.summary
+                // Truncated rather than wrapped: wrapping this paragraph
+                // would also wrap the register rows above it.
+                super::truncate(
+                    &format!(
+                        "{} changed: {}",
+                        entry.register.display_name(),
+                        entry.register.summary
+                    ),
+                    usize::from(inner.width).saturating_sub(2),
+                    symbols.ellipsis,
                 ),
                 theme.dim(),
             ),
@@ -98,7 +111,7 @@ fn register_spans<'a>(entry: &RegisterEntry, app: &App, theme: &Theme) -> Vec<Sp
     };
 
     let name = Span::styled(
-        format!("{:<6}", entry.register.display_name()),
+        format!("{:<NAME_WIDTH$}", entry.register.display_name()),
         if changed {
             theme.changed()
         } else {
@@ -328,5 +341,20 @@ mod tests {
         // A dead end with no next step is the worst kind of empty state.
         assert!(NO_SESSION.contains("F12"));
         assert!(NO_SESSION.contains("F6"));
+    }
+
+    #[test]
+    fn the_name_column_leaves_a_space_after_the_longest_name() {
+        // RFLAGS is six characters. A six-wide field ran the name straight
+        // into its value, which is how this was noticed.
+        let longest = crate::instruction::registers::all()
+            .iter()
+            .map(|register| register.display_name().chars().count())
+            .max()
+            .expect("there are registers");
+        assert!(
+            longest < NAME_WIDTH,
+            "{longest} characters do not fit a {NAME_WIDTH}-wide column with a gap"
+        );
     }
 }
