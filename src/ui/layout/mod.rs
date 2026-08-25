@@ -175,6 +175,15 @@ fn wide(body: Rect, document_bar: Rect, status_bar: Rect, focus: Panel) -> Layou
         (Panel::Output, side_bottom[1]),
     ];
 
+    // Reading material and the scratchpad need room to be readable, so they
+    // take the disassembly and explanation slots together rather than being
+    // squeezed into a side panel. The editor and the CPU state stay visible,
+    // which is the point of reading them here rather than in a book.
+    if matches!(focus, Panel::Scratchpad | Panel::Learn) {
+        panels.retain(|(panel, _)| !matches!(panel, Panel::Disassembly | Panel::Explain));
+        panels.push((focus, union(left[1], left[2])));
+    }
+
     // Breakpoints share the output slot unless the user is looking at them.
     if focus == Panel::Breakpoints {
         panels.retain(|(panel, _)| *panel != Panel::Output);
@@ -191,6 +200,16 @@ fn wide(body: Rect, document_bar: Rect, status_bar: Rect, focus: Panel) -> Layou
         document_bar,
         status_bar,
     }
+}
+
+/// The smallest rectangle covering both of two stacked areas.
+fn union(top: Rect, bottom: Rect) -> Rect {
+    Rect::new(
+        top.x,
+        top.y,
+        top.width.max(bottom.width),
+        (bottom.y + bottom.height).saturating_sub(top.y),
+    )
 }
 
 /// The editor plus a side column, with the rest behind tabs.
@@ -285,6 +304,30 @@ mod tests {
     /// Whether two rectangles share any cell.
     fn overlaps(a: Rect, b: Rect) -> bool {
         a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height
+    }
+
+    #[test]
+    fn the_material_takes_a_readable_area_when_it_has_focus() {
+        for focus in [Panel::Learn, Panel::Scratchpad] {
+            let layout = compute(wide_area(), focus);
+            let area = layout
+                .panels
+                .iter()
+                .find(|(panel, _)| *panel == focus)
+                .map(|(_, area)| *area)
+                .unwrap_or_else(|| panic!("{focus} is not placed"));
+
+            // Taller than the single slot it replaces, and never overlapping
+            // the editor above it.
+            assert!(area.height >= 10, "{focus} got {} rows", area.height);
+            let editor = layout
+                .panels
+                .iter()
+                .find(|(panel, _)| *panel == Panel::Editor)
+                .map(|(_, area)| *area)
+                .expect("the editor stays visible");
+            assert!(area.y >= editor.y + editor.height);
+        }
     }
 
     #[test]
