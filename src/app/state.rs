@@ -21,7 +21,7 @@ use crate::debugger::memory::MemoryBlock;
 use crate::debugger::registers::{Format, RegisterFile};
 use crate::debugger::state::{DebuggerState, StateMachine, Transition};
 use crate::disassembler::{DisassemblyLine, Syntax};
-use crate::editor::{Movement, SelectionMode, Workspace};
+use crate::editor::{Movement, Position, Range, SelectionMode, Workspace};
 use crate::instruction::Database as InstructionDatabase;
 use crate::process::ProcessOutput;
 use crate::project::Project;
@@ -70,6 +70,8 @@ pub enum Effect {
     OpenFile(PathBuf),
     /// Assemble and run the scratchpad snippet.
     RunScratchpad,
+    /// Offer text to the terminal's clipboard.
+    SetSystemClipboard(String),
 }
 
 /// How far a step goes.
@@ -222,6 +224,11 @@ pub struct App {
     pub scratchpad_result: Option<Result<crate::scratchpad::Outcome, String>>,
     /// Where the reader is in the material.
     pub learning: crate::learning::Progress,
+    /// Text cut or copied, used by paste.
+    ///
+    /// ratasm keeps its own copy because the terminal will accept text for
+    /// the system clipboard but will not reliably give any back.
+    pub clipboard: String,
 
     /// Instruction semantics, loaded once.
     pub instructions: InstructionDatabase,
@@ -286,6 +293,7 @@ impl App {
             scratchpad: crate::scratchpad::Scratchpad::new(),
             scratchpad_result: None,
             learning: crate::learning::Progress::new(),
+            clipboard: String::new(),
 
             instructions: InstructionDatabase::load()?,
             syscalls: SyscallDatabase::load()?,
@@ -298,6 +306,49 @@ impl App {
             should_quit: false,
             settings,
         })
+    }
+
+    /// Copies the selection, or the whole line when there is none.
+    ///
+    /// Copying the current line with nothing selected is what every editor
+    /// does, and it is the common case: you want this instruction, and
+    /// selecting it first is a step you should not have to take.
+    fn copy(&mut self, remove: bool) -> Effect {
+        let document = self.workspace.active_mut();
+        let selected = document.has_selection();
+
+        let text = if selected {
+            document.selected_text()
+        } else {
+            let line = document.cursor().line;
+            format!("{}\n", document.buffer().line_or_empty(line))
+        };
+
+        if text.trim().is_empty() && !selected {
+            self.status = Status::info("The line is empty");
+            return Effect::None;
+        }
+
+        // With nothing selected, cutting takes the line the copy took —
+        // including its newline, so the lines below move up.
+        if remove && !document.delete_selection() {
+            let line = document.cursor().line;
+            let buffer = document.buffer();
+            let end = if line + 1 < buffer.line_count() {
+                Position::new(line + 1, 0)
+            } else {
+                Position::new(line, buffer.line_len(line))
+            };
+            document.replace_range(Range::new(Position::new(line, 0), end), "");
+        }
+
+        self.clipboard = text.clone();
+        self.status = Status::info(format!(
+            "{} {}",
+            if remove { "Cut" } else { "Copied" },
+            describe(&text)
+        ));
+        Effect::SetSystemClipboard(text)
     }
 
     /// Applies a command, returning any I/O the run loop must perform.
@@ -361,10 +412,16 @@ impl App {
                 self.workspace.active_mut().dedent();
                 Effect::None
             }
-            Command::Copy | Command::Cut | Command::Paste => {
-                // The clipboard is not wired up yet; saying so is better than
-                // appearing to work.
-                self.status = Status::warning("The clipboard is not connected yet");
+            Command::Copy => self.copy(false),
+            Command::Cut => self.copy(true),
+            Command::Paste => {
+                if self.clipboard.is_empty() {
+                    self.status = Status::info("Nothing has been copied yet");
+                    return Effect::None;
+                }
+                let text = self.clipboard.clone();
+                self.workspace.active_mut().insert(&text);
+                self.status = Status::info(format!("Pasted {}", describe(&text)));
                 Effect::None
             }
 
@@ -963,6 +1020,20 @@ impl App {
     }
 }
 
+/// Describes an amount of copied text for the status bar.
+fn describe(text: &str) -> String {
+    let lines = text.lines().count().max(1);
+    if lines > 1 {
+        format!("{lines} lines")
+    } else {
+        let characters = text.trim_end_matches('\n').chars().count();
+        format!(
+            "{characters} character{}",
+            if characters == 1 { "" } else { "s" }
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1373,14 +1444,71 @@ mod tests {
     }
 
     #[test]
-    fn unimplemented_features_say_so_rather_than_pretending() {
-        // Silently doing nothing would read as a bug.
-        let mut app = app();
-        app.apply(&Command::Copy);
-        assert_eq!(app.status.severity, Severity::Warning);
+    fn copying_a_selection_offers_it_to_the_terminal_too() {
+        let mut app = app_with_source("mov rax, 1\nmov rdi, 0\n");
+        app.workspace
+            .active_mut()
+            .select_range(Range::new(Position::new(0, 0), Position::new(0, 3)));
 
-        app.apply(&Command::OpenScratchpad);
-        assert_eq!(app.status.severity, Severity::Warning);
+        let effect = app.apply(&Command::Copy);
+        assert_eq!(app.clipboard, "mov");
+        assert_eq!(effect, Effect::SetSystemClipboard("mov".to_owned()));
+    }
+
+    #[test]
+    fn copying_with_no_selection_takes_the_whole_line() {
+        let mut app = app_with_source("mov rax, 1\nmov rdi, 0\n");
+        app.apply(&Command::Copy);
+        assert_eq!(app.clipboard, "mov rax, 1\n");
+    }
+
+    #[test]
+    fn cutting_removes_what_it_copied() {
+        let mut app = app_with_source("mov rax, 1\nmov rdi, 0\n");
+        app.apply(&Command::Cut);
+
+        assert_eq!(app.clipboard, "mov rax, 1\n");
+        assert_eq!(
+            app.workspace.active().buffer().to_text(),
+            "mov rdi, 0\n",
+            "the line itself must be gone, not just copied"
+        );
+    }
+
+    #[test]
+    fn pasting_puts_back_exactly_what_was_cut() {
+        let mut app = app_with_source("mov rax, 1\nmov rdi, 0\n");
+        let before = app.workspace.active().buffer().to_text();
+
+        app.apply(&Command::Cut);
+        app.apply(&Command::Paste);
+
+        assert_eq!(app.workspace.active().buffer().to_text(), before);
+    }
+
+    #[test]
+    fn pasting_an_empty_clipboard_says_so_rather_than_doing_nothing() {
+        let mut app = app_with_source("mov rax, 1\n");
+        let effect = app.apply(&Command::Paste);
+
+        assert_eq!(effect, Effect::None);
+        assert_eq!(app.status.severity, Severity::Info);
+        assert!(app.status.text.contains("copied"));
+    }
+
+    #[test]
+    fn cutting_the_last_line_does_not_run_off_the_end() {
+        let mut app = app_with_source("only line");
+        app.apply(&Command::Cut);
+        assert_eq!(app.workspace.active().buffer().to_text(), "");
+    }
+
+    #[test]
+    fn an_amount_of_text_is_described_for_the_status_bar() {
+        assert_eq!(describe("x"), "1 character");
+        assert_eq!(describe("mov"), "3 characters");
+        assert_eq!(describe("mov rax, 1\n"), "10 characters");
+        assert_eq!(describe("one\ntwo\n"), "2 lines");
     }
 
     #[test]

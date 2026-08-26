@@ -27,6 +27,7 @@ use crate::debugger::session::GdbSession;
 use crate::debugger::state::Transition;
 use crate::disassembler;
 use crate::editor::workspace;
+use crate::ui::clipboard;
 use crate::ui::render;
 use crate::ui::Tui;
 
@@ -180,6 +181,31 @@ async fn perform(app: &mut App, session: &mut Option<GdbSession>, effect: Effect
                 }
             }
         }
+
+        Effect::SetSystemClipboard(text) => match clipboard::set_sequence(&text) {
+            // The sequence goes straight to the terminal rather than through
+            // ratatui: it draws nothing, it asks the terminal emulator for
+            // something.
+            Some(sequence) => {
+                use std::io::Write as _;
+                let mut out = std::io::stdout();
+                if write!(out, "{sequence}")
+                    .and_then(|()| out.flush())
+                    .is_err()
+                {
+                    // ratasm's own clipboard already holds the text, so
+                    // pasting still works; only the system clipboard missed
+                    // out, and saying so would be noise on every copy.
+                    tracing::debug!("could not write the clipboard sequence");
+                }
+            }
+            None => {
+                app.status = Status::warning(format!(
+                    "Copied within ratasm; too large for the terminal clipboard (over {} KiB)",
+                    clipboard::MAX_BYTES / 1024
+                ));
+            }
+        },
     }
 }
 
