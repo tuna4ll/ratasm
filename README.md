@@ -55,11 +55,18 @@ This is an honest account of what works today.
 | Disassembler: ELF inspection and x86-64 decoding | Working |
 | Instruction explainer, syscall database, flag analysis | Working |
 | Terminal UI: panels, responsive layout, command palette | Working |
-| Learning mode, scratchpad, clipboard | Not yet |
+| Reverse execution: stepping and running backwards | Working |
+| Learning mode and the scratchpad | Working |
+| Copy and paste, including the system clipboard over OSC 52 | Working |
 
-Everything marked *working* is covered by the test suite — 860 tests, including
-ones that assemble and run real programs and drive a real GDB. The two
-unfinished features say so when you reach for them rather than doing nothing.
+Everything above is covered by the test suite — 941 tests, including ones that
+assemble and run real programs, drive a real GDB, and check every answer in the
+learning material against the processor.
+
+Copying sends the text to your terminal with OSC 52, which works over SSH but
+which some terminals disable; pasting uses ratasm's own copy, because a
+terminal that ignores the read request answers with silence rather than an
+error, and a paste that silently does nothing is worse than no paste at all.
 
 ## Installing
 
@@ -126,28 +133,45 @@ while you watch the registers move.
 
 ## Screen layout
 
-Panels adapt to the terminal. Below roughly 100 columns they collapse into
-tabs rather than being squeezed into uselessness.
+<img src="assets/screenshot-debug.png" alt="ratasm paused four instructions into a program" width="100%">
 
-```text
-┌─ main.asm ────────────────────────┬─ Registers ──────────────┐
-│  7   _start:                      │  RAX  0x000000000000003c │
-│  8 ●     mov rax, 1               │  RBX  0x0000000000000000 │
-│  9 ▶     mov rdi, 1               │  RSP  0x00007ffd8f2a1b40 │
-│ 10       lea rsi, [rel message]   │  RIP  0x00000000004000b7 │
-│ 11       syscall                  ├─ Flags ──────────────────┤
-│                                   │  ZF ■   would take: je   │
-├─ Disassembly ─────────────────────┤  CF □   SF □   OF □      │
-│ 4000b0  b8 3c 00 00 00  mov eax,… ├─ Stack ──────────────────┤
-│ 4000b7  bf 01 00 00 00  mov edi,… │ →7ffd8f2a1b40  00000001 │
-├─ Explain ─────────────────────────┴──────────────────────────┤
-│ Effect: RDI ← 1     Writes: RDI     Flags: none              │
-└──────────────────────────────────────────────────────────────┘
-```
+The program above is the one `ratasm new` writes, paused on its `syscall` after
+four presses of <kbd>F7</kbd>. Everything on screen is live: RDX is highlighted
+because that instruction changed it, the flags panel lists the conditional
+jumps that would be taken as the flags stand, and the explanation reads the
+real operands — `kernel executes the call in 0x1` is RAX's actual value, not an
+example.
 
-The editor, registers, flags, stack, memory, disassembly, breakpoints, build
-output, instruction explanation, syscall finder and symbol explorer are all
-panels; <kbd>Tab</kbd> cycles between them.
+Panels adapt to the terminal. Below roughly 100 columns they collapse into tabs
+rather than being squeezed into uselessness. The editor, registers, flags,
+stack, call stack, memory, disassembly, breakpoints, build output, instruction
+explanation, syscall finder, symbol explorer, scratchpad and learning panel are
+all panels; <kbd>Tab</kbd> cycles between them.
+
+### The scratchpad
+
+<img src="assets/screenshot-scratchpad.png" alt="the scratchpad running add rax, rbx" width="790">
+
+<kbd>F2</kbd> opens a place to try one instruction without making a project.
+Type `rax=1` to set a starting value and `add rax, rbx` to run it; ratasm
+assembles a small program, runs it under GDB and reports what actually changed.
+Nothing is simulated — including `PF=1` above, which is set because 3 has an
+even number of one bits.
+
+The snippet is assembled and executed natively on your machine. It is not a
+sandbox, and the panel says so.
+
+### Learning mode
+
+<img src="assets/screenshot-learning.png" alt="a learning-mode question answered correctly" width="790">
+
+<kbd>F1</kbd> opens lessons on the registers, the System V ABI, the stack, the
+flags and the syscall convention, followed by questions about what a given
+instruction leaves behind. A wrong answer stays on the question and shows the
+working rather than moving on.
+
+Every stated answer is checked against a real processor by the test suite, so
+the material cannot drift away from what your machine actually does.
 
 ## Keyboard shortcuts
 
@@ -159,6 +183,9 @@ panels; <kbd>Tab</kbd> cycles between them.
 | <kbd>F8</kbd> | Step over |
 | <kbd>F9</kbd> | Toggle breakpoint |
 | <kbd>F10</kbd> | Step one source line |
+| <kbd>Shift</kbd>+<kbd>F7</kbd> | Step one instruction *backwards* |
+| <kbd>F1</kbd> | Learning panel |
+| <kbd>F2</kbd> | Scratchpad |
 | <kbd>Ctrl</kbd>+<kbd>S</kbd> | Save |
 | <kbd>Ctrl</kbd>+<kbd>O</kbd> | Open |
 | <kbd>Ctrl</kbd>+<kbd>P</kbd> | Command palette |
@@ -217,6 +244,15 @@ the defaults and treats that file's directory as the project root.
 - **Source-level stepping needs debug information.** Build with debug info
   enabled or you get instruction-level stepping only.
 - **One debug session at a time.** No multi-threaded target support.
+- **Stepping backwards needs GDB's recording.** It is on by default and costs
+  time per instruction; `record = false` turns it off, and stepping back past
+  the start of the recording is refused rather than guessed at.
+- **Pasting only sees what ratasm copied.** Copying reaches your system
+  clipboard through OSC 52 where the terminal allows it; reading it back is not
+  something a terminal reliably permits.
+- **The program's own input and output are captured, not interactive.** A
+  program that expects to be typed at while it runs is better run outside
+  ratasm; `stdin` in `.ratasm.toml` supplies fixed input.
 
 ## Security note
 
@@ -252,13 +288,12 @@ Architecture notes for anyone finding their way around:
 
 ## Roadmap
 
-- Learning mode: guided exercises on the ABI, the stack and calling conventions
-- Scratchpad: set up registers, run one instruction, compare the result
+- Watchpoints and conditional breakpoints
+- A pseudo-terminal for the program, so interactive programs can be debugged
 - AT&T syntax rendering throughout, not just in the disassembler
 - GAS source support
+- More lessons, and exercises that assemble what you write
 - AArch64 and RISC-V back ends
-- Watchpoints and conditional breakpoints
-- Time-travel debugging via GDB's reverse execution
 
 ## Licence
 
