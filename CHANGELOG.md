@@ -45,6 +45,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   reported rather than silently shadowing one another.
 - Command-line interface: `new`, `build`, `run` and `doctor` work without a
   terminal, so the toolchain composes with Make and CI.
+- Call stack panel built from GDB's frame list, which preserves the repeated
+  `frame=` keys a map representation would have collapsed.
+- Explanations that read live register values: `RAX ← RAX + RBX` becomes
+  `0x1 ← 0x1 + 0x2` while the program is stopped. Memory operands are left
+  unresolved rather than guessed at.
+- Reverse execution: stepping and continuing backwards through GDB's process
+  recording, which is enabled once the program is live and can be turned off
+  with `debugger.record`.
+- Scratchpad: set starting register values, run one instruction, and see which
+  registers and flags it actually changed. The snippet is assembled and run
+  natively; it is not a sandbox, and the panel says so.
+- Learning mode: lessons on the registers, the System V AMD64 ABI, the stack,
+  the flags and the Linux syscall convention, followed by questions whose
+  stated answers are checked against a real processor by the test suite.
+- Copy, cut and paste, with copied text offered to the terminal's clipboard
+  through OSC 52 so it works over SSH. Paste uses ratasm's own copy, because a
+  terminal that ignores the read request answers with silence.
 
 ### Fixed
 
@@ -57,5 +74,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The disassembler resynchronises one byte after an undecodable byte, matching
   `objdump`. Letting the decoder consume the following opcode's escape byte
   discarded the next valid instruction.
+- The flags panel is no longer blank. Filtering the narrow pseudo-registers by
+  name dropped `eflags`, which GDB never calls `rflags`; the widest reported
+  alias for each register is kept instead.
+- A register name six characters long no longer runs into its value: `RFLAGS`
+  filled the whole name column, leaving no separating space.
+- The explanation panel describes the file execution stopped in, rather than
+  whichever file happens to be open in the editor.
 
 [Unreleased]: https://github.com/tuna4ll/ratasm/compare/main...HEAD
