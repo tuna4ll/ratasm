@@ -107,9 +107,23 @@ rather than typed from memory. Entries whose arguments are not modelled are
 marked `detailed: false` and carry nothing else; tests enforce that such an
 entry invents no arguments, no return value and no example.
 
+## Learning and the scratchpad
+
+Both are modules that know nothing about a terminal. `learning` holds lessons
+and questions as data with a `Progress` value describing where the reader is;
+`scratchpad` takes some starting register values and one instruction and hands
+back what changed.
+
+The scratchpad does not model the instruction. It generates a small program
+with the snippet bracketed by two labels, assembles it, and reads the registers
+at both labels through GDB — so the answer comes from the processor rather than
+from an emulator that could be wrong. That is also what makes the learning
+material checkable: a test runs every question through the scratchpad and fails
+if a stated answer disagrees with the machine.
+
 ## Testing
 
-Around 650 tests, all runnable without a terminal. The parsers are exercised
+Around 940 tests, all runnable without a terminal. The parsers are exercised
 from fixtures captured from real GDB and NASM output. Tests needing `gdb`,
 `nasm` or `ld` skip themselves when those are absent, so the suite passes on a
 bare machine while still covering the real thing when it is available.

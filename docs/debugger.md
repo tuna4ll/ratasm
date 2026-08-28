@@ -50,7 +50,7 @@ stack=[frame={...},frame={...},frame={...}]
 That is a list whose elements are *results sharing a key*. Represented as a map
 it would keep only the last frame. `Value::elements_named` retrieves them all.
 
-## Two details that caused bugs
+## Details that caused bugs
 
 **Program exit is a stop reason, not a record class.** GDB reports a finished
 program as `*stopped,reason="exited-normally"` — an ordinary stop record.
@@ -60,6 +60,21 @@ waiting to step a process that no longer exists.
 **Exit codes are octal.** A program exiting with status 9 is reported as
 `exit-code="011"`. Reading that as decimal gives 11. Verified against GDB 17.2
 and pinned by a test.
+
+**`--start` breaks on `main`, which assembly programs do not have.** A
+`_start`-only program ran to completion instead of stopping, so ratasm sets a
+temporary breakpoint on the ELF entry address it read itself and then runs.
+
+**GDB lists narrow pseudo-registers beside the full ones.** `-data-list-register-values`
+reports `rsp` and then `esp`; taking the last value seen left `RSP` holding
+only its low half, breaking every stack and memory read. Filtering by name
+instead then dropped the flags register, because GDB calls it `eflags` and
+never `rflags`. What works is keeping the widest alias reported for each
+register, which needs no list of exceptions.
+
+**Recording needs a live process.** `record full` answers "Target native does
+not support this command" when there is no inferior, so ratasm enables it after
+the first stop rather than before the program starts.
 
 ## The state machine
 
@@ -84,6 +99,18 @@ table decides whether it succeeds.
 A GDB process can die at any moment, from any state, so `force_failed` always
 succeeds — refusing that transition would leave the UI claiming a session that
 no longer exists.
+
+## Stepping backwards
+
+With recording on, GDB can undo an instruction. `-exec-step-instruction
+--reverse` and its relatives step the recorded execution backwards, and ratasm
+binds them to <kbd>Shift</kbd> plus the forward key. The recording starts at the
+program's entry point, so stepping back past that is refused by GDB and
+reported as such rather than being papered over.
+
+Recording costs time per instruction. That is invisible for the programs ratasm
+is for, and would not be for a large one, so `debugger.record = false` turns it
+off.
 
 ## Breakpoints across sessions
 
