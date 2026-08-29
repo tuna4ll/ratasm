@@ -40,6 +40,48 @@ const STOP_TIMEOUT: Duration = Duration::from_secs(15);
 /// How often to redraw when nothing has happened.
 const TICK: Duration = Duration::from_millis(250);
 
+/// The result of work that ran off the event loop.
+///
+/// Running a program can take as long as its timeout, and the scratchpad has
+/// to assemble and debug one. Awaiting either inside the event loop would stop
+/// the interface redrawing and stop it reading keys, which is exactly when a
+/// user reaches for the stop key.
+enum Background {
+    /// The program finished, or could not be started.
+    Ran(Result<crate::process::ProcessOutput, String>),
+    /// The scratchpad snippet finished, or could not be run.
+    Scratchpad(Result<crate::scratchpad::Outcome, String>),
+}
+
+/// Work in flight, so a second request can be refused and the first cancelled.
+#[derive(Default)]
+struct Running {
+    /// The task, kept so stopping can abort it.
+    handle: Option<tokio::task::JoinHandle<()>>,
+}
+
+impl Running {
+    /// Whether something is still running.
+    fn is_busy(&self) -> bool {
+        self.handle.as_ref().is_some_and(|task| !task.is_finished())
+    }
+
+    /// Aborts the task, if any.
+    ///
+    /// The child process is killed with it: every command is spawned with
+    /// `kill_on_drop`, so dropping the future that owns it does not leave a
+    /// program running with nobody watching.
+    fn cancel(&mut self) -> bool {
+        match self.handle.take() {
+            Some(task) if !task.is_finished() => {
+                task.abort();
+                true
+            }
+            _ => false,
+        }
+    }
+}
+
 /// Runs the interface until the user quits.
 ///
 /// # Errors
@@ -51,6 +93,8 @@ const TICK: Duration = Duration::from_millis(250);
 pub async fn run(mut app: App, terminal: &mut Tui) -> Result<()> {
     let mut events = EventStream::new();
     let mut session: Option<GdbSession> = None;
+    let (finished_tx, mut finished_rx) = tokio::sync::mpsc::unbounded_channel::<Background>();
+    let mut running = Running::default();
 
     loop {
         let size = terminal.size().context("cannot read the terminal size")?;
@@ -75,12 +119,21 @@ pub async fn run(mut app: App, terminal: &mut Tui) -> Result<()> {
                 // sensible response.
                 Some(Err(_)) | None => break,
             },
+            Some(done) = finished_rx.recv() => {
+                running.handle = None;
+                finish_background(&mut app, done);
+                Effect::None
+            },
             () = tokio::time::sleep(TICK) => Effect::None,
         };
 
-        perform(&mut app, &mut session, effect).await;
+        perform(&mut app, &mut session, &finished_tx, &mut running, effect).await;
         drain_debugger_events(&mut app, &mut session).await;
     }
+
+    // A program still running belongs to this session and nothing else will
+    // reap it.
+    running.cancel();
 
     // Never leave GDB holding the program's process group.
     if let Some(session) = session {
@@ -95,7 +148,13 @@ fn handle_key_event(app: &mut App, key: KeyEvent) -> Effect {
 }
 
 /// Performs an effect, folding the result back into the application.
-async fn perform(app: &mut App, session: &mut Option<GdbSession>, effect: Effect) {
+async fn perform(
+    app: &mut App,
+    session: &mut Option<GdbSession>,
+    finished: &tokio::sync::mpsc::UnboundedSender<Background>,
+    running: &mut Running,
+    effect: Effect,
+) {
     match effect {
         Effect::None | Effect::Quit => {}
 
@@ -104,13 +163,19 @@ async fn perform(app: &mut App, session: &mut Option<GdbSession>, effect: Effect
         }
 
         Effect::Run => {
-            if build(app, false).await {
-                run_program(app).await;
+            if running.is_busy() {
+                app.status = Status::warning("Something is already running");
+            } else if build(app, false).await {
+                start_program(app, finished, running);
             }
         }
 
         Effect::StopProgram => {
-            app.status = Status::info("Programs already run with a timeout; nothing to stop");
+            if running.cancel() {
+                app.status = Status::warning("Stopped");
+            } else {
+                app.status = Status::info("Nothing is running");
+            }
         }
 
         Effect::SaveFile(path) => match app.workspace.save_active_as(&path) {
@@ -164,21 +229,10 @@ async fn perform(app: &mut App, session: &mut Option<GdbSession>, effect: Effect
         Effect::ReadMemory(address) => read_memory(app, session, address).await,
 
         Effect::RunScratchpad => {
-            app.status = Status::info("Running the snippet…");
-            let gdb = app.settings.debugger.gdb.clone();
-            match app.scratchpad.run(&gdb).await {
-                Ok(outcome) => {
-                    app.status = if outcome.is_empty() {
-                        Status::info("The snippet changed nothing")
-                    } else {
-                        Status::success(format!("{} register(s) changed", outcome.changes.len()))
-                    };
-                    app.scratchpad_result = Some(Ok(outcome));
-                }
-                Err(error) => {
-                    app.status = Status::error(error.to_string());
-                    app.scratchpad_result = Some(Err(error.to_string()));
-                }
+            if running.is_busy() {
+                app.status = Status::warning("Something is already running");
+            } else {
+                start_snippet(app, finished, running);
             }
         }
 
@@ -243,8 +297,12 @@ async fn build(app: &mut App, debug: bool) -> bool {
     }
 }
 
-/// Runs the built program.
-async fn run_program(app: &mut App) {
+/// Starts the built program on its own task.
+fn start_program(
+    app: &mut App,
+    finished: &tokio::sync::mpsc::UnboundedSender<Background>,
+    running: &mut Running,
+) {
     let Some(executable) = app
         .build
         .as_ref()
@@ -254,9 +312,54 @@ async fn run_program(app: &mut App) {
     };
 
     app.status = Status::info("Running…");
-    match assembler::run_executable(&app.project, &executable).await {
-        Ok(output) => app.finish_run(output),
-        Err(error) => app.status = Status::error(error.to_string()),
+    let project = app.project.clone();
+    let finished = finished.clone();
+    running.handle = Some(tokio::spawn(async move {
+        let result = assembler::run_executable(&project, &executable)
+            .await
+            .map_err(|error| error.to_string());
+        // The receiver is gone only when the interface has already exited,
+        // in which case there is nobody left to tell.
+        let _ = finished.send(Background::Ran(result));
+    }));
+}
+
+/// Starts the scratchpad snippet on its own task.
+fn start_snippet(
+    app: &mut App,
+    finished: &tokio::sync::mpsc::UnboundedSender<Background>,
+    running: &mut Running,
+) {
+    app.status = Status::info("Running the snippet…");
+    let gdb = app.settings.debugger.gdb.clone();
+    let scratchpad = app.scratchpad.clone();
+    let finished = finished.clone();
+    running.handle = Some(tokio::spawn(async move {
+        let result = scratchpad
+            .run(&gdb)
+            .await
+            .map_err(|error| error.to_string());
+        let _ = finished.send(Background::Scratchpad(result));
+    }));
+}
+
+/// Folds the result of a background task back into the application.
+fn finish_background(app: &mut App, done: Background) {
+    match done {
+        Background::Ran(Ok(output)) => app.finish_run(output),
+        Background::Ran(Err(error)) => app.status = Status::error(error),
+        Background::Scratchpad(Ok(outcome)) => {
+            app.status = if outcome.is_empty() {
+                Status::info("The snippet changed nothing")
+            } else {
+                Status::success(format!("{} register(s) changed", outcome.changes.len()))
+            };
+            app.scratchpad_result = Some(Ok(outcome));
+        }
+        Background::Scratchpad(Err(error)) => {
+            app.status = Status::error(error.clone());
+            app.scratchpad_result = Some(Err(error));
+        }
     }
 }
 
@@ -733,6 +836,19 @@ mod tests {
         assert_eq!(app.status.severity, crate::app::Severity::Warning);
     }
 
+    /// Performs one effect the way the run loop does, then waits for any
+    /// background work it started so a test can assert on the result.
+    async fn settle(app: &mut App, session: &mut Option<GdbSession>, effect: Effect) {
+        let (finished, mut incoming) = tokio::sync::mpsc::unbounded_channel();
+        let mut running = Running::default();
+        perform(app, session, &finished, &mut running, effect).await;
+        if running.handle.is_some() {
+            if let Some(done) = incoming.recv().await {
+                finish_background(app, done);
+            }
+        }
+    }
+
     #[tokio::test]
     async fn building_a_working_project_produces_disassembly() {
         if !crate::process::is_available(Path::new("nasm"))
@@ -783,8 +899,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("temp dir");
         let mut app = app_for(dir.path());
 
-        build(&mut app, false).await;
-        run_program(&mut app).await;
+        settle(&mut app, &mut None, Effect::Run).await;
 
         assert!(
             app.output.iter().any(|line| line.contains("Hello, world!")),
@@ -821,8 +936,57 @@ mod tests {
             Effect::ReadMemory(0x1000),
             Effect::StopProgram,
         ] {
-            perform(&mut app, &mut session, effect).await;
+            settle(&mut app, &mut session, effect).await;
         }
+    }
+
+    #[tokio::test]
+    async fn a_running_program_can_be_stopped() {
+        if !crate::process::is_available(Path::new("nasm"))
+            || !crate::process::is_available(Path::new("ld"))
+        {
+            eprintln!("skipping: nasm or ld not installed");
+            return;
+        }
+
+        let dir = tempfile::tempdir().expect("temp dir");
+        let mut app = app_for(dir.path());
+        // A program that never exits on its own.
+        std::fs::write(
+            dir.path().join("src").join("main.asm"),
+            "section .text\n    global _start\n_start:\n    jmp _start\n",
+        )
+        .expect("write the source");
+
+        let (finished, _incoming) = tokio::sync::mpsc::unbounded_channel();
+        let mut running = Running::default();
+        let mut session = None;
+
+        perform(&mut app, &mut session, &finished, &mut running, Effect::Run).await;
+        assert!(running.is_busy(), "the program should still be looping");
+
+        // The interface is still responsive, which is the point: this call
+        // happens while the program runs, not after it.
+        perform(
+            &mut app,
+            &mut session,
+            &finished,
+            &mut running,
+            Effect::StopProgram,
+        )
+        .await;
+        assert_eq!(app.status.severity, crate::app::Severity::Warning);
+        assert!(!running.is_busy());
+    }
+
+    #[tokio::test]
+    async fn stopping_with_nothing_running_says_so() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let mut app = app_for(dir.path());
+        let mut session = None;
+
+        settle(&mut app, &mut session, Effect::StopProgram).await;
+        assert_eq!(app.status.severity, crate::app::Severity::Info);
     }
 
     #[tokio::test]
@@ -833,7 +997,7 @@ mod tests {
 
         app.workspace.active_mut().insert("ret\n");
         let path = dir.path().join("written.asm");
-        perform(&mut app, &mut session, Effect::SaveFile(path.clone())).await;
+        settle(&mut app, &mut session, Effect::SaveFile(path.clone())).await;
 
         assert_eq!(std::fs::read_to_string(&path).expect("read"), "ret\n");
         assert_eq!(app.status.severity, crate::app::Severity::Success);
@@ -845,7 +1009,7 @@ mod tests {
         let mut app = app_for(dir.path());
         let mut session = None;
 
-        perform(
+        settle(
             &mut app,
             &mut session,
             Effect::OpenFile(dir.path().join("absent.asm")),
@@ -880,8 +1044,8 @@ mod tests {
         assert!(session.is_some(), "session: {}", app.status.text);
 
         // Step past the two movs so RAX and RBX hold known values.
-        perform(&mut app, &mut session, Effect::Step(StepKind::Instruction)).await;
-        perform(&mut app, &mut session, Effect::Step(StepKind::Instruction)).await;
+        settle(&mut app, &mut session, Effect::Step(StepKind::Instruction)).await;
+        settle(&mut app, &mut session, Effect::Step(StepKind::Instruction)).await;
 
         assert_eq!(app.registers.value_of("rax"), Some(1));
         assert_eq!(app.registers.value_of("rbx"), Some(2));
@@ -896,7 +1060,7 @@ mod tests {
             "the explainer should be reading live registers"
         );
 
-        perform(&mut app, &mut session, Effect::DebugStop).await;
+        settle(&mut app, &mut session, Effect::DebugStop).await;
     }
 
     #[tokio::test]
@@ -923,17 +1087,17 @@ mod tests {
         start_session(&mut app, &mut session).await;
         assert!(session.is_some(), "session: {}", app.status.text);
 
-        perform(&mut app, &mut session, Effect::Step(StepKind::Instruction)).await;
+        settle(&mut app, &mut session, Effect::Step(StepKind::Instruction)).await;
         assert_eq!(
             app.registers.value_of("rax"),
             Some(1),
             "after the first mov"
         );
 
-        perform(&mut app, &mut session, Effect::Step(StepKind::Instruction)).await;
+        settle(&mut app, &mut session, Effect::Step(StepKind::Instruction)).await;
         assert_eq!(app.registers.value_of("rax"), Some(2), "after the second");
 
-        perform(&mut app, &mut session, Effect::Step(StepKind::Back)).await;
+        settle(&mut app, &mut session, Effect::Step(StepKind::Back)).await;
         assert_eq!(
             app.registers.value_of("rax"),
             Some(1),
@@ -941,7 +1105,7 @@ mod tests {
             app.status.text
         );
 
-        perform(&mut app, &mut session, Effect::DebugStop).await;
+        settle(&mut app, &mut session, Effect::DebugStop).await;
     }
 
     #[test]
@@ -984,8 +1148,8 @@ mod tests {
         start_session(&mut app, &mut session).await;
         assert!(session.is_some(), "session: {}", app.status.text);
 
-        perform(&mut app, &mut session, Effect::Step(StepKind::Instruction)).await;
-        perform(&mut app, &mut session, Effect::Step(StepKind::Instruction)).await;
+        settle(&mut app, &mut session, Effect::Step(StepKind::Instruction)).await;
+        settle(&mut app, &mut session, Effect::Step(StepKind::Instruction)).await;
 
         let flags = app.registers.flags().expect("the flags must be readable");
         assert!(
@@ -994,7 +1158,7 @@ mod tests {
             flags.summary()
         );
 
-        perform(&mut app, &mut session, Effect::DebugStop).await;
+        settle(&mut app, &mut session, Effect::DebugStop).await;
     }
 
     #[tokio::test]
@@ -1024,7 +1188,7 @@ mod tests {
         start_session(&mut app, &mut session).await;
         assert!(session.is_some(), "session: {}", app.status.text);
 
-        perform(&mut app, &mut session, Effect::DebugContinue).await;
+        settle(&mut app, &mut session, Effect::DebugContinue).await;
 
         assert!(
             app.frames.len() >= 2,
@@ -1035,7 +1199,7 @@ mod tests {
         assert_eq!(app.frames[1].function.as_deref(), Some("_start"));
         assert!(app.frames[0].is_innermost());
 
-        perform(&mut app, &mut session, Effect::DebugStop).await;
+        settle(&mut app, &mut session, Effect::DebugStop).await;
         assert!(
             app.frames.is_empty(),
             "frames must be cleared with the session"
@@ -1080,13 +1244,13 @@ mod tests {
         assert!(app.current_address.is_some());
 
         let first = app.registers.rip();
-        perform(&mut app, &mut session, Effect::Step(StepKind::Instruction)).await;
+        settle(&mut app, &mut session, Effect::Step(StepKind::Instruction)).await;
         let second = app.registers.rip();
 
         assert_ne!(first, second, "stepping must advance the program counter");
         assert!(!app.stack.is_empty(), "the stack should have been read");
 
-        perform(&mut app, &mut session, Effect::DebugStop).await;
+        settle(&mut app, &mut session, Effect::DebugStop).await;
         assert!(session.is_none(), "the session should be gone");
         assert!(app.registers.is_empty(), "state should have been cleared");
     }
