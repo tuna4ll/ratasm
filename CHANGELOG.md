@@ -62,6 +62,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Copy, cut and paste, with copied text offered to the terminal's clipboard
   through OSC 52 so it works over SSH. Paste uses ratasm's own copy, because a
   terminal that ignores the read request answers with silence.
+- Programs run on their own task, so the interface keeps drawing and reading
+  keys while one runs, and <kbd>Ctrl</kbd>+<kbd>F5</kbd> stops one that will not
+  stop itself.
 
 ### Fixed
 
