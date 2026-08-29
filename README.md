@@ -183,6 +183,7 @@ the material cannot drift away from what your machine actually does.
 | <kbd>F8</kbd> | Step over |
 | <kbd>F9</kbd> | Toggle breakpoint |
 | <kbd>F10</kbd> | Step one source line |
+| <kbd>Ctrl</kbd>+<kbd>F5</kbd> | Stop the running program |
 | <kbd>Shift</kbd>+<kbd>F7</kbd> | Step one instruction *backwards* |
 | <kbd>F1</kbd> | Learning panel |
 | <kbd>F2</kbd> | Scratchpad |
@@ -252,7 +253,9 @@ the defaults and treats that file's directory as the project root.
   something a terminal reliably permits.
 - **The program's own input and output are captured, not interactive.** A
   program that expects to be typed at while it runs is better run outside
-  ratasm; `stdin` in `.ratasm.toml` supplies fixed input.
+  ratasm; `stdin` in `.ratasm.toml` supplies fixed input. The interface stays
+  responsive while a program runs, and <kbd>Ctrl</kbd>+<kbd>F5</kbd> stops one
+  that will not stop itself.
 
 ## Security note
 

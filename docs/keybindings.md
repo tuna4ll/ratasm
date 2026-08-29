@@ -12,6 +12,7 @@
 | <kbd>F8</kbd> | Step over |
 | <kbd>F9</kbd> | Toggle breakpoint on the current line |
 | <kbd>F10</kbd> | Step one source line |
+| <kbd>Ctrl</kbd>+<kbd>F5</kbd> | Stop the running program |
 | <kbd>F11</kbd> | Step out of the current call |
 | <kbd>F12</kbd> | Start a debug session |
 | <kbd>Shift</kbd>+<kbd>F5</kbd> | Continue *backwards* |

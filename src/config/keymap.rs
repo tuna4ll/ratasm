@@ -299,6 +299,8 @@ impl Keymap {
             Command::ReverseContinue,
         );
         bind(KeyBinding::plain(KeyCode::F(12)), Command::DebugStart);
+        // A program that loops forever needs one key to end it.
+        bind(KeyBinding::ctrl(KeyCode::F(5)), Command::Stop);
 
         // Files.
         bind(KeyBinding::ctrl(KeyCode::Char('s')), Command::SaveFile);
@@ -622,6 +624,7 @@ mod tests {
             ("F1", Command::ToggleLearningMode),
             ("F2", Command::OpenScratchpad),
             ("shift+F5", Command::ReverseContinue),
+            ("ctrl+F5", Command::Stop),
             ("shift+F7", Command::StepBack),
             ("shift+F8", Command::StepBackOver),
             ("ctrl+s", Command::SaveFile),
