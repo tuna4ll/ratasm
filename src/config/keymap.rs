@@ -20,7 +20,7 @@ use std::fmt;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use crate::app::panel::Panel;
+use crate::app::page::Page;
 use crate::command::Command;
 
 /// A key plus its modifiers.
@@ -341,12 +341,13 @@ impl Keymap {
         bind(KeyBinding::ctrl(KeyCode::PageDown), Command::NextDocument);
         bind(KeyBinding::ctrl(KeyCode::PageUp), Command::PreviousDocument);
 
-        // Alt plus a digit focuses a panel directly.
-        for (index, panel) in Panel::ALL.iter().enumerate().take(9) {
+        // Alt plus a digit opens the page with that number, which is the
+        // number the page bar prints beside its name.
+        for (index, page) in Page::ALL.iter().enumerate() {
             let digit = char::from_digit(index as u32 + 1, 10).unwrap_or('1');
             bindings.insert(
                 KeyBinding::new(KeyCode::Char(digit), KeyModifiers::ALT),
-                Command::FocusPanel(*panel),
+                Command::GoToPage(*page),
             );
         }
 
@@ -623,6 +624,10 @@ mod tests {
             ("F10", Command::StepLine),
             ("F1", Command::ToggleLearningMode),
             ("F2", Command::OpenScratchpad),
+            ("alt+1", Command::GoToPage(Page::Code)),
+            ("alt+2", Command::GoToPage(Page::Debug)),
+            ("alt+3", Command::GoToPage(Page::Learn)),
+            ("alt+4", Command::GoToPage(Page::Reference)),
             ("shift+F5", Command::ReverseContinue),
             ("ctrl+F5", Command::Stop),
             ("shift+F7", Command::StepBack),

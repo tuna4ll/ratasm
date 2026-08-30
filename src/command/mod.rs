@@ -16,6 +16,7 @@ pub mod palette;
 
 use std::fmt;
 
+use crate::app::page::Page;
 use crate::app::panel::Panel;
 
 pub use palette::{fuzzy_match, FuzzyMatch};
@@ -115,6 +116,12 @@ pub enum Command {
     Dedent,
 
     // --- Navigate ---
+    /// Open a named page.
+    GoToPage(Page),
+    /// Open the next page.
+    NextPage,
+    /// Open the previous page.
+    PreviousPage,
     /// Focus the next panel.
     NextPanel,
     /// Focus the previous panel.
@@ -262,6 +269,7 @@ impl Command {
             Command::OpenScratchpad,
             Command::ShowKeybindings,
         ];
+        commands.extend(Page::ALL.map(Command::GoToPage));
         commands.extend(Panel::ALL.map(Command::FocusPanel));
         commands
     }
@@ -288,6 +296,9 @@ impl Command {
             Command::Indent => "edit.indent".into(),
             Command::Dedent => "edit.dedent".into(),
 
+            Command::GoToPage(page) => format!("navigate.page.{}", page.id()),
+            Command::NextPage => "navigate.next-page".into(),
+            Command::PreviousPage => "navigate.previous-page".into(),
             Command::NextPanel => "navigate.next-panel".into(),
             Command::PreviousPanel => "navigate.previous-panel".into(),
             Command::FocusPanel(panel) => format!("navigate.focus.{}", panel.id()),
@@ -353,6 +364,9 @@ impl Command {
             Command::Indent => "Indent".into(),
             Command::Dedent => "Dedent".into(),
 
+            Command::GoToPage(page) => format!("{} page", page.title()),
+            Command::NextPage => "Next page".into(),
+            Command::PreviousPage => "Previous page".into(),
             Command::NextPanel => "Next panel".into(),
             Command::PreviousPanel => "Previous panel".into(),
             Command::FocusPanel(panel) => format!("Focus {}", panel.title().to_lowercase()),
@@ -429,6 +443,7 @@ impl Command {
             Command::ToggleDisassemblySyntax => {
                 "Intel puts the destination first; AT&T puts the source first".into()
             }
+            Command::GoToPage(page) => page.description().into(),
             Command::OpenSyscallFinder => "Search Linux system calls by name or number".into(),
             Command::OpenScratchpad => "Try an instruction without making a project".into(),
             Command::ToggleLearningMode => "Show explanations and exercises alongside".into(),
@@ -454,7 +469,10 @@ impl Command {
             | Command::Indent
             | Command::Dedent => Category::Edit,
 
-            Command::NextPanel
+            Command::GoToPage(_)
+            | Command::NextPage
+            | Command::PreviousPage
+            | Command::NextPanel
             | Command::PreviousPanel
             | Command::FocusPanel(_)
             | Command::NextDocument
