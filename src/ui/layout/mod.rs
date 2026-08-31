@@ -1,5 +1,12 @@
 //! Working out where each panel goes.
 //!
+//! # Pages first, then size
+//!
+//! Which panels are on screen is decided by the [`Page`], not by the layout:
+//! the layout's job is only to arrange the panels that page holds. That split
+//! is what keeps this module small — it never has to decide whether the
+//! register view is relevant, only how much room it gets.
+//!
 //! # Three shapes, not a squeeze
 //!
 //! Below a certain width a panel stops being useful rather than merely small:
@@ -7,9 +14,10 @@
 //! all. So instead of scaling every panel down, the layout picks one of three
 //! arrangements and puts whatever does not fit behind tabs.
 //!
-//! - **Wide** — the editor with the CPU state beside it and the output below.
-//! - **Medium** — the editor with one side column; the rest share a tab strip.
-//! - **Narrow** — one panel at a time, all of them in tabs.
+//! - **Wide** — the page's full arrangement.
+//! - **Medium** — the page's main panel with one side slot; the rest share a
+//!   tab strip.
+//! - **Narrow** — one panel at a time, the page's panels in tabs.
 //!
 //! The focused panel is always visible. That is the invariant the tests pin
 //! down, because a focus that lands on a hidden panel makes the keyboard
@@ -17,13 +25,14 @@
 
 use ratatui::layout::{Constraint, Direction, Layout as RatatuiLayout, Rect};
 
+use crate::app::page::Page;
 use crate::app::panel::Panel;
 
-/// The narrowest terminal that gets the full three-column arrangement.
+/// The narrowest terminal that gets a page's full arrangement.
 pub const WIDE_THRESHOLD: u16 = 120;
 /// The narrowest terminal that gets a side column at all.
 pub const MEDIUM_THRESHOLD: u16 = 80;
-/// The shortest terminal that gets a bottom row.
+/// The shortest terminal that gets a page's full arrangement.
 pub const TALL_THRESHOLD: u16 = 28;
 /// Below this, ratasm shows a message instead of an unusable layout.
 pub const MINIMUM_WIDTH: u16 = 40;
@@ -33,9 +42,9 @@ pub const MINIMUM_HEIGHT: u16 = 10;
 /// Which arrangement was chosen.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LayoutMode {
-    /// Everything on screen at once.
+    /// The page's full arrangement.
     Wide,
-    /// The editor plus one side column; the rest in tabs.
+    /// The page's main panel plus one side slot; the rest in tabs.
     Medium,
     /// One panel at a time.
     Narrow,
@@ -54,8 +63,8 @@ pub struct Layout {
     pub tabbed: Vec<Panel>,
     /// The tab strip's area, when there is one.
     pub tab_bar: Option<Rect>,
-    /// The document tab bar at the top.
-    pub document_bar: Rect,
+    /// The page bar at the top.
+    pub page_bar: Rect,
     /// The status bar at the bottom.
     pub status_bar: Rect,
 }
@@ -80,26 +89,28 @@ impl Layout {
     }
 }
 
-/// Computes the layout for a terminal of `area`, with `focus` focused.
+/// Computes the layout for a terminal of `area` showing `page`, focused on
+/// `focus`.
 ///
 /// The focused panel is guaranteed an area in every mode except
 /// [`LayoutMode::TooSmall`].
-pub fn compute(area: Rect, focus: Panel) -> Layout {
+pub fn compute(area: Rect, page: Page, focus: Panel) -> Layout {
     if area.width < MINIMUM_WIDTH || area.height < MINIMUM_HEIGHT {
         return Layout {
             mode: LayoutMode::TooSmall,
             panels: Vec::new(),
             tabbed: Vec::new(),
             tab_bar: None,
-            document_bar: Rect::new(area.x, area.y, area.width, 0),
+            page_bar: Rect::new(area.x, area.y, area.width, 0),
             status_bar: Rect::new(area.x, area.y, area.width, 0),
         };
     }
 
-    // One row for open documents at the top, one for the status bar at the
-    // bottom. Both are always present: losing the status bar would hide the
-    // only place errors are reported.
-    let rows = RatatuiLayout::default()
+    // One row for the page bar at the top, one for the status bar at the
+    // bottom. Both are always present: losing the page bar would hide the only
+    // sign that the other pages exist, and losing the status bar would hide
+    // the only place errors are reported.
+    let bars = RatatuiLayout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(1),
@@ -107,57 +118,113 @@ pub fn compute(area: Rect, focus: Panel) -> Layout {
             Constraint::Length(1),
         ])
         .split(area);
-    let (document_bar, body, status_bar) = (rows[0], rows[1], rows[2]);
+    let (page_bar, body, status_bar) = (bars[0], bars[1], bars[2]);
 
-    if area.width >= WIDE_THRESHOLD && area.height >= TALL_THRESHOLD {
-        wide(body, document_bar, status_bar, focus)
+    let mut layout = if area.width >= WIDE_THRESHOLD && area.height >= TALL_THRESHOLD {
+        wide(body, page, focus)
     } else if area.width >= MEDIUM_THRESHOLD {
-        medium(body, document_bar, status_bar, focus)
+        medium(body, page, focus)
     } else {
-        narrow(body, document_bar, status_bar, focus)
+        narrow(body, page, focus)
+    };
+
+    layout.page_bar = page_bar;
+    layout.status_bar = status_bar;
+    layout
+}
+
+/// A layout with the bars left for [`compute`] to fill in.
+fn assembled(
+    mode: LayoutMode,
+    panels: Vec<(Panel, Rect)>,
+    tabbed: Vec<Panel>,
+    tab_bar: Option<Rect>,
+) -> Layout {
+    Layout {
+        mode,
+        panels,
+        tabbed,
+        tab_bar,
+        page_bar: Rect::default(),
+        status_bar: Rect::default(),
     }
 }
 
-/// Everything visible at once.
-fn wide(body: Rect, document_bar: Rect, status_bar: Rect, focus: Panel) -> Layout {
-    // Editor and disassembly on the left, CPU state on the right, output
-    // across the bottom.
-    let columns = RatatuiLayout::default()
+/// Splits an area into stacked rows by percentage.
+fn rows(area: Rect, parts: &[u16]) -> std::rc::Rc<[Rect]> {
+    RatatuiLayout::default()
+        .direction(Direction::Vertical)
+        .constraints(
+            parts
+                .iter()
+                .map(|part| Constraint::Percentage(*part))
+                .collect::<Vec<_>>(),
+        )
+        .split(area)
+}
+
+/// Splits an area into side-by-side columns by percentage.
+fn columns(area: Rect, parts: &[u16]) -> std::rc::Rc<[Rect]> {
+    RatatuiLayout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(58), Constraint::Percentage(42)])
-        .split(body);
+        .constraints(
+            parts
+                .iter()
+                .map(|part| Constraint::Percentage(*part))
+                .collect::<Vec<_>>(),
+        )
+        .split(area)
+}
 
-    let left = RatatuiLayout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Percentage(58),
-            Constraint::Percentage(25),
-            Constraint::Percentage(17),
-        ])
-        .split(columns[0]);
+/// The page's full arrangement.
+fn wide(body: Rect, page: Page, focus: Panel) -> Layout {
+    match page {
+        Page::Code => wide_code(body),
+        Page::Debug => wide_debug(body, focus),
+        Page::Learn => wide_learn(body),
+        Page::Reference => wide_reference(body),
+    }
+}
 
-    let right = RatatuiLayout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Percentage(40),
-            Constraint::Percentage(22),
-            Constraint::Percentage(38),
-        ])
-        .split(columns[1]);
+/// Source and project files on top, build output across the bottom.
+fn wide_code(body: Rect) -> Layout {
+    let stacked = rows(body, &[72, 28]);
+    let top = columns(stacked[0], &[76, 24]);
 
-    let side_bottom = RatatuiLayout::default()
+    assembled(
+        LayoutMode::Wide,
+        vec![
+            (Panel::Editor, top[0]),
+            (Panel::Explorer, top[1]),
+            (Panel::Output, stacked[1]),
+        ],
+        Vec::new(),
+        None,
+    )
+}
+
+/// The source and its machine code on the left, the CPU state on the right.
+fn wide_debug(body: Rect, focus: Panel) -> Layout {
+    // The output is the least of it while stepping, so it gets the smallest
+    // share; the registers get the most, because they carry a footnote about
+    // what changed that is worth more than another blank row elsewhere.
+    let stacked = rows(body, &[82, 18]);
+    let halves = columns(stacked[0], &[58, 42]);
+    let left = rows(halves[0], &[50, 26, 24]);
+    let right = rows(halves[1], &[44, 24, 32]);
+
+    // The bottom-right slot is shared between four panels, with a tab strip
+    // above it: a shared slot without one is a panel nobody discovers.
+    let shared_area = RatatuiLayout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .constraints([Constraint::Length(1), Constraint::Min(3)])
         .split(right[2]);
 
-    // The lower-right slot is shared: whichever of these the user is looking
-    // at takes it, so all four remain reachable without a tab strip.
     let shared = [
         Panel::Stack,
         Panel::CallStack,
         Panel::Memory,
-        Panel::Syscalls,
-        Panel::Explorer,
+        Panel::Breakpoints,
     ];
     let shown = if shared.contains(&focus) {
         focus
@@ -165,124 +232,105 @@ fn wide(body: Rect, document_bar: Rect, status_bar: Rect, focus: Panel) -> Layou
         Panel::Stack
     };
 
-    let mut panels = vec![
-        (Panel::Editor, left[0]),
-        (Panel::Disassembly, left[1]),
-        (Panel::Explain, left[2]),
-        (Panel::Registers, right[0]),
-        (Panel::Flags, right[1]),
-        (shown, side_bottom[0]),
-        (Panel::Output, side_bottom[1]),
-    ];
-
-    // Reading material and the scratchpad need room to be readable, so they
-    // take the disassembly and explanation slots together rather than being
-    // squeezed into a side panel. The editor and the CPU state stay visible,
-    // which is the point of reading them here rather than in a book.
-    if matches!(focus, Panel::Scratchpad | Panel::Learn) {
-        panels.retain(|(panel, _)| !matches!(panel, Panel::Disassembly | Panel::Explain));
-        panels.push((focus, union(left[1], left[2])));
-    }
-
-    // Breakpoints share the output slot unless the user is looking at them.
-    if focus == Panel::Breakpoints {
-        panels.retain(|(panel, _)| *panel != Panel::Output);
-        panels.push((Panel::Breakpoints, side_bottom[1]));
-    }
-
-    ensure_focus_visible(&mut panels, focus, side_bottom[0]);
-
-    Layout {
-        mode: LayoutMode::Wide,
-        panels,
-        tabbed: shared.to_vec(),
-        tab_bar: None,
-        document_bar,
-        status_bar,
-    }
-}
-
-/// The smallest rectangle covering both of two stacked areas.
-fn union(top: Rect, bottom: Rect) -> Rect {
-    Rect::new(
-        top.x,
-        top.y,
-        top.width.max(bottom.width),
-        (bottom.y + bottom.height).saturating_sub(top.y),
+    assembled(
+        LayoutMode::Wide,
+        vec![
+            (Panel::Editor, left[0]),
+            (Panel::Disassembly, left[1]),
+            (Panel::Explain, left[2]),
+            (Panel::Registers, right[0]),
+            (Panel::Flags, right[1]),
+            (shown, shared_area[1]),
+            (Panel::Output, stacked[1]),
+        ],
+        shared.to_vec(),
+        Some(shared_area[0]),
     )
 }
 
-/// The editor plus a side column, with the rest behind tabs.
-fn medium(body: Rect, document_bar: Rect, status_bar: Rect, focus: Panel) -> Layout {
-    let columns = RatatuiLayout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
-        .split(body);
+/// Something to read beside somewhere to try it.
+fn wide_learn(body: Rect) -> Layout {
+    let stacked = rows(body, &[74, 26]);
+    let top = columns(stacked[0], &[56, 44]);
 
-    let left = RatatuiLayout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Min(6), Constraint::Length(4)])
-        .split(columns[0]);
+    assembled(
+        LayoutMode::Wide,
+        vec![
+            (Panel::Learn, top[0]),
+            (Panel::Scratchpad, top[1]),
+            (Panel::Explain, stacked[1]),
+        ],
+        Vec::new(),
+        None,
+    )
+}
 
-    let right = RatatuiLayout::default()
+/// The syscall table beside the instruction explanation.
+fn wide_reference(body: Rect) -> Layout {
+    let halves = columns(body, &[58, 42]);
+
+    assembled(
+        LayoutMode::Wide,
+        vec![(Panel::Syscalls, halves[0]), (Panel::Explain, halves[1])],
+        Vec::new(),
+        None,
+    )
+}
+
+/// The page's main panel with one side slot, the rest behind tabs.
+fn medium(body: Rect, page: Page, focus: Panel) -> Layout {
+    let main = page.default_panel();
+    let tabbed: Vec<Panel> = page
+        .panels()
+        .iter()
+        .copied()
+        .filter(|panel| *panel != main)
+        .collect();
+
+    // With only one panel on the page there is nothing to put beside it.
+    if tabbed.is_empty() {
+        return assembled(LayoutMode::Medium, vec![(main, body)], Vec::new(), None);
+    }
+
+    let halves = columns(body, &[58, 42]);
+    let side = RatatuiLayout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Length(1), Constraint::Min(4)])
-        .split(columns[1]);
+        .split(halves[1]);
 
-    // Everything except the editor and the explanation shares one slot.
-    let tabbed: Vec<Panel> = Panel::ALL
-        .into_iter()
-        .filter(|panel| !matches!(panel, Panel::Editor | Panel::Explain))
-        .collect();
     let shown = if tabbed.contains(&focus) {
         focus
     } else {
-        Panel::Registers
+        tabbed[0]
     };
 
-    let panels = vec![
-        (Panel::Editor, left[0]),
-        (Panel::Explain, left[1]),
-        (shown, right[1]),
-    ];
-
-    Layout {
-        mode: LayoutMode::Medium,
-        panels,
+    assembled(
+        LayoutMode::Medium,
+        vec![(main, halves[0]), (shown, side[1])],
         tabbed,
-        tab_bar: Some(right[0]),
-        document_bar,
-        status_bar,
-    }
+        Some(side[0]),
+    )
 }
 
-/// One panel at a time.
-fn narrow(body: Rect, document_bar: Rect, status_bar: Rect, focus: Panel) -> Layout {
-    let rows = RatatuiLayout::default()
+/// One panel at a time, with every panel on the page in the tab strip.
+fn narrow(body: Rect, page: Page, focus: Panel) -> Layout {
+    let stacked = RatatuiLayout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Length(1), Constraint::Min(4)])
         .split(body);
 
-    Layout {
-        mode: LayoutMode::Narrow,
-        panels: vec![(focus, rows[1])],
-        tabbed: Panel::ALL.to_vec(),
-        tab_bar: Some(rows[0]),
-        document_bar,
-        status_bar,
-    }
-}
+    let shown = if page.contains(focus) {
+        focus
+    } else {
+        page.default_panel()
+    };
 
-/// Guarantees the focused panel has somewhere to draw.
-///
-/// Without this, focusing a panel the current arrangement does not show would
-/// make the keyboard appear to stop responding.
-fn ensure_focus_visible(panels: &mut Vec<(Panel, Rect)>, focus: Panel, fallback: Rect) {
-    if panels.iter().any(|(panel, _)| *panel == focus) {
-        return;
-    }
-    panels.retain(|(_, area)| *area != fallback);
-    panels.push((focus, fallback));
+    assembled(
+        LayoutMode::Narrow,
+        vec![(shown, stacked[1])],
+        page.panels().to_vec(),
+        Some(stacked[0]),
+    )
 }
 
 #[cfg(test)]
@@ -301,53 +349,40 @@ mod tests {
         Rect::new(0, 0, 60, 20)
     }
 
+    /// Every (page, focus) pair, which is the space these invariants cover.
+    fn every_focus() -> Vec<(Page, Panel)> {
+        Page::ALL
+            .into_iter()
+            .flat_map(|page| page.panels().iter().map(move |panel| (page, *panel)))
+            .collect()
+    }
+
     /// Whether two rectangles share any cell.
     fn overlaps(a: Rect, b: Rect) -> bool {
         a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height
     }
 
     #[test]
-    fn the_material_takes_a_readable_area_when_it_has_focus() {
-        for focus in [Panel::Learn, Panel::Scratchpad] {
-            let layout = compute(wide_area(), focus);
-            let area = layout
-                .panels
-                .iter()
-                .find(|(panel, _)| *panel == focus)
-                .map(|(_, area)| *area)
-                .unwrap_or_else(|| panic!("{focus} is not placed"));
-
-            // Taller than the single slot it replaces, and never overlapping
-            // the editor above it.
-            assert!(area.height >= 10, "{focus} got {} rows", area.height);
-            let editor = layout
-                .panels
-                .iter()
-                .find(|(panel, _)| *panel == Panel::Editor)
-                .map(|(_, area)| *area)
-                .expect("the editor stays visible");
-            assert!(area.y >= editor.y + editor.height);
-        }
-    }
-
-    #[test]
     fn each_width_selects_its_arrangement() {
-        assert_eq!(compute(wide_area(), Panel::Editor).mode, LayoutMode::Wide);
         assert_eq!(
-            compute(medium_area(), Panel::Editor).mode,
+            compute(wide_area(), Page::Debug, Panel::Editor).mode,
+            LayoutMode::Wide
+        );
+        assert_eq!(
+            compute(medium_area(), Page::Debug, Panel::Editor).mode,
             LayoutMode::Medium
         );
         assert_eq!(
-            compute(narrow_area(), Panel::Editor).mode,
+            compute(narrow_area(), Page::Debug, Panel::Editor).mode,
             LayoutMode::Narrow
         );
     }
 
     #[test]
     fn a_short_but_wide_terminal_does_not_get_the_full_layout() {
-        // Height matters as much as width: the wide arrangement needs three
+        // Height matters as much as width: the wide arrangement needs several
         // stacked rows to be worth anything.
-        let layout = compute(Rect::new(0, 0, 160, 20), Panel::Editor);
+        let layout = compute(Rect::new(0, 0, 160, 20), Page::Debug, Panel::Editor);
         assert_ne!(layout.mode, LayoutMode::Wide);
     }
 
@@ -359,7 +394,7 @@ mod tests {
             Rect::new(0, 0, 1, 1),
             Rect::new(0, 0, 0, 0),
         ] {
-            let layout = compute(area, Panel::Editor);
+            let layout = compute(area, Page::Code, Panel::Editor);
             assert_eq!(layout.mode, LayoutMode::TooSmall, "for {area:?}");
             assert!(layout.panels.is_empty());
         }
@@ -370,11 +405,11 @@ mod tests {
         // The invariant that keeps the keyboard working: focus can never land
         // somewhere the user cannot see.
         for area in [wide_area(), medium_area(), narrow_area()] {
-            for focus in Panel::ALL {
-                let layout = compute(area, focus);
+            for (page, focus) in every_focus() {
+                let layout = compute(area, page, focus);
                 assert!(
                     layout.is_visible(focus),
-                    "{focus} is hidden in {:?} at {}x{}",
+                    "{focus} is hidden on {page} in {:?} at {}x{}",
                     layout.mode,
                     area.width,
                     area.height
@@ -384,17 +419,45 @@ mod tests {
     }
 
     #[test]
+    fn only_the_pages_own_panels_are_drawn() {
+        // Otherwise the page would not be a page, just a differently sorted
+        // pile of the same fourteen panels.
+        for area in [wide_area(), medium_area(), narrow_area()] {
+            for (page, focus) in every_focus() {
+                for panel in compute(area, page, focus).visible_panels() {
+                    assert!(page.contains(panel), "{panel} is not on {page}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn every_panel_on_a_page_is_reachable_when_wide() {
+        // Drawn outright or one tab away — but never absent, or Tab would
+        // move focus somewhere invisible.
+        for page in Page::ALL {
+            let layout = compute(wide_area(), page, page.default_panel());
+            for panel in page.panels() {
+                assert!(
+                    layout.is_visible(*panel) || layout.tabbed.contains(panel),
+                    "{panel} is neither shown nor tabbed on {page}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn panels_never_overlap() {
         for area in [wide_area(), medium_area(), narrow_area()] {
-            for focus in Panel::ALL {
-                let layout = compute(area, focus);
+            for (page, focus) in every_focus() {
+                let layout = compute(area, page, focus);
                 let areas: Vec<Rect> = layout.panels.iter().map(|(_, area)| *area).collect();
 
                 for (index, first) in areas.iter().enumerate() {
                     for second in &areas[index + 1..] {
                         assert!(
                             !overlaps(*first, *second),
-                            "{first:?} overlaps {second:?} at {}x{} focused on {focus}",
+                            "{first:?} overlaps {second:?} on {page} at {}x{} focused on {focus}",
                             area.width,
                             area.height
                         );
@@ -405,10 +468,29 @@ mod tests {
     }
 
     #[test]
+    fn nothing_overlaps_the_bars() {
+        for area in [wide_area(), medium_area(), narrow_area()] {
+            for (page, focus) in every_focus() {
+                let layout = compute(area, page, focus);
+                for (panel, rect) in &layout.panels {
+                    assert!(
+                        !overlaps(*rect, layout.page_bar),
+                        "{panel} covers the page bar"
+                    );
+                    assert!(
+                        !overlaps(*rect, layout.status_bar),
+                        "{panel} covers the status bar"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
     fn every_panel_stays_inside_the_terminal() {
         for area in [wide_area(), medium_area(), narrow_area()] {
-            for focus in Panel::ALL {
-                for (panel, rect) in compute(area, focus).panels {
+            for (page, focus) in every_focus() {
+                for (panel, rect) in compute(area, page, focus).panels {
                     assert!(
                         rect.x + rect.width <= area.width && rect.y + rect.height <= area.height,
                         "{panel} at {rect:?} escapes {}x{}",
@@ -424,11 +506,11 @@ mod tests {
     fn no_panel_is_given_a_zero_sized_area() {
         // A zero-sized panel draws nothing and looks like a bug.
         for area in [wide_area(), medium_area(), narrow_area()] {
-            for focus in Panel::ALL {
-                for (panel, rect) in compute(area, focus).panels {
+            for (page, focus) in every_focus() {
+                for (panel, rect) in compute(area, page, focus).panels {
                     assert!(
                         rect.width > 0 && rect.height > 0,
-                        "{panel} has no area at {}x{}",
+                        "{panel} has no area on {page} at {}x{}",
                         area.width,
                         area.height
                     );
@@ -441,7 +523,7 @@ mod tests {
     fn the_status_bar_is_always_present_and_one_row_tall() {
         // It is the only place errors are reported, so it never disappears.
         for area in [wide_area(), medium_area(), narrow_area()] {
-            let layout = compute(area, Panel::Editor);
+            let layout = compute(area, Page::Code, Panel::Editor);
             assert_eq!(layout.status_bar.height, 1);
             assert_eq!(layout.status_bar.width, area.width);
             assert_eq!(
@@ -453,33 +535,66 @@ mod tests {
     }
 
     #[test]
-    fn the_document_bar_sits_at_the_top() {
+    fn the_page_bar_sits_at_the_top() {
         for area in [wide_area(), medium_area(), narrow_area()] {
-            let layout = compute(area, Panel::Editor);
-            assert_eq!(layout.document_bar.y, 0);
-            assert_eq!(layout.document_bar.height, 1);
+            let layout = compute(area, Page::Code, Panel::Editor);
+            assert_eq!(layout.page_bar.y, 0);
+            assert_eq!(layout.page_bar.height, 1);
+            assert_eq!(layout.page_bar.width, area.width);
         }
     }
 
     #[test]
-    fn the_wide_layout_shows_the_editor_and_cpu_state_together() {
-        let layout = compute(wide_area(), Panel::Editor);
+    fn the_debug_page_shows_the_source_and_the_cpu_together() {
+        let layout = compute(wide_area(), Page::Debug, Panel::Editor);
         for panel in [
             Panel::Editor,
             Panel::Registers,
             Panel::Flags,
             Panel::Disassembly,
             Panel::Explain,
+            Panel::Output,
         ] {
             assert!(layout.is_visible(panel), "{panel} should be visible");
         }
-        assert!(layout.tab_bar.is_none(), "no tabs are needed when wide");
+    }
+
+    #[test]
+    fn the_code_page_gives_the_editor_most_of_the_screen() {
+        // The whole point of splitting the pages up: writing code should not
+        // be done in a third of the terminal.
+        let area = wide_area();
+        let editor = compute(area, Page::Code, Panel::Editor)
+            .area_of(Panel::Editor)
+            .expect("the editor is on the code page");
+        let debugging = compute(area, Page::Debug, Panel::Editor)
+            .area_of(Panel::Editor)
+            .expect("the editor is on the debug page");
+
+        assert!(editor.width > debugging.width);
+        assert!(
+            u32::from(editor.width) * u32::from(editor.height) > u32::from(area.width) / 2 * 20,
+            "the editor got {}x{}",
+            editor.width,
+            editor.height
+        );
+    }
+
+    #[test]
+    fn the_learn_page_puts_the_scratchpad_beside_the_material() {
+        let layout = compute(wide_area(), Page::Learn, Panel::Learn);
+        let learn = layout.area_of(Panel::Learn).expect("the material");
+        let scratchpad = layout.area_of(Panel::Scratchpad).expect("the scratchpad");
+
+        assert_eq!(learn.y, scratchpad.y, "side by side, not stacked");
+        assert!(scratchpad.x >= learn.x + learn.width);
+        assert!(layout.is_visible(Panel::Explain));
     }
 
     #[test]
     fn narrower_layouts_offer_a_tab_strip() {
         for area in [medium_area(), narrow_area()] {
-            let layout = compute(area, Panel::Editor);
+            let layout = compute(area, Page::Debug, Panel::Editor);
             assert!(layout.tab_bar.is_some(), "tabs are needed at {area:?}");
             assert!(!layout.tabbed.is_empty());
         }
@@ -487,17 +602,17 @@ mod tests {
 
     #[test]
     fn the_narrow_layout_shows_exactly_one_panel() {
-        let layout = compute(narrow_area(), Panel::Registers);
+        let layout = compute(narrow_area(), Page::Debug, Panel::Registers);
         assert_eq!(layout.panels.len(), 1);
         assert_eq!(layout.visible_panels(), vec![Panel::Registers]);
     }
 
     #[test]
     fn focusing_a_shared_slot_swaps_which_panel_it_shows() {
-        // In the wide layout the lower-right slot is shared; focusing one of
-        // its members must bring that member forward.
-        let stack = compute(wide_area(), Panel::Stack);
-        let memory = compute(wide_area(), Panel::Memory);
+        // The debug page's bottom-right slot is shared; focusing one of its
+        // members must bring that member forward, in the same place.
+        let stack = compute(wide_area(), Page::Debug, Panel::Stack);
+        let memory = compute(wide_area(), Page::Debug, Panel::Memory);
 
         assert!(stack.is_visible(Panel::Stack));
         assert!(memory.is_visible(Panel::Memory));
@@ -506,11 +621,15 @@ mod tests {
             memory.area_of(Panel::Memory),
             "they share the same slot"
         );
+        assert!(
+            stack.tab_bar.is_some(),
+            "a shared slot needs a strip saying what else is in it"
+        );
     }
 
     #[test]
     fn asking_for_a_missing_panel_returns_nothing() {
-        let layout = compute(narrow_area(), Panel::Editor);
+        let layout = compute(narrow_area(), Page::Code, Panel::Editor);
         assert!(layout.area_of(Panel::Registers).is_none());
         assert!(!layout.is_visible(Panel::Registers));
     }
@@ -522,14 +641,14 @@ mod tests {
         for width in (MINIMUM_WIDTH..=WIDE_THRESHOLD + 10).step_by(3) {
             for height in [MINIMUM_HEIGHT, 20, 30, 50] {
                 let area = Rect::new(0, 0, width, height);
-                for focus in Panel::ALL {
-                    let layout = compute(area, focus);
+                for (page, focus) in every_focus() {
+                    let layout = compute(area, page, focus);
                     if layout.mode == LayoutMode::TooSmall {
                         continue;
                     }
                     assert!(
                         layout.is_visible(focus),
-                        "{focus} hidden at {width}x{height}"
+                        "{focus} hidden on {page} at {width}x{height}"
                     );
                 }
             }

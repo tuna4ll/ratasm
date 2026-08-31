@@ -25,14 +25,14 @@ pub fn draw(frame: &mut Frame, app: &App) {
         area,
     );
 
-    let layout = layout::compute(area, app.focus);
+    let layout = layout::compute(area, app.page, app.focus);
 
     if layout.mode == LayoutMode::TooSmall {
         chrome::draw_too_small(frame, area);
         return;
     }
 
-    chrome::draw_document_bar(frame, app, layout.document_bar);
+    chrome::draw_page_bar(frame, app, layout.page_bar);
 
     if let Some(tab_bar) = layout.tab_bar {
         chrome::draw_tab_bar(frame, app, tab_bar, &layout.tabbed);
@@ -53,7 +53,11 @@ pub fn draw(frame: &mut Frame, app: &App) {
 /// Called before drawing, because the viewport depends on the height the
 /// terminal happens to have and the document deliberately does not know it.
 pub fn sync_scroll(app: &mut App, width: u16, height: u16) {
-    let layout = layout::compute(ratatui::layout::Rect::new(0, 0, width, height), app.focus);
+    let layout = layout::compute(
+        ratatui::layout::Rect::new(0, 0, width, height),
+        app.page,
+        app.focus,
+    );
     let Some(area) = layout.area_of(crate::app::panel::Panel::Editor) else {
         return;
     };
@@ -114,11 +118,44 @@ mod tests {
 
     #[test]
     fn a_wide_terminal_shows_the_main_panels() {
-        let app = app();
+        let mut app = app();
+        app.open_page(crate::app::Page::Debug);
         let text = screen(&app, 160, 48);
 
         for title in ["Editor", "Registers", "Flags", "Disassembly", "Explain"] {
             assert!(text.contains(title), "{title} is missing from the screen");
+        }
+    }
+
+    #[test]
+    fn the_page_bar_names_every_page_and_marks_the_open_one() {
+        let app = app();
+        let bar = render(&app, 160, 48).remove(0);
+
+        for page in crate::app::Page::ALL {
+            assert!(bar.contains(page.title()), "{page} is missing: {bar}");
+            assert!(
+                bar.contains(&page.number().to_string()),
+                "the shortcut number for {page} is missing: {bar}"
+            );
+        }
+        assert!(
+            bar.contains(&app.workspace.active().display_name()),
+            "the open file is missing: {bar}"
+        );
+    }
+
+    #[test]
+    fn each_page_draws_its_own_panels_and_no_others() {
+        let mut app = app();
+        for page in crate::app::Page::ALL {
+            app.open_page(page);
+            let text = screen(&app, 160, 48);
+            for panel in page.panels() {
+                // Panels sharing a slot are one tab away rather than drawn.
+                let shown = text.contains(panel.title());
+                assert!(shown, "{panel} is nowhere on the {page} page:\n{text}");
+            }
         }
     }
 
@@ -147,7 +184,8 @@ mod tests {
     #[test]
     fn panels_with_no_data_explain_themselves() {
         // An empty box reads as a bug; a sentence does not.
-        let app = app();
+        let mut app = app();
+        app.open_page(crate::app::Page::Debug);
         let text = screen(&app, 160, 48);
         assert!(
             text.contains("No debug session"),
@@ -184,7 +222,7 @@ mod tests {
     fn every_panel_can_be_focused_and_drawn_at_every_size() {
         let mut app = app();
         for panel in crate::app::panel::Panel::ALL {
-            app.focus = panel;
+            app.focus_panel(panel);
             for (width, height) in [(160u16, 48u16), (100, 30), (60, 20), (45, 12)] {
                 let text = render(&app, width, height).join("\n");
                 assert!(!text.is_empty(), "{panel} drew nothing at {width}x{height}");
@@ -199,7 +237,13 @@ mod tests {
 
         let text = screen(&app, 160, 48);
         assert!(text.contains("Command palette"));
-        assert!(text.contains("Build"), "commands should be listed");
+        // A listed command, with its binding, from the palette itself rather
+        // than from a panel that happens to mention the same word.
+        assert!(
+            text.contains("New file"),
+            "commands should be listed:\n{text}"
+        );
+        assert!(text.contains("ctrl+n"), "bindings should be listed");
     }
 
     #[test]
@@ -264,6 +308,7 @@ mod tests {
     #[test]
     fn the_explanation_panel_shows_the_instruction_under_the_cursor() {
         let mut app = app();
+        app.open_page(crate::app::Page::Debug);
         app.workspace.active_mut().insert("    add rax, rbx\n");
         app.workspace.active_mut().move_cursor(
             crate::editor::Movement::To(crate::editor::Position::new(0, 6)),
