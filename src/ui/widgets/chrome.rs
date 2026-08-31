@@ -6,6 +6,7 @@ use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 use ratatui::Frame;
 
 use crate::app::mode::Mode;
+use crate::app::page::Page;
 use crate::app::panel::Panel;
 use crate::app::state::Severity;
 use crate::app::App;
@@ -57,6 +58,13 @@ pub fn draw_output(frame: &mut Frame, app: &App, area: Rect, focused: bool) {
 }
 
 /// Draws the system call reference.
+/// The most matches listed above the details.
+///
+/// Past this the list stops being something you scan and becomes something
+/// you scroll, and the details are what answer the question.
+const MOST_LISTED_SYSCALLS: u16 = 12;
+
+/// Draws the system call finder.
 pub fn draw_syscalls(frame: &mut Frame, app: &App, area: Rect, focused: bool) {
     let Some(inner) = super::frame_panel(frame, area, &app.theme, Panel::Syscalls, focused) else {
         return;
@@ -98,9 +106,16 @@ pub fn draw_syscalls(frame: &mut Frame, app: &App, area: Rect, focused: bool) {
     let show_detail = rows[1].height >= 10 && rows[1].width >= 46;
 
     let (list_area, detail_area) = if show_detail {
+        // The list takes only the rows it has matches for, up to a cap. A
+        // fixed share leaves a gap the size of the panel when three calls
+        // match, which reads as a rendering bug.
+        let listed = u16::try_from(matches.len())
+            .unwrap_or(u16::MAX)
+            .clamp(1, MOST_LISTED_SYSCALLS)
+            .min(rows[1].height.saturating_sub(6));
         let split = RatatuiLayout::default()
             .direction(Direction::Vertical)
-            .constraints([Constraint::Percentage(40), Constraint::Percentage(60)])
+            .constraints([Constraint::Length(listed + 1), Constraint::Min(5)])
             .split(rows[1]);
         (split[0], Some(split[1]))
     } else {
@@ -188,6 +203,23 @@ pub fn draw_syscalls(frame: &mut Frame, app: &App, area: Rect, focused: bool) {
         )));
     }
 
+    // The example is the part people copy, so it goes in rather than staying
+    // in the database where nobody sees it.
+    if let Some(example) = &call.example {
+        let room = usize::from(detail_area.height).saturating_sub(lines.len() + 2);
+        if room >= example.lines().count() {
+            lines.push(Line::from(""));
+            for source in example.lines() {
+                // Highlighted the same way the editor would, so an example
+                // and the code it is copied into look alike.
+                lines.push(Line::from(super::editor::highlight(
+                    source,
+                    theme.palette(),
+                )));
+            }
+        }
+    }
+
     frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: true }), detail_area);
 }
 
@@ -231,8 +263,12 @@ pub fn draw_explorer(frame: &mut Frame, app: &App, area: Rect, focused: bool) {
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled("Symbols", theme.dim())));
         for symbol in symbols.iter().take(inner.height as usize) {
+            // The line number matters: a name can appear twice, once where it
+            // is exported with `global` and once where it is defined, and
+            // without the number those two rows look like a duplicate.
             lines.push(Line::from(vec![
-                Span::styled(format!("  {:<20}", symbol.name), theme.base()),
+                Span::styled(format!("  {:<18}", symbol.name), theme.base()),
+                Span::styled(format!("{:>4}  ", symbol.position.line + 1), theme.dim()),
                 Span::styled(symbol.kind.description(), theme.dim()),
             ]));
         }
@@ -242,14 +278,31 @@ pub fn draw_explorer(frame: &mut Frame, app: &App, area: Rect, focused: bool) {
 }
 
 /// Draws the bar listing open documents.
-pub fn draw_document_bar(frame: &mut Frame, app: &App, area: Rect) {
+pub fn draw_page_bar(frame: &mut Frame, app: &App, area: Rect) {
     if area.height == 0 {
         return;
     }
     let theme = &app.theme;
     let symbols = theme.symbols();
 
+    // Each page is numbered because the number is also its shortcut. Showing
+    // it is cheaper than a help screen nobody opens.
     let mut spans: Vec<Span> = Vec::new();
+    for page in Page::ALL {
+        let active = page == app.page;
+        spans.push(Span::styled(
+            format!(" {} {} ", page.number(), page.title()),
+            if active {
+                theme.selection()
+            } else {
+                theme.dim()
+            },
+        ));
+    }
+
+    // The open documents follow, so the page bar doubles as the file tabs
+    // rather than costing a second row.
+    let mut documents: Vec<Span> = Vec::new();
     for (index, document) in app.workspace.documents().iter().enumerate() {
         let active = index == app.workspace.active_index();
         let modified = if document.is_modified() {
@@ -257,15 +310,26 @@ pub fn draw_document_bar(frame: &mut Frame, app: &App, area: Rect) {
         } else {
             ""
         };
-        spans.push(Span::styled(
+        documents.push(Span::styled(
             format!(" {}{} ", document.display_name(), modified),
-            if active {
-                theme.selection()
-            } else {
-                theme.dim()
-            },
+            if active { theme.bright() } else { theme.dim() },
         ));
-        spans.push(Span::styled(symbols.separator.to_owned(), theme.dim()));
+    }
+
+    // Pages first: they are how you get anywhere, so they are the part that
+    // must survive a narrow terminal.
+    let used: usize = spans.iter().map(|span| span.content.chars().count()).sum();
+    let room = usize::from(area.width).saturating_sub(used);
+    let listed: usize = documents
+        .iter()
+        .map(|span| span.content.chars().count())
+        .sum();
+    if listed + 3 <= room {
+        spans.push(Span::styled(
+            format!("  {}  ", symbols.separator),
+            theme.dim(),
+        ));
+        spans.append(&mut documents);
     }
 
     frame.render_widget(Paragraph::new(Line::from(spans)), area);
