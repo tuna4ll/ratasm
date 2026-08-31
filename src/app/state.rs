@@ -29,6 +29,7 @@ use crate::syscall::Database as SyscallDatabase;
 use crate::ui::Theme;
 
 use super::mode::{Mode, Palette, Prompt, PromptKind};
+use super::page::Page;
 use super::panel::Panel;
 
 /// Work the run loop must perform on the application's behalf.
@@ -167,7 +168,9 @@ pub struct App {
     pub keymap: Keymap,
     /// Colours and glyphs.
     pub theme: Theme,
-    /// Which panel has focus.
+    /// The page on show.
+    pub page: Page,
+    /// Which panel has focus. Always one of [`App::page`]'s panels.
     pub focus: Panel,
     /// What the interface is doing.
     pub mode: Mode,
@@ -265,7 +268,8 @@ impl App {
             project,
             keymap,
             theme,
-            focus: Panel::default(),
+            page: Page::default(),
+            focus: Page::default().default_panel(),
             mode: Mode::default(),
             status: Status::default(),
 
@@ -306,6 +310,30 @@ impl App {
             should_quit: false,
             settings,
         })
+    }
+
+    /// Opens a page, moving focus onto it.
+    ///
+    /// Focus follows the page rather than staying where it was, because a
+    /// focus on a panel the page does not draw is a keyboard that appears to
+    /// have stopped working.
+    pub fn open_page(&mut self, page: Page) {
+        if self.page == page {
+            return;
+        }
+        self.page = page;
+        self.focus = page.default_panel();
+    }
+
+    /// Focuses a panel, opening a page that shows it if necessary.
+    ///
+    /// A panel on the current page never moves the user off it, even when it
+    /// also appears elsewhere.
+    pub fn focus_panel(&mut self, panel: Panel) {
+        if !self.page.contains(panel) {
+            self.page = Page::for_panel(panel);
+        }
+        self.focus = panel;
     }
 
     /// Copies the selection, or the whole line when there is none.
@@ -426,16 +454,28 @@ impl App {
             }
 
             // --- Navigate ---
+            Command::GoToPage(page) => {
+                self.open_page(*page);
+                Effect::None
+            }
+            Command::NextPage => {
+                self.open_page(self.page.next());
+                Effect::None
+            }
+            Command::PreviousPage => {
+                self.open_page(self.page.previous());
+                Effect::None
+            }
             Command::NextPanel => {
-                self.focus = self.focus.next();
+                self.focus = self.page.next_panel(self.focus);
                 Effect::None
             }
             Command::PreviousPanel => {
-                self.focus = self.focus.previous();
+                self.focus = self.page.previous_panel(self.focus);
                 Effect::None
             }
             Command::FocusPanel(panel) => {
-                self.focus = *panel;
+                self.focus_panel(*panel);
                 Effect::None
             }
             Command::NextDocument => {
@@ -485,6 +525,9 @@ impl App {
             // --- Debug ---
             Command::DebugStart => {
                 if self.debugger.state().can_launch() || self.debugger.state().can_build() {
+                    // The registers and the stack are the reason to start a
+                    // session, so open the page that shows them.
+                    self.open_page(Page::Debug);
                     Effect::DebugStart
                 } else {
                     self.status = Status::warning(format!(
@@ -553,7 +596,7 @@ impl App {
             Command::ToggleLearningMode => {
                 self.learning_mode = !self.learning_mode;
                 if self.learning_mode {
-                    self.focus = Panel::Learn;
+                    self.focus_panel(Panel::Learn);
                 }
                 self.status = Status::info(if self.learning_mode {
                     "Learning mode on: ←→ moves through the material, ? jumps to the questions"
@@ -569,15 +612,15 @@ impl App {
                 Effect::None
             }
             Command::OpenSyscallFinder => {
-                self.focus = Panel::Syscalls;
+                self.focus_panel(Panel::Syscalls);
                 Effect::None
             }
             Command::OpenScratchpad => {
-                self.focus = Panel::Scratchpad;
+                self.focus_panel(Panel::Scratchpad);
                 Effect::None
             }
             Command::ShowKeybindings => {
-                self.focus = Panel::Output;
+                self.focus_panel(Panel::Output);
                 self.output.clear();
                 self.output.push("Keyboard shortcuts".to_owned());
                 self.output.push(String::new());
@@ -673,7 +716,7 @@ impl App {
                 Ok(line) => {
                     self.cancel_overlay();
                     self.workspace.active_mut().go_to_line(line);
-                    self.focus = Panel::Editor;
+                    self.focus_panel(Panel::Editor);
                     Effect::None
                 }
                 Err(_) => {
@@ -686,7 +729,7 @@ impl App {
                     Ok(address) => {
                         self.cancel_overlay();
                         self.memory_address = Some(address);
-                        self.focus = Panel::Memory;
+                        self.focus_panel(Panel::Memory);
                         Effect::ReadMemory(address)
                     }
                     Err(error) => {
@@ -762,7 +805,7 @@ impl App {
                 .debugger
                 .fail(Transition::BuildFailed, outcome.summary());
             self.status = Status::error(outcome.summary());
-            self.focus = Panel::Output;
+            self.focus_panel(Panel::Output);
             self.go_to_first_error();
         }
         self.build = Some(outcome);
@@ -774,7 +817,7 @@ impl App {
         let _ = self.debugger.fail(Transition::BuildFailed, message.clone());
         self.output = vec![message.clone()];
         self.status = Status::error(message);
-        self.focus = Panel::Output;
+        self.focus_panel(Panel::Output);
     }
 
     /// Records a finished program run.
@@ -798,7 +841,7 @@ impl App {
         } else {
             Status::error(format!("Program {}", output.outcome.description()))
         };
-        self.focus = Panel::Output;
+        self.focus_panel(Panel::Output);
         self.last_run = Some(output);
     }
 
@@ -828,7 +871,7 @@ impl App {
                 self.workspace
                     .active_mut()
                     .move_cursor(Movement::To(position), SelectionMode::Collapse);
-                self.focus = Panel::Editor;
+                self.focus_panel(Panel::Editor);
                 self.status = Status::info(format!("{name} defined on line {}", position.line + 1));
             }
             None => self.status = Status::warning(format!("'{word}' is not defined in this file")),
@@ -852,7 +895,7 @@ impl App {
             Movement::To(crate::editor::Position::new(line, column)),
             SelectionMode::Collapse,
         );
-        self.focus = Panel::Editor;
+        self.focus_panel(Panel::Editor);
         self.status = Status::error(message);
     }
 
@@ -879,7 +922,7 @@ impl App {
             Some(hit) => {
                 let range = hit.range;
                 self.workspace.active_mut().select_range(range);
-                self.focus = Panel::Editor;
+                self.focus_panel(Panel::Editor);
                 self.status = Status::info(format!(
                     "'{}' on line {}",
                     self.search_query,
@@ -980,6 +1023,27 @@ impl App {
     fn explanation_source(&self) -> Option<crate::instruction::Explanation> {
         let explain = |line: &str| crate::instruction::explain_line(&self.instructions, line);
 
+        // The reference page has no editor to move a cursor in, so the search
+        // box drives both halves of it: a name that is an instruction is
+        // explained beside the system calls that match it.
+        if self.page == Page::Reference {
+            if let Some(explanation) = explain(&self.syscall_query) {
+                return Some(explanation);
+            }
+        }
+
+        // On the learn page the instruction under discussion is the one being
+        // asked about or typed, not one in a file that may not even be open.
+        if self.page == Page::Learn {
+            if !self.scratchpad.snippet.trim().is_empty() {
+                return explain(&self.scratchpad.snippet);
+            }
+            if let Some(question) = self.learning.current_question() {
+                return explain(question.instruction);
+            }
+            return None;
+        }
+
         if self.debugger.state().can_inspect() {
             if let Some((file, line)) = &self.current_line {
                 if let Some(document) = self.document_for(file) {
@@ -1011,6 +1075,47 @@ impl App {
     /// GDB reports the file name it was given, which may be relative where the
     /// editor holds an absolute path, so the file names are compared when the
     /// full paths do not match.
+    /// Shows where execution stopped: the debug page, on the right line.
+    ///
+    /// Called on every stop. Being stopped in a debugger is the one moment
+    /// when the machine state is unambiguously what you want to look at, so
+    /// this moves the user there rather than leaving them to notice.
+    pub fn show_execution(&mut self) {
+        self.open_page(Page::Debug);
+        self.follow_execution();
+    }
+
+    /// Moves the editor to the line execution stopped on.
+    ///
+    /// Without this the marker in the gutter is usually off the top or bottom
+    /// of the view, which makes the debugger look like it stopped somewhere
+    /// else entirely. The document has to be one that is already open — the
+    /// debugger is not a reason to start reading files off disk.
+    ///
+    /// Returns whether the editor moved.
+    pub fn follow_execution(&mut self) -> bool {
+        let Some((file, line)) = self.current_line.clone() else {
+            return false;
+        };
+        let Some(index) = self.index_of_document(&file) else {
+            return false;
+        };
+
+        self.workspace.set_active(index);
+        self.workspace.active_mut().go_to_line(line);
+        true
+    }
+
+    /// The index of the open document for `path`, matched as loosely as the
+    /// explanation panel matches it.
+    fn index_of_document(&self, path: &std::path::Path) -> Option<usize> {
+        self.workspace.documents().iter().position(|document| {
+            document
+                .path()
+                .is_some_and(|open| open == path || open.file_name() == path.file_name())
+        })
+    }
+
     fn document_for(&self, path: &std::path::Path) -> Option<&crate::editor::Document> {
         self.workspace.documents().iter().find(|document| {
             document
@@ -1065,16 +1170,179 @@ mod tests {
     }
 
     #[test]
-    fn panel_focus_cycles_and_jumps() {
+    fn panel_focus_cycles_within_the_page() {
         let mut app = app();
-        assert_eq!(app.apply(&Command::NextPanel), Effect::None);
-        assert_eq!(app.focus, Panel::Registers);
+        assert_eq!(app.page, Page::Code);
 
+        // Tab stays on the page: the code page has three panels, not fourteen.
+        assert_eq!(app.apply(&Command::NextPanel), Effect::None);
+        assert_eq!(app.focus, Panel::Explorer);
         app.apply(&Command::PreviousPanel);
         assert_eq!(app.focus, Panel::Editor);
 
+        for _ in 0..Page::Code.panels().len() {
+            app.apply(&Command::NextPanel);
+            assert_eq!(app.page, Page::Code, "Tab must not change page");
+        }
+        assert_eq!(app.focus, Panel::Editor, "the cycle closed");
+    }
+
+    #[test]
+    fn focusing_a_panel_opens_a_page_that_shows_it() {
+        let mut app = app();
         app.apply(&Command::FocusPanel(Panel::Memory));
+
         assert_eq!(app.focus, Panel::Memory);
+        assert_eq!(app.page, Page::Debug, "memory is not on the code page");
+        assert!(app.page.contains(app.focus));
+    }
+
+    #[test]
+    fn focusing_a_panel_the_page_already_shows_stays_put() {
+        let mut app = app();
+        app.apply(&Command::GoToPage(Page::Debug));
+        // Output is on both pages; being on Debug already, it must not jump.
+        app.apply(&Command::FocusPanel(Panel::Output));
+
+        assert_eq!(app.page, Page::Debug);
+        assert_eq!(app.focus, Panel::Output);
+    }
+
+    #[test]
+    fn changing_page_moves_focus_onto_it() {
+        let mut app = app();
+        for page in Page::ALL {
+            app.apply(&Command::GoToPage(page));
+            assert_eq!(app.page, page);
+            assert!(
+                page.contains(app.focus),
+                "{page} left focus on {}",
+                app.focus
+            );
+        }
+
+        app.apply(&Command::NextPage);
+        assert_eq!(app.page, Page::Code, "the last page wraps to the first");
+        app.apply(&Command::PreviousPage);
+        assert_eq!(app.page, Page::Reference);
+    }
+
+    #[test]
+    fn every_command_leaves_focus_on_the_current_page() {
+        // The invariant the whole page model rests on: if a command could
+        // leave focus on a panel the page does not draw, the keyboard would
+        // appear to stop working.
+        for command in Command::all() {
+            let mut app = app();
+            app.apply(&command);
+            assert!(
+                app.page.contains(app.focus),
+                "{command} left focus on {} while showing {}",
+                app.focus,
+                app.page
+            );
+        }
+    }
+
+    #[test]
+    fn stopping_shows_the_machine_and_the_line_it_stopped_on() {
+        let mut app = app_with_source("one\ntwo\nthree\nfour\nfive\nsix\n");
+        app.workspace
+            .active_mut()
+            .set_path("/tmp/ratasm-test/main.asm");
+        app.current_line = Some((PathBuf::from("/tmp/ratasm-test/main.asm"), 5));
+
+        app.show_execution();
+
+        assert_eq!(app.page, Page::Debug, "the registers are on the debug page");
+        assert_eq!(
+            app.workspace.active().cursor().line,
+            4,
+            "the editor should be on the stopped line"
+        );
+    }
+
+    #[test]
+    fn following_execution_into_a_file_that_is_not_open_does_nothing() {
+        let mut app = app();
+        app.current_line = Some((PathBuf::from("/nowhere/other.asm"), 3));
+
+        assert!(
+            !app.follow_execution(),
+            "the debugger is not a reason to read files off disk"
+        );
+    }
+
+    #[test]
+    fn following_execution_with_no_stop_does_nothing() {
+        let mut app = app();
+        assert!(!app.follow_execution());
+    }
+
+    #[test]
+    fn the_learn_page_explains_the_instruction_being_asked_about() {
+        let mut app = app();
+        app.open_page(Page::Learn);
+        app.learning.jump_to_questions();
+
+        let question = app
+            .learning
+            .current_question()
+            .expect("jumping lands on a question");
+        let explanation = app
+            .current_explanation()
+            .expect("the question names an instruction");
+
+        assert!(
+            question
+                .instruction
+                .to_lowercase()
+                .contains(&explanation.mnemonic.to_lowercase()),
+            "explained {} for the question {}",
+            explanation.mnemonic,
+            question.instruction
+        );
+    }
+
+    #[test]
+    fn the_reference_page_explains_an_instruction_typed_into_the_search_box() {
+        let mut app = app();
+        app.open_page(Page::Reference);
+        app.syscall_query = "imul".to_owned();
+
+        let explanation = app
+            .current_explanation()
+            .expect("imul is an instruction ratasm knows");
+        assert_eq!(explanation.mnemonic.to_lowercase(), "imul");
+    }
+
+    #[test]
+    fn a_search_that_is_not_an_instruction_leaves_the_panel_alone() {
+        let mut app = app();
+        app.open_page(Page::Reference);
+        app.syscall_query = "write".to_owned();
+
+        // Falls back to the editor, which holds nothing to explain here.
+        assert!(app.current_explanation().is_none());
+    }
+
+    #[test]
+    fn a_typed_snippet_takes_precedence_over_the_question() {
+        let mut app = app();
+        app.open_page(Page::Learn);
+        app.learning.jump_to_questions();
+        app.scratchpad.snippet = "xor rcx, rcx".to_owned();
+
+        let explanation = app.current_explanation().expect("the snippet is explained");
+        assert_eq!(explanation.mnemonic.to_lowercase(), "xor");
+    }
+
+    #[test]
+    fn starting_a_session_opens_the_debug_page() {
+        let mut app = app();
+        assert_eq!(app.page, Page::Code);
+        app.apply(&Command::DebugStart);
+        assert_eq!(app.page, Page::Debug);
     }
 
     #[test]
@@ -1258,7 +1526,7 @@ mod tests {
 
         let effect = app.accept_palette();
         assert_eq!(effect, Effect::None);
-        assert_eq!(app.focus, Panel::Registers, "the command actually ran");
+        assert_eq!(app.focus, Panel::Explorer, "the command actually ran");
         assert_eq!(app.mode, Mode::Normal, "the palette closed");
     }
 

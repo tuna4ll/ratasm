@@ -557,7 +557,7 @@ mod tests {
         type_text(&mut app, "next panel");
         handle_key(&mut app, press(KeyCode::Enter));
 
-        assert_eq!(app.focus, Panel::Registers);
+        assert_eq!(app.focus, Panel::Explorer);
         assert!(!app.mode.is_overlay());
     }
 
@@ -612,7 +612,7 @@ mod tests {
     #[test]
     fn the_syscall_panel_filters_as_you_type() {
         let mut app = app();
-        app.focus = Panel::Syscalls;
+        app.focus_panel(Panel::Syscalls);
 
         type_text(&mut app, "write");
         assert_eq!(app.syscall_query, "write");
@@ -630,7 +630,7 @@ mod tests {
     #[test]
     fn the_syscall_selection_is_clamped_to_the_matches() {
         let mut app = app();
-        app.focus = Panel::Syscalls;
+        app.focus_panel(Panel::Syscalls);
         type_text(&mut app, "write");
 
         let count = app.matching_syscalls().len();
@@ -648,7 +648,7 @@ mod tests {
     #[test]
     fn escape_clears_the_syscall_query() {
         let mut app = app();
-        app.focus = Panel::Syscalls;
+        app.focus_panel(Panel::Syscalls);
         type_text(&mut app, "write");
 
         handle_key(&mut app, press(KeyCode::Esc));
@@ -667,7 +667,7 @@ mod tests {
         }
         assert_eq!(app.breakpoints.len(), 3);
 
-        app.focus = Panel::Breakpoints;
+        app.focus_panel(Panel::Breakpoints);
         handle_key(&mut app, press(KeyCode::Down));
         assert_eq!(app.breakpoint_selected, 1);
 
@@ -708,7 +708,7 @@ mod tests {
     #[test]
     fn tab_moves_between_panels_outside_the_editor() {
         let mut app = app();
-        app.focus = Panel::Registers;
+        app.focus_panel(Panel::Registers);
         handle_key(&mut app, press(KeyCode::Tab));
         assert_eq!(app.focus, Panel::Flags);
 
@@ -721,12 +721,13 @@ mod tests {
         // Since the editor keeps Tab for indentation, there has to be another
         // way out that works from inside it.
         let mut app = app();
-        app.focus = Panel::Editor;
+        app.focus_panel(Panel::Editor);
         handle_key(
             &mut app,
-            KeyEvent::new(KeyCode::Char('2'), KeyModifiers::ALT),
+            KeyEvent::new(KeyCode::Char('3'), KeyModifiers::ALT),
         );
-        assert_eq!(app.focus, Panel::Registers);
+        assert_eq!(app.page, crate::app::Page::Learn);
+        assert_eq!(app.focus, Panel::Learn);
         assert_eq!(
             app.workspace.active().buffer().to_text(),
             "",
@@ -738,7 +739,7 @@ mod tests {
     fn tab_indents_in_the_editor_rather_than_changing_panel() {
         // The editor needs Tab for indentation, so it wins there.
         let mut app = app();
-        app.focus = Panel::Editor;
+        app.focus_panel(Panel::Editor);
         type_text(&mut app, "ret");
         app.workspace
             .active_mut()
@@ -757,7 +758,7 @@ mod tests {
     #[test]
     fn typing_in_the_scratchpad_builds_a_snippet_and_enter_runs_it() {
         let mut app = app();
-        app.focus = Panel::Scratchpad;
+        app.focus_panel(Panel::Scratchpad);
         type_text(&mut app, "add rax, rbx");
         assert_eq!(app.scratchpad.snippet, "add rax, rbx");
 
@@ -774,7 +775,7 @@ mod tests {
     #[test]
     fn an_assignment_sets_a_starting_value_instead_of_running() {
         let mut app = app();
-        app.focus = Panel::Scratchpad;
+        app.focus_panel(Panel::Scratchpad);
         type_text(&mut app, "rax=0x10");
 
         assert_eq!(handle_key(&mut app, press(KeyCode::Enter)), Effect::None);
@@ -788,7 +789,7 @@ mod tests {
     #[test]
     fn an_assignment_with_no_value_removes_the_starting_value() {
         let mut app = app();
-        app.focus = Panel::Scratchpad;
+        app.focus_panel(Panel::Scratchpad);
         app.scratchpad.set("rbx", 7).expect("rbx is a register");
 
         type_text(&mut app, "rbx=");
@@ -799,7 +800,7 @@ mod tests {
     #[test]
     fn an_unknown_register_is_reported_rather_than_stored() {
         let mut app = app();
-        app.focus = Panel::Scratchpad;
+        app.focus_panel(Panel::Scratchpad);
         type_text(&mut app, "rzz=1");
         handle_key(&mut app, press(KeyCode::Enter));
 
@@ -810,7 +811,7 @@ mod tests {
     #[test]
     fn an_unparsable_value_is_reported_rather_than_stored() {
         let mut app = app();
-        app.focus = Panel::Scratchpad;
+        app.focus_panel(Panel::Scratchpad);
         type_text(&mut app, "rax=nonsense");
         handle_key(&mut app, press(KeyCode::Enter));
 
@@ -821,7 +822,7 @@ mod tests {
     #[test]
     fn escape_clears_the_scratchpad_line_and_its_result() {
         let mut app = app();
-        app.focus = Panel::Scratchpad;
+        app.focus_panel(Panel::Scratchpad);
         type_text(&mut app, "mov rax, 1");
         app.scratchpad_result = Some(Err("boom".to_owned()));
 
@@ -833,7 +834,7 @@ mod tests {
     #[test]
     fn tab_still_leaves_the_scratchpad() {
         let mut app = app();
-        app.focus = Panel::Scratchpad;
+        app.focus_panel(Panel::Scratchpad);
         handle_key(&mut app, press(KeyCode::Tab));
         assert_ne!(app.focus, Panel::Scratchpad);
         assert!(
@@ -845,7 +846,7 @@ mod tests {
     #[test]
     fn arrows_move_through_the_learning_material() {
         let mut app = app();
-        app.focus = Panel::Learn;
+        app.focus_panel(Panel::Learn);
         assert_eq!(app.learning.position(), 1);
 
         handle_key(&mut app, press(KeyCode::Right));
@@ -862,7 +863,7 @@ mod tests {
     #[test]
     fn a_question_mark_jumps_to_the_questions() {
         let mut app = app();
-        app.focus = Panel::Learn;
+        app.focus_panel(Panel::Learn);
         handle_key(&mut app, press(KeyCode::Char('?')));
 
         assert!(app.learning.is_question());
@@ -872,7 +873,7 @@ mod tests {
     #[test]
     fn a_correct_answer_is_typed_and_accepted() {
         let mut app = app();
-        app.focus = Panel::Learn;
+        app.focus_panel(Panel::Learn);
         handle_key(&mut app, press(KeyCode::Char('?')));
 
         let question = app.learning.current_question().expect("on a question");
@@ -888,7 +889,7 @@ mod tests {
     #[test]
     fn a_wrong_answer_keeps_the_question_open() {
         let mut app = app();
-        app.focus = Panel::Learn;
+        app.focus_panel(Panel::Learn);
         handle_key(&mut app, press(KeyCode::Char('?')));
         let position = app.learning.position();
 
@@ -913,7 +914,7 @@ mod tests {
     #[test]
     fn escape_clears_a_typed_answer() {
         let mut app = app();
-        app.focus = Panel::Learn;
+        app.focus_panel(Panel::Learn);
         handle_key(&mut app, press(KeyCode::Char('?')));
         type_text(&mut app, "42");
 
@@ -925,7 +926,7 @@ mod tests {
     #[test]
     fn tab_still_leaves_the_learning_panel() {
         let mut app = app();
-        app.focus = Panel::Learn;
+        app.focus_panel(Panel::Learn);
         handle_key(&mut app, press(KeyCode::Tab));
         assert_ne!(app.focus, Panel::Learn);
     }
