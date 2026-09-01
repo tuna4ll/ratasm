@@ -602,6 +602,11 @@ async fn handle_stop(app: &mut App, session: &mut Option<GdbSession>, record: &R
         }
     }
 
+    // Show where it stopped. A gutter marker on a line nobody can see is the
+    // same as no marker at all, and a stop on a page with no register view is
+    // a debugger nobody can watch.
+    app.show_execution();
+
     if let Some(number) = record.get("bkptno").and_then(|value| value.as_str()) {
         if let Ok(number) = number.parse::<u32>() {
             app.breakpoints.record_hit(number);

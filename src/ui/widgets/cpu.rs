@@ -29,6 +29,9 @@ const NO_SESSION: &str =
 /// value; `RFLAGS` is six characters, so six is one too few.
 const NAME_WIDTH: usize = 7;
 
+/// Columns one flag takes: two for the name, one space, the glyph, a gap.
+const FLAG_WIDTH: usize = 5;
+
 /// Draws the register panel.
 pub fn draw_registers(frame: &mut Frame, app: &App, area: Rect, focused: bool) {
     let block = super::panel_block(&app.theme, Panel::Registers, focused);
@@ -153,6 +156,15 @@ pub fn draw_flags(frame: &mut Frame, app: &App, area: Rect, focused: bool) {
         .map(|previous| flags.changed_from(previous))
         .unwrap_or_default();
 
+    // As many flags per row as the panel is wide enough for, in multiples of
+    // three so the rows stay even. Every row saved here is a row the
+    // conditional-jump list gets, and that list is the point of the panel.
+    let per_row = match usize::from(inner.width) / FLAG_WIDTH {
+        fits if fits >= Flag::ALL.len() => Flag::ALL.len(),
+        fits if fits >= 6 => 6,
+        _ => 3,
+    };
+
     let mut lines: Vec<Line> = Vec::new();
     let mut row: Vec<Span> = Vec::new();
 
@@ -173,8 +185,7 @@ pub fn draw_flags(frame: &mut Frame, app: &App, area: Rect, focused: bool) {
             style,
         ));
 
-        // Three per row keeps the nine flags readable in a narrow panel.
-        if (index + 1) % 3 == 0 {
+        if (index + 1) % per_row == 0 {
             lines.push(Line::from(std::mem::take(&mut row)));
         }
     }
@@ -190,7 +201,10 @@ pub fn draw_flags(frame: &mut Frame, app: &App, area: Rect, focused: bool) {
         .collect();
 
     if !taken.is_empty() && inner.height > lines.len() as u16 + 1 {
-        lines.push(Line::from(""));
+        // The blank separator is a luxury; the list is not.
+        if inner.height > lines.len() as u16 + 2 {
+            lines.push(Line::from(""));
+        }
         lines.push(Line::from(Span::styled("Would be taken:", theme.dim())));
         let text = super::truncate(&taken.join(" "), usize::from(inner.width), symbols.ellipsis);
         lines.push(Line::from(Span::styled(text, theme.success())));

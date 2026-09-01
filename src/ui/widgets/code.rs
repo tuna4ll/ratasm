@@ -5,6 +5,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 
+use crate::app::page::Page;
 use crate::app::panel::Panel;
 use crate::app::App;
 
@@ -98,13 +99,15 @@ pub fn draw_explanation(frame: &mut Frame, app: &App, area: Rect, focused: bool)
     let block = super::panel_block(&app.theme, Panel::Explain, focused);
 
     let Some(explanation) = app.current_explanation() else {
-        super::draw_placeholder(
-            frame,
-            area,
-            &app.theme,
-            block,
-            "Put the cursor on an instruction to see what it does.",
-        );
+        // Where the instruction comes from depends on the page, so telling
+        // the reader to move a cursor on a page with no editor would be
+        // advice they cannot follow.
+        let hint = match app.page {
+            Page::Reference => "Type an instruction name in the search box to see what it does.",
+            Page::Learn => "Type an instruction in the scratchpad to see what it does.",
+            Page::Code | Page::Debug => "Put the cursor on an instruction to see what it does.",
+        };
+        super::draw_placeholder(frame, area, &app.theme, block, hint);
         return;
     };
     let inner = block.inner(area);
