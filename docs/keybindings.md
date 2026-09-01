@@ -1,5 +1,25 @@
 # Keyboard shortcuts
 
+## Pages
+
+The interface is four pages, each holding the panels for one activity. The
+page bar across the top names them, with the number that opens it:
+
+| Key | Page | What is on it |
+| --- | --- | --- |
+| <kbd>Alt</kbd>+<kbd>1</kbd> | Code | Editor, project files and symbols, build output |
+| <kbd>Alt</kbd>+<kbd>2</kbd> | Debug | Editor, disassembly, explanation, registers, flags, stack, output |
+| <kbd>Alt</kbd>+<kbd>3</kbd> | Learn | Lessons and questions, the scratchpad, the explanation |
+| <kbd>Alt</kbd>+<kbd>4</kbd> | Reference | System calls and instruction semantics |
+
+<kbd>Tab</kbd> moves between the panels of the *current page*, so it stays a
+navigation key rather than a search through fourteen panels. Starting a debug
+session opens the Debug page, and so does stopping at a breakpoint — being
+stopped is the one moment the machine state is unambiguously what you want.
+
+Panels that share a slot, such as the stack and the memory view, have a small
+tab strip above them naming the others.
+
 ## Defaults
 
 ### Running and debugging
@@ -60,9 +80,8 @@ assembled, and `rax=` removes it again. <kbd>Tab</kbd> still leaves the panel.
 | <kbd>Ctrl</kbd>+<kbd>F</kbd> | Search |
 | <kbd>Ctrl</kbd>+<kbd>G</kbd> | Go to line, or to an address |
 | <kbd>Ctrl</kbd>+<kbd>K</kbd> | Syscall finder |
-| <kbd>Tab</kbd> | Next panel (indents inside the editor) |
+| <kbd>Tab</kbd> | Next panel on this page (indents inside the editor) |
 | <kbd>Shift</kbd>+<kbd>Tab</kbd> | Previous panel (dedents inside the editor) |
-| <kbd>Alt</kbd>+<kbd>1</kbd>…<kbd>9</kbd> | Focus one of the first nine panels directly |
 
 ### Editing
 
@@ -170,6 +189,10 @@ code, so a command missing here is a build failure rather than a surprise.
 | `app.syscalls` | Find a system call |
 | `app.scratchpad` | Open scratchpad |
 | `app.keybindings` | Show keyboard shortcuts |
+| `navigate.page.code` | Code page |
+| `navigate.page.debug` | Debug page |
+| `navigate.page.learn` | Learn page |
+| `navigate.page.reference` | Reference page |
 | `navigate.focus.editor` | Focus editor |
 | `navigate.focus.registers` | Focus registers |
 | `navigate.focus.flags` | Focus flags |
