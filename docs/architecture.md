@@ -107,6 +107,19 @@ rather than typed from memory. Entries whose arguments are not modelled are
 marked `detailed: false` and carry nothing else; tests enforce that such an
 entry invents no arguments, no return value and no example.
 
+## Pages
+
+Fourteen panels do not fit on one screen, and Tab through fourteen of them is a
+search rather than navigation. So `app::page` groups them into four pages — one
+per activity — and the layout's only job is arranging the panels the open page
+holds. The layout never has to decide whether the register view is relevant,
+only how much room it gets.
+
+Two invariants hold the model together, both pinned by tests: every panel is on
+at least one page, and focus is always on a panel the open page draws. The
+second is why `App::focus_panel` exists rather than assignment to a field — a
+panel on another page brings its page with it.
+
 ## Learning and the scratchpad
 
 Both are modules that know nothing about a terminal. `learning` holds lessons
@@ -123,7 +136,7 @@ if a stated answer disagrees with the machine.
 
 ## Testing
 
-Around 940 tests, all runnable without a terminal. The parsers are exercised
+Around 970 tests, all runnable without a terminal. The parsers are exercised
 from fixtures captured from real GDB and NASM output. Tests needing `gdb`,
 `nasm` or `ld` skip themselves when those are absent, so the suite passes on a
 bare machine while still covering the real thing when it is available.
