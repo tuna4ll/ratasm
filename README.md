@@ -54,12 +54,12 @@ This is an honest account of what works today.
 | GDB/MI transport, breakpoints, stepping, registers, memory | Working |
 | Disassembler: ELF inspection and x86-64 decoding | Working |
 | Instruction explainer, syscall database, flag analysis | Working |
-| Terminal UI: panels, responsive layout, command palette | Working |
+| Terminal UI: pages, responsive layout, command palette | Working |
 | Reverse execution: stepping and running backwards | Working |
 | Learning mode and the scratchpad | Working |
 | Copy and paste, including the system clipboard over OSC 52 | Working |
 
-Everything above is covered by the test suite — 941 tests, including ones that
+Everything above is covered by the test suite — 971 tests, including ones that
 assemble and run real programs, drive a real GDB, and check every answer in the
 learning material against the processor.
 
@@ -131,47 +131,65 @@ Press <kbd>F6</kbd> to assemble it, <kbd>F5</kbd> to run it, <kbd>F9</kbd> on a
 line to set a breakpoint, and <kbd>F7</kbd> to step one instruction at a time
 while you watch the registers move.
 
-## Screen layout
+## The four pages
 
-<img src="assets/screenshot-debug.png" alt="ratasm paused four instructions into a program" width="100%">
+The interface is four pages, each holding the panels for one activity, named
+along the top with the number that opens it. <kbd>Tab</kbd> moves between the
+panels of the page you are on — so it stays a navigation key rather than a
+search through fourteen panels.
 
-The program above is the one `ratasm new` writes, paused on its `syscall` after
-four presses of <kbd>F7</kbd>. Everything on screen is live: RDX is highlighted
-because that instruction changed it, the flags panel lists the conditional
-jumps that would be taken as the flags stand, and the explanation reads the
-real operands — `kernel executes the call in 0x1` is RAX's actual value, not an
-example.
+### <kbd>Alt</kbd>+<kbd>1</kbd> — Code
 
-Panels adapt to the terminal. Below roughly 100 columns they collapse into tabs
-rather than being squeezed into uselessness. The editor, registers, flags,
-stack, call stack, memory, disassembly, breakpoints, build output, instruction
-explanation, syscall finder, symbol explorer, scratchpad and learning panel are
-all panels; <kbd>Tab</kbd> cycles between them.
+<img src="assets/screenshot-code.png" alt="the code page: editor, project files, build output" width="100%">
 
-### The scratchpad
+Writing and building. The editor gets most of the screen, the project's files
+and symbols sit beside it, and the build output runs along the bottom with the
+exact `nasm` and `ld` commands that ran.
 
-<img src="assets/screenshot-scratchpad.png" alt="the scratchpad running add rax, rbx" width="790">
+### <kbd>Alt</kbd>+<kbd>2</kbd> — Debug
 
-<kbd>F2</kbd> opens a place to try one instruction without making a project.
-Type `rax=1` to set a starting value and `add rax, rbx` to run it; ratasm
-assembles a small program, runs it under GDB and reports what actually changed.
-Nothing is simulated — including `PF=1` above, which is set because 3 has an
-even number of one bits.
+<img src="assets/screenshot-debug.png" alt="the debug page, paused four instructions into a program" width="100%">
+
+Watching the machine. The program above is the one `ratasm new` writes, paused
+on its `syscall` after four presses of <kbd>F7</kbd>. Everything on screen is
+live: the editor has followed execution to line 23, RDX is highlighted because
+that instruction changed it, the flag panel lists the conditional jumps that
+would be taken as the flags stand, and the explanation reads the real operands
+— `kernel executes the call in 0x1` is RAX's actual value, not an example.
+
+Starting a session opens this page, and so does stopping at a breakpoint. The
+strip above the stack names the panels sharing that slot: the call stack, the
+memory view and the breakpoint list.
+
+### <kbd>Alt</kbd>+<kbd>3</kbd> — Learn
+
+<img src="assets/screenshot-learn.png" alt="the learn page: a question, the scratchpad, and the instruction explained" width="100%">
+
+Lessons on the registers, the System V ABI, the stack, the flags and the
+syscall convention, followed by questions about what a given instruction leaves
+behind. A wrong answer stays on the question and shows the working rather than
+moving on.
+
+Beside it is the scratchpad: type `rax=1` to set a starting value and
+`add rax, rbx` to run it. ratasm assembles a small program, runs it under GDB
+and reports what actually changed — including `PF=1` above, set because 3 has
+an even number of one bits. Nothing is simulated, and every answer in the
+material is checked against a real processor by the test suite.
 
 The snippet is assembled and executed natively on your machine. It is not a
 sandbox, and the panel says so.
 
-### Learning mode
+### <kbd>Alt</kbd>+<kbd>4</kbd> — Reference
 
-<img src="assets/screenshot-learning.png" alt="a learning-mode question answered correctly" width="790">
+<img src="assets/screenshot-reference.png" alt="the reference page: the write syscall and its NASM example" width="100%">
 
-<kbd>F1</kbd> opens lessons on the registers, the System V ABI, the stack, the
-flags and the syscall convention, followed by questions about what a given
-instruction leaves behind. A wrong answer stays on the question and shows the
-working rather than moving on.
+Looking things up. All 385 Linux system calls are searchable by name or number,
+with the register each argument goes in and a NASM example to copy. Type an
+instruction name instead and the panel beside it explains that.
 
-Every stated answer is checked against a real processor by the test suite, so
-the material cannot drift away from what your machine actually does.
+Panels adapt to the terminal. Below roughly 120 columns a page keeps its main
+panel and puts the rest behind a tab strip; below 80 it shows one at a time,
+rather than squeezing a register view into a width where it shows nothing.
 
 ## Keyboard shortcuts
 
@@ -194,8 +212,8 @@ the material cannot drift away from what your machine actually does.
 | <kbd>Ctrl</kbd>+<kbd>G</kbd> | Go to line or address |
 | <kbd>Ctrl</kbd>+<kbd>K</kbd> | Syscall finder |
 | <kbd>Ctrl</kbd>+<kbd>Q</kbd> | Quit |
-| <kbd>Tab</kbd> / <kbd>Shift</kbd>+<kbd>Tab</kbd> | Next / previous panel (indent / dedent in the editor) |
-| <kbd>Alt</kbd>+<kbd>1</kbd>…<kbd>9</kbd> | Focus a panel directly |
+| <kbd>Tab</kbd> / <kbd>Shift</kbd>+<kbd>Tab</kbd> | Next / previous panel on this page (indent / dedent in the editor) |
+| <kbd>Alt</kbd>+<kbd>1</kbd>…<kbd>4</kbd> | Open a page |
 
 All of them are configurable, and conflicting bindings are reported at start-up
 rather than silently shadowing one another. See
