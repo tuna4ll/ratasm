@@ -65,6 +65,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Programs run on their own task, so the interface keeps drawing and reading
   keys while one runs, and <kbd>Ctrl</kbd>+<kbd>F5</kbd> stops one that will not
   stop itself.
+- Pages. The fourteen panels are grouped into four pages — Code, Debug, Learn
+  and Reference — opened with <kbd>Alt</kbd> plus their number. Tab moves
+  between the panels of the open page, and a debug session opens the page that
+  shows the machine.
 
 ### Fixed
 
@@ -84,5 +88,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   filled the whole name column, leaving no separating space.
 - The explanation panel describes the file execution stopped in, rather than
   whichever file happens to be open in the editor.
+- Stopping scrolls the editor to the line it stopped on. The marker in the
+  gutter was usually off-screen, which made the debugger look as though it had
+  stopped somewhere else.
+- The flag panel fits its nine flags to the panel's width, so the list of
+  conditional jumps that would be taken is not pushed off the bottom.
+- The system call list is only as tall as it has matches, instead of leaving a
+  panel-sized gap above the details, and shows the NASM example that was
+  already in the database.
 
 [Unreleased]: https://github.com/tuna4ll/ratasm/compare/main...HEAD
