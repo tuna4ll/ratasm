@@ -177,9 +177,11 @@ jobs:
     name: Publish to crates.io
     needs: [verify, release]
     runs-on: ubuntu-latest
-    # Skipped when no token is configured, so a fork can still cut its own
-    # GitHub releases without holding the crate's credentials.
-    if: ${{ !github.event.inputs.tag }}
+    # No job-level condition: whether this publishes is decided by whether the
+    # CARGO_REGISTRY_TOKEN secret exists, which the step below checks. A fork
+    # without the secret still cuts its own GitHub releases, and a repository
+    # that adds the secret after a release can run this workflow by hand for
+    # the tag it already pushed.
     steps:
       - uses: actions/checkout@v4
 
