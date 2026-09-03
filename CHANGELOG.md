@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-09-03
+
 ### Added
 
 - NASM editor core: line-oriented buffer with exactly invertible edits,
@@ -97,4 +99,5 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   panel-sized gap above the details, and shows the NASM example that was
   already in the database.
 
-[Unreleased]: https://github.com/tuna4ll/ratasm/compare/main...HEAD
+[Unreleased]: https://github.com/tuna4ll/ratasm/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/tuna4ll/ratasm/releases/tag/v0.1.0

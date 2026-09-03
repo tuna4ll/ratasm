@@ -154,6 +154,8 @@ jobs:
             awk -v v="$version" '
               $0 ~ "^## \\[?" v "\\]?" { found = 1; next }
               found && /^## / { exit }
+              # Link reference definitions belong to the file, not the notes.
+              found && /^\[[^]]+\]: / { exit }
               found { print }
             ' CHANGELOG.md > release-notes.md
           fi
