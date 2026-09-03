@@ -11,8 +11,9 @@ cd ratasm
 cargo build
 ```
 
-You need a recent stable Rust toolchain (1.82 or newer), plus the assembly
-toolchain ratasm drives:
+You need a recent stable Rust toolchain — the minimum is `rust-version` in
+Cargo.toml, and CI reads it from there — plus the assembly toolchain ratasm
+drives:
 
 ```sh
 sudo apt install nasm binutils gdb      # Debian, Ubuntu
