@@ -11,13 +11,29 @@ cargo run -- new /tmp/demo
 
 ```sh
 cargo fmt --all -- --check
-cargo clippy --all-targets --all-features -- -D warnings
-cargo test --all-features
-cargo doc --no-deps --all-features
+cargo clippy --locked --all-targets --all-features -- -D warnings
+cargo test --locked --all-features
+cargo doc --locked --no-deps --all-features
 ```
 
 `cargo doc` runs with `RUSTDOCFLAGS=-D warnings`, so a broken intra-doc link
 fails the build.
+
+`--locked` is not decoration. `Cargo.lock` is committed, and CI builds exactly
+what it pins; without it a release of any transitive crate can change the build
+under you. That is not hypothetical — a `clap_lex` release that needed edition
+2024 broke the minimum-version job while nothing in this repository had
+changed.
+
+A separate job compiles the crate on the oldest supported compiler. It reads
+that version from `rust-version` in `Cargo.toml` rather than repeating it, so
+raising the minimum is a one-line change. Raise it when the dependency graph
+forces it — this finds the number:
+
+```sh
+cargo metadata --format-version 1 --all-features \
+  | python3 -c 'import json,sys; print(max(p["rust_version"] for p in json.load(sys.stdin)["packages"] if p.get("rust_version")))'
+```
 
 ## Tests
 
@@ -101,9 +117,49 @@ carries all of it, and that a non-detailed entry invents none of it.
 ## Releasing
 
 1. Update the version in `Cargo.toml`.
-2. Move the `Unreleased` entries in `CHANGELOG.md` under the new version.
-3. Commit, tag `vX.Y.Z`, and push the tag.
+2. Move the `Unreleased` entries in `CHANGELOG.md` under the new version, with
+   the date, and add the two link definitions at the foot of the file.
+3. Commit, then tag and push:
+
+```sh
+git tag -s vX.Y.Z -m "ratasm X.Y.Z"
+git push origin main
+git push origin vX.Y.Z
+```
 
 The release workflow verifies that the tag matches `Cargo.toml`, runs the full
 checks, builds musl and glibc binaries, publishes a GitHub release with
-checksums and the install script, and pushes to crates.io.
+checksums, the changelog entry as its notes and the install script, and pushes
+to crates.io.
+
+### The crates.io token
+
+Publishing needs a `CARGO_REGISTRY_TOKEN` repository secret. Without it the
+release still happens; only the crates.io step is skipped, with a warning.
+
+1. Sign in at [crates.io](https://crates.io) with GitHub and **verify your
+   email address** — the registry refuses to publish without one.
+2. Account Settings → API Tokens → New Token. Scope it to the crates named
+   `ratasm` and to the `publish-new` and `publish-update` endpoints; nothing
+   else is needed, and a token that can only do this is a token worth much
+   less if it leaks. Give it an expiry.
+3. The token is shown once. Store it as a repository secret named exactly
+   `CARGO_REGISTRY_TOKEN`:
+
+```sh
+gh secret set CARGO_REGISTRY_TOKEN --repo tuna4ll/ratasm
+```
+
+   or through Settings → Secrets and variables → Actions → New repository
+   secret.
+
+If a tag was released before the secret existed, re-run that release rather
+than cutting a new version:
+
+```sh
+gh run rerun <run-id>              # the Release run for the tag
+```
+
+Publishing is idempotent: a version already on crates.io is reported and
+skipped rather than failing the workflow. A published version can never be
+replaced, so a mistake means a new version number, not a re-upload.
