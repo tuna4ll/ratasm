@@ -16,6 +16,11 @@ env:
   # Deliberately no global RUSTFLAGS: "-D warnings" there would also apply to
   # dependency crates, so an upstream warning would fail our build. Warnings in
   # this crate are caught by the clippy step instead.
+  #
+  # Every cargo command below passes --locked. Cargo.lock is committed, so CI
+  # tests the dependency versions that ship — and a release of some transitive
+  # crate that needs a newer compiler than our MSRV cannot break the build
+  # without a lockfile change to review.
 
 jobs:
   check:
@@ -35,24 +40,16 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: cargo clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings
+        run: cargo clippy --locked --all-targets --all-features -- -D warnings
 
   test:
-    name: Test (${{ matrix.rust }})
+    name: Test
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        # Stable is what users build with; the MSRV run catches accidental use
-        # of newer language features.
-        rust: [stable, "1.82"]
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust ${{ matrix.rust }}
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: ${{ matrix.rust }}
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
 
       - uses: Swatinem/rust-cache@v2
 
@@ -70,12 +67,46 @@ jobs:
           gdb --version | head -1
 
       - name: cargo test
-        run: cargo test --all-features --verbose
+        run: cargo test --locked --all-features --verbose
 
       - name: cargo doc
-        run: cargo doc --no-deps --all-features
+        run: cargo doc --locked --no-deps --all-features
         env:
           RUSTDOCFLAGS: -D warnings
+
+  # The oldest compiler the crate claims to support. The toolchain is read
+  # from Cargo.toml rather than written here as well, so the promise has one
+  # place to live and cannot drift out of step with what CI actually proves.
+  msrv:
+    name: Minimum supported Rust version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read the MSRV from Cargo.toml
+        id: msrv
+        run: |
+          set -eu
+          version=$(sed -n 's/^rust-version *= *"\([0-9.]*\)".*/\1/p' Cargo.toml | head -1)
+          if [ -z "$version" ]; then
+            echo "::error::Cargo.toml has no rust-version" >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "MSRV is $version"
+
+      - name: Install Rust ${{ steps.msrv.outputs.version }}
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.msrv.outputs.version }}
+
+      - uses: Swatinem/rust-cache@v2
+
+      # Compiling is the whole question here: running the suite again on an
+      # older compiler would test the same behaviour twice and only tell us
+      # about the toolchain when it fails to build.
+      - name: cargo check
+        run: cargo check --locked --all-targets --all-features
 
   build:
     name: Build release binary
