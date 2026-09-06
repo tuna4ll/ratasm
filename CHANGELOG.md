@@ -6,6 +6,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-09-06
+
+### Fixed
+
+- The program-counter marker is tied to the file execution stopped in. It was
+  drawn wherever the stopped line number matched, so in a project with more
+  than one source it marked an unrelated line in whatever buffer was showing.
+- Document lookup compares whole trailing path components rather than the bare
+  file name, so `src/main.asm` and `lib/main.asm` are no longer the same file.
+- Stepping into a source that is not open opens it, instead of leaving the
+  editor on the previous file as though execution had never left it.
+- Jumping to a build error goes to the file the diagnostic names. The cursor
+  moved in whatever document was active, which in a multi-source project is
+  almost never the right one, and a failed build does this automatically.
+
 ## [0.1.0] - 2026-09-03
 
 ### Added
@@ -99,5 +114,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   panel-sized gap above the details, and shows the NASM example that was
   already in the database.
 
-[Unreleased]: https://github.com/tuna4ll/ratasm/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/tuna4ll/ratasm/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/tuna4ll/ratasm/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/tuna4ll/ratasm/releases/tag/v0.1.0
