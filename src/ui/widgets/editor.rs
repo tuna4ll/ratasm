@@ -1,13 +1,7 @@
-//! The source editor panel.
-//!
-//! Draws the visible slice of the active document with NASM highlighting, a
-//! line-number gutter, breakpoint markers and the program counter.
-//!
-//! Highlighting works from the token stream produced by
-//! [`crate::editor::syntax`], which tiles each line exactly. Rendering can
-//! therefore emit one span per token and be sure the line comes out complete —
-//! a highlighter that reconstructed spans by searching for patterns would drop
-//! or duplicate text the first time it met an unusual line.
+//! The source editor panel: highlighted text, gutter, breakpoints and the
+//! program counter. Highlighting consumes the token stream from
+//! [`crate::editor::syntax`], which tiles each line exactly, so one span per
+//! token reproduces the line without gaps.
 
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
@@ -31,8 +25,7 @@ pub fn draw(frame: &mut Frame, app: &App, area: Rect, focused: bool) {
     let theme = &app.theme;
     let symbols = theme.symbols();
 
-    // The gutter is sized to the largest line number the file actually has,
-    // so a short file does not waste four columns.
+    // Sized to the largest line number the file actually has.
     let gutter = if app.settings.editor.line_numbers {
         buffer.line_count().to_string().len().max(2) + 1
     } else {
@@ -46,6 +39,13 @@ pub fn draw(frame: &mut Frame, app: &App, area: Rect, focused: bool) {
     let cursor = document.cursor();
     let path = document.path().map(std::path::Path::to_path_buf);
 
+    // The program counter belongs to one file. Without this check the marker
+    // lands on whatever line number happens to be showing in another buffer.
+    let stopped_here = match (&app.current_line, path.as_deref()) {
+        (Some((file, _)), Some(open)) => crate::editor::workspace::same_file(open, file),
+        _ => false,
+    };
+
     let mut lines: Vec<Line> = Vec::with_capacity(height);
     for offset in 0..height {
         let index = first + offset;
@@ -56,16 +56,15 @@ pub fn draw(frame: &mut Frame, app: &App, area: Rect, focused: bool) {
         let mut spans: Vec<Span> = Vec::new();
         let number = index + 1;
 
-        // Breakpoint and program-counter markers share one column, with the
-        // program counter winning: knowing where execution stopped matters
-        // more than knowing a breakpoint is set on that same line.
+        // Both markers share one column; the program counter wins.
         let has_breakpoint = path
             .as_deref()
             .is_some_and(|path| app.breakpoints.is_set_at(path, number));
-        let is_current = app
-            .current_line
-            .as_ref()
-            .is_some_and(|(_, line)| *line == number);
+        let is_current = stopped_here
+            && app
+                .current_line
+                .as_ref()
+                .is_some_and(|(_, line)| *line == number);
 
         let marker = if is_current {
             Span::styled(
@@ -115,7 +114,6 @@ pub fn draw(frame: &mut Frame, app: &App, area: Rect, focused: bool) {
     let paragraph = Paragraph::new(lines).scroll((0, document.scroll_column() as u16));
     frame.render_widget(paragraph, inner);
 
-    // Place the terminal cursor so the user can see where typing will land.
     if focused && cursor.line >= first && cursor.line < first + height {
         let column = buffer.display_column(cursor.line, cursor.column);
         let x = inner.x

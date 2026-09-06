@@ -1,16 +1,8 @@
 //! The set of open documents and the file operations on them.
 //!
-//! # Saving is atomic
-//!
-//! A save writes to a temporary file in the *same directory* as the target and
-//! then renames it over the original. A rename within one filesystem is
-//! atomic, so an interrupted save — a full disk, a crash, a killed process —
-//! leaves the previous version of the file intact rather than a truncated one.
-//! Writing directly to the destination would risk destroying the user's work
-//! at exactly the moment they asked to preserve it.
-//!
-//! The temporary file must share the destination's directory because a rename
-//! across filesystems fails; `/tmp` is very often a different filesystem.
+//! Saves write a temporary file in the destination's own directory and rename
+//! it over the original, so an interrupted save cannot truncate the user's
+//! work. The directory has to match: a rename across filesystems fails.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -55,10 +47,7 @@ pub enum FileError {
     },
 }
 
-/// Reads a file as UTF-8 text.
-///
-/// Reported as a typed error rather than lossy-decoded: silently replacing
-/// invalid bytes would corrupt the file the moment the user saved it back.
+/// Reads a file as UTF-8 text, refusing rather than lossy-decoding it.
 pub fn read_file(path: &Path) -> Result<String, FileError> {
     let bytes = std::fs::read(path).map_err(|source| FileError::Read {
         path: path.to_path_buf(),
@@ -70,8 +59,6 @@ pub fn read_file(path: &Path) -> Result<String, FileError> {
 }
 
 /// Writes `contents` to `path` atomically.
-///
-/// See the module documentation for why this goes through a temporary file.
 pub fn write_file_atomically(path: &Path, contents: &str) -> Result<(), FileError> {
     let directory = path
         .parent()
@@ -109,8 +96,6 @@ pub fn write_file_atomically(path: &Path, contents: &str) -> Result<(), FileErro
 }
 
 /// Renders a path for a message, preferring the file name when it is long.
-///
-/// A full temporary path in a status bar pushes out the message itself.
 pub fn display_path(path: &Path) -> String {
     let full = path.display().to_string();
     if full.chars().count() <= 60 {
@@ -121,10 +106,26 @@ pub fn display_path(path: &Path) -> String {
         .unwrap_or(full)
 }
 
-/// The open documents and which one is active.
+/// Whether an open document's path is the file a tool named.
 ///
-/// Always holds at least one document, so "the active document" is never a
-/// missing value that every caller has to handle.
+/// GDB and the assembler report the path they were given, usually relative to
+/// the project root, so an exact comparison misses. Matching whole trailing
+/// components accepts `src/main.asm` for a reported `main.asm` while keeping
+/// `lib/main.asm` and `src/main.asm` apart — a bare file-name comparison does
+/// not, and confuses two files that legitimately share a name.
+pub fn same_file(open: &Path, reported: &Path) -> bool {
+    if open == reported {
+        return true;
+    }
+    let open: Vec<_> = open.components().collect();
+    let reported: Vec<_> = reported.components().collect();
+    if reported.is_empty() || reported.len() > open.len() {
+        return false;
+    }
+    open[open.len() - reported.len()..] == reported[..]
+}
+
+/// The open documents and which one is active; always holds at least one.
 #[derive(Debug)]
 pub struct Workspace {
     documents: Vec<Document>,
@@ -156,8 +157,6 @@ impl Workspace {
     }
 
     /// Always `false`; a workspace always holds a document.
-    ///
-    /// Provided so callers do not reach for `len() == 0` and write dead code.
     pub fn is_empty(&self) -> bool {
         false
     }
@@ -169,7 +168,6 @@ impl Workspace {
 
     /// The active document.
     pub fn active(&self) -> &Document {
-        // `active` is kept in range by every mutating method.
         self.documents
             .get(self.active)
             .unwrap_or(&self.documents[0])
@@ -211,11 +209,7 @@ impl Workspace {
         self.recent_files.truncate(Self::MAX_RECENT);
     }
 
-    /// Opens `path`, activating it.
-    ///
-    /// A file that is already open is activated rather than opened twice, so
-    /// the user never ends up editing one file in two buffers with divergent
-    /// undo histories.
+    /// Opens `path`, activating it; a file already open is activated, not reopened.
     pub fn open(&mut self, path: &Path) -> Result<usize, FileError> {
         if let Some(index) = self
             .documents
@@ -284,11 +278,7 @@ impl Workspace {
         Ok(path.to_path_buf())
     }
 
-    /// Closes the document at `index`.
-    ///
-    /// Closing the last document leaves a fresh untitled one behind rather
-    /// than an empty workspace. Returns whether the closed document had
-    /// unsaved changes, so a caller that skipped confirmation can report it.
+    /// Closes the document at `index`, returning whether it had unsaved changes.
     pub fn close(&mut self, index: usize) -> Result<bool, FileError> {
         if index >= self.documents.len() {
             return Err(FileError::NoSuchDocument { index });
@@ -335,6 +325,30 @@ mod tests {
 
     fn temp_dir() -> tempfile::TempDir {
         tempfile::tempdir().expect("temp dir")
+    }
+
+    #[test]
+    fn a_reported_path_matches_on_whole_trailing_components() {
+        assert!(same_file(
+            Path::new("/w/src/main.asm"),
+            Path::new("src/main.asm")
+        ));
+        assert!(same_file(
+            Path::new("/w/src/main.asm"),
+            Path::new("main.asm")
+        ));
+        assert!(same_file(Path::new("main.asm"), Path::new("main.asm")));
+    }
+
+    #[test]
+    fn two_files_sharing_a_name_stay_apart() {
+        // The bug this replaces matched on the file name alone.
+        assert!(!same_file(
+            Path::new("/w/lib/main.asm"),
+            Path::new("src/main.asm")
+        ));
+        assert!(!same_file(Path::new("/w/src/util.asm"), Path::new("m.asm")));
+        assert!(!same_file(Path::new("main.asm"), Path::new("")));
     }
 
     #[test]

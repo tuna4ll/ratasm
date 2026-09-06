@@ -1085,20 +1085,26 @@ impl App {
         self.follow_execution();
     }
 
-    /// Moves the editor to the line execution stopped on.
+    /// Moves the editor to the file and line execution stopped on.
     ///
-    /// Without this the marker in the gutter is usually off the top or bottom
-    /// of the view, which makes the debugger look like it stopped somewhere
-    /// else entirely. The document has to be one that is already open — the
-    /// debugger is not a reason to start reading files off disk.
-    ///
+    /// Opens the file if it is not already in the workspace: stepping into a
+    /// second source is the normal way a multi-file program runs, and leaving
+    /// the editor on the previous file makes it look like execution never left.
     /// Returns whether the editor moved.
     pub fn follow_execution(&mut self) -> bool {
         let Some((file, line)) = self.current_line.clone() else {
             return false;
         };
-        let Some(index) = self.index_of_document(&file) else {
-            return false;
+
+        let index = match self.index_of_document(&file) {
+            Some(index) => index,
+            None => {
+                let resolved = self.resolve_reported_path(&file);
+                match self.workspace.open(&resolved) {
+                    Ok(index) => index,
+                    Err(_) => return false,
+                }
+            }
         };
 
         self.workspace.set_active(index);
@@ -1106,22 +1112,43 @@ impl App {
         true
     }
 
-    /// The index of the open document for `path`, matched as loosely as the
-    /// explanation panel matches it.
-    fn index_of_document(&self, path: &std::path::Path) -> Option<usize> {
-        self.workspace.documents().iter().position(|document| {
-            document
-                .path()
-                .is_some_and(|open| open == path || open.file_name() == path.file_name())
-        })
+    /// Turns a path a tool reported into one that can be opened.
+    pub fn resolve_reported_path(&self, reported: &std::path::Path) -> PathBuf {
+        if reported.is_absolute() || reported.is_file() {
+            return reported.to_path_buf();
+        }
+        let rooted = self.project.root().join(reported);
+        if rooted.is_file() {
+            rooted
+        } else {
+            reported.to_path_buf()
+        }
+    }
+
+    /// The index of the open document for a path a tool reported.
+    pub fn index_of_document(&self, path: &std::path::Path) -> Option<usize> {
+        let documents = self.workspace.documents();
+        documents
+            .iter()
+            .position(|document| document.path() == Some(path))
+            .or_else(|| {
+                let rooted = self.project.root().join(path);
+                documents
+                    .iter()
+                    .position(|document| document.path() == Some(rooted.as_path()))
+            })
+            .or_else(|| {
+                documents.iter().position(|document| {
+                    document
+                        .path()
+                        .is_some_and(|open| crate::editor::workspace::same_file(open, path))
+                })
+            })
     }
 
     fn document_for(&self, path: &std::path::Path) -> Option<&crate::editor::Document> {
-        self.workspace.documents().iter().find(|document| {
-            document
-                .path()
-                .is_some_and(|open| open == path || open.file_name() == path.file_name())
-        })
+        self.index_of_document(path)
+            .and_then(|index| self.workspace.documents().get(index))
     }
 }
 
@@ -1263,13 +1290,44 @@ mod tests {
     }
 
     #[test]
-    fn following_execution_into_a_file_that_is_not_open_does_nothing() {
+    fn following_execution_into_a_missing_file_does_nothing() {
         let mut app = app();
         app.current_line = Some((PathBuf::from("/nowhere/other.asm"), 3));
 
-        assert!(
-            !app.follow_execution(),
-            "the debugger is not a reason to read files off disk"
+        assert!(!app.follow_execution(), "there is no such file to open");
+    }
+
+    #[test]
+    fn following_execution_opens_a_second_source_that_is_not_yet_open() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let other = dir.path().join("util.asm");
+        std::fs::write(&other, "one\ntwo\nthree\nfour\n").expect("write");
+
+        let mut app = app();
+        app.current_line = Some((other.clone(), 3));
+
+        assert!(app.follow_execution(), "stepping into a file must open it");
+        assert_eq!(app.workspace.active().path(), Some(other.as_path()));
+        assert_eq!(app.workspace.active().cursor().line, 2);
+    }
+
+    #[test]
+    fn two_open_files_sharing_a_name_are_not_confused() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let first = dir.path().join("src");
+        let second = dir.path().join("lib");
+        std::fs::create_dir_all(&first).expect("mkdir");
+        std::fs::create_dir_all(&second).expect("mkdir");
+        std::fs::write(first.join("main.asm"), "a\n").expect("write");
+        std::fs::write(second.join("main.asm"), "b\n").expect("write");
+
+        let mut app = app();
+        app.workspace.open(&first.join("main.asm")).expect("open");
+        let wanted = app.workspace.open(&second.join("main.asm")).expect("open");
+
+        assert_eq!(
+            app.index_of_document(&second.join("main.asm")),
+            Some(wanted)
         );
     }
 
