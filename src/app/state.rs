@@ -890,6 +890,20 @@ impl App {
         };
         let column = diagnostic.buffer_column();
         let message = diagnostic.message.clone();
+        let file = diagnostic.file.clone();
+
+        // The diagnostic names its own file, and in a project with several
+        // sources that is rarely the buffer on screen. Jumping to the line
+        // number in whatever was showing pointed at unrelated code.
+        if let Some(file) = file {
+            if !self.show_file(&file) {
+                self.status = Status::error(format!(
+                    "{}: {message}",
+                    crate::editor::workspace::display_path(&file)
+                ));
+                return;
+            }
+        }
 
         self.workspace.active_mut().move_cursor(
             Movement::To(crate::editor::Position::new(line, column)),
@@ -897,6 +911,25 @@ impl App {
         );
         self.focus_panel(Panel::Editor);
         self.status = Status::error(message);
+    }
+
+    /// Makes `path` the active document, opening it if necessary.
+    pub fn show_file(&mut self, path: &std::path::Path) -> bool {
+        if let Some(index) = self.index_of_document(path) {
+            self.workspace.set_active(index);
+            return true;
+        }
+        let resolved = self.resolve_reported_path(path);
+        match self.workspace.open(&resolved) {
+            Ok(index) => {
+                self.workspace.set_active(index);
+                self.workspace
+                    .active_mut()
+                    .set_indent_width(self.settings.indent_width());
+                true
+            }
+            Err(_) => false,
+        }
     }
 
     /// Moves to the next or previous search match.
@@ -1096,18 +1129,9 @@ impl App {
             return false;
         };
 
-        let index = match self.index_of_document(&file) {
-            Some(index) => index,
-            None => {
-                let resolved = self.resolve_reported_path(&file);
-                match self.workspace.open(&resolved) {
-                    Ok(index) => index,
-                    Err(_) => return false,
-                }
-            }
-        };
-
-        self.workspace.set_active(index);
+        if !self.show_file(&file) {
+            return false;
+        }
         self.workspace.active_mut().go_to_line(line);
         true
     }
@@ -1842,6 +1866,7 @@ mod tests {
         use crate::assembler::diagnostics;
 
         let mut app = app_with_source("one\ntwo\nthree\nfour\nfive\n");
+        app.workspace.active_mut().set_path("main.asm");
         app.apply(&Command::Build);
 
         let diagnostics =
@@ -1855,6 +1880,45 @@ mod tests {
 
         app.apply(&Command::GoToFirstError);
         assert_eq!(app.workspace.active().cursor().line, 2, "line 3 is index 2");
+    }
+
+    #[test]
+    fn an_error_in_another_source_jumps_to_that_source() {
+        use crate::assembler::diagnostics;
+
+        let mut app = app_with_source("one\ntwo\nthree\nfour\nfive\n");
+        app.workspace.active_mut().set_path("main.asm");
+
+        let dir = tempfile::tempdir().expect("temp dir");
+        let other = dir.path().join("util.asm");
+        std::fs::write(&other, "a\nb\nc\nd\ne\nf\n").expect("write");
+        app.workspace.open(&other).expect("open");
+        app.workspace.set_active(0);
+
+        app.diagnostics = diagnostics::parse_assembler_output(&format!(
+            "{}:4: error: symbol undefined\n",
+            other.display()
+        ));
+        app.apply(&Command::GoToFirstError);
+
+        assert_eq!(
+            app.workspace.active().path(),
+            Some(other.as_path()),
+            "the jump must land in the file the diagnostic names"
+        );
+        assert_eq!(app.workspace.active().cursor().line, 3);
+    }
+
+    #[test]
+    fn an_error_in_a_file_that_cannot_be_opened_still_names_it() {
+        use crate::assembler::diagnostics;
+
+        let mut app = app_with_source("one\ntwo\n");
+        app.diagnostics = diagnostics::parse_assembler_output("/nowhere/gone.asm:2: error: bad\n");
+        app.apply(&Command::GoToFirstError);
+
+        assert_eq!(app.status.severity, Severity::Error);
+        assert!(app.status.text.contains("gone.asm"), "{}", app.status.text);
     }
 
     #[test]
