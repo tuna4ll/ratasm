@@ -1,6 +1,8 @@
 //! Turning terminal input into state changes.
 
-use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use crossterm::event::{
+    KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+};
 
 use crate::app::mode::Mode;
 use crate::app::panel::Panel;
@@ -62,6 +64,125 @@ fn handle_scrollable(app: &mut App, panel: Panel, key: KeyEvent) -> Effect {
         _ => return Effect::None,
     };
     app.apply(&command)
+}
+
+/// Handles one mouse event against the layout a terminal of `width` by
+pub fn handle_mouse(app: &mut App, mouse: MouseEvent, width: u16, height: u16) -> Effect {
+    use crate::ui::layout;
+
+    if app.mode.is_overlay() {
+        return Effect::None;
+    }
+
+    let layout = layout::compute(
+        ratatui::layout::Rect::new(0, 0, width, height),
+        app.page,
+        app.focus,
+    );
+    let (column, row) = (mouse.column, mouse.row);
+
+    match mouse.kind {
+        MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
+            let down = mouse.kind == MouseEventKind::ScrollDown;
+            let Some(panel) = layout.panel_at(column, row) else {
+                return Effect::None;
+            };
+            if !crate::app::ScrollState::is_scrollable(panel) {
+                return scroll_text_panel(app, panel, down);
+            }
+            let step = crate::app::scroll::STEP as isize;
+            app.scroll.scroll_by(panel, if down { step } else { -step });
+            Effect::None
+        }
+
+        MouseEventKind::Down(MouseButton::Left) => {
+            if row == layout.page_bar.y {
+                return click_page_bar(app, column);
+            }
+            if let Some(panel) = layout.tab_at(column, row) {
+                app.focus_panel(panel);
+                return Effect::None;
+            }
+            let Some(panel) = layout.panel_at(column, row) else {
+                return Effect::None;
+            };
+            app.focus_panel(panel);
+            if panel == Panel::Editor {
+                if let Some(area) = layout.area_of(Panel::Editor) {
+                    place_cursor(app, area, column, row);
+                }
+            }
+            Effect::None
+        }
+
+        _ => Effect::None,
+    }
+}
+
+/// Scrolls the editor or scratchpad, which move a cursor rather than a view.
+fn scroll_text_panel(app: &mut App, panel: Panel, down: bool) -> Effect {
+    if panel != Panel::Editor {
+        return Effect::None;
+    }
+    let movement = if down { Movement::Down } else { Movement::Up };
+    for _ in 0..crate::app::scroll::STEP {
+        app.workspace
+            .active_mut()
+            .move_cursor(movement, SelectionMode::Collapse);
+    }
+    Effect::None
+}
+
+/// Opens the page or document whose label was clicked in the page bar.
+fn click_page_bar(app: &mut App, column: u16) -> Effect {
+    let mut offset = 0u16;
+    for page in crate::app::Page::ALL {
+        let width = format!(" {} {} ", page.number(), page.title())
+            .chars()
+            .count() as u16;
+        if column < offset + width {
+            app.open_page(page);
+            return Effect::None;
+        }
+        offset += width;
+    }
+
+    offset += 5;
+    for (index, document) in app.workspace.documents().iter().enumerate() {
+        let modified = usize::from(document.is_modified());
+        let width = document.display_name().chars().count() as u16 + 2 + modified as u16;
+        if column >= offset && column < offset + width {
+            app.workspace.set_active(index);
+            app.focus_panel(Panel::Editor);
+            return Effect::None;
+        }
+        offset += width;
+    }
+    Effect::None
+}
+
+/// Puts the editor cursor at the cell that was clicked.
+fn place_cursor(app: &mut App, area: ratatui::layout::Rect, column: u16, row: u16) {
+    let document = app.workspace.active();
+    let gutter = if app.settings.editor.line_numbers {
+        document.buffer().line_count().to_string().len().max(2) + 1
+    } else {
+        0
+    };
+    let text_x = area.x + 2 + 2 + gutter as u16;
+    let text_y = area.y + 1;
+    if row < text_y || column < text_x {
+        return;
+    }
+
+    let line = document.scroll_line() + usize::from(row - text_y);
+    let offset = document.scroll_column() + usize::from(column - text_x);
+    let line = line.min(document.buffer().line_count().saturating_sub(1));
+    let position = crate::editor::Position::new(line, offset);
+
+    app.workspace
+        .active_mut()
+        .move_cursor(Movement::To(position), SelectionMode::Collapse);
 }
 
 /// Handles a key while the palette or a prompt is open.
@@ -374,6 +495,87 @@ mod tests {
 
     fn shift(code: KeyCode) -> KeyEvent {
         KeyEvent::new(code, KeyModifiers::SHIFT)
+    }
+
+    /// A mouse event of `kind` at a cell, with no modifiers held.
+    fn at(kind: MouseEventKind, column: u16, row: u16) -> MouseEvent {
+        MouseEvent {
+            kind,
+            column,
+            row,
+            modifiers: KeyModifiers::NONE,
+        }
+    }
+
+    /// The layout the mouse tests aim at, so a cell can be named by panel.
+    fn cell_in(app: &App, panel: Panel, width: u16, height: u16) -> (u16, u16) {
+        let layout = crate::ui::layout::compute(
+            ratatui::layout::Rect::new(0, 0, width, height),
+            app.page,
+            app.focus,
+        );
+        let area = layout.area_of(panel).expect("the panel is drawn");
+        (area.x + 2, area.y + 2)
+    }
+
+    #[test]
+    fn the_wheel_scrolls_whatever_it_is_pointing_at() {
+        let mut app = app();
+        app.open_page(crate::app::Page::Code);
+        app.output = (1..=80).map(|n| format!("line-{n}")).collect();
+        crate::ui::render::sync_scroll(&mut app, 160, 48);
+
+        let (column, row) = cell_in(&app, Panel::Output, 160, 48);
+        let before = app.scroll.offset(Panel::Output);
+
+        handle_mouse(&mut app, at(MouseEventKind::ScrollUp, column, row), 160, 48);
+        assert!(
+            app.scroll.offset(Panel::Output) < before,
+            "the wheel must move the panel under the pointer"
+        );
+        assert_eq!(app.focus, Panel::Editor, "without stealing focus");
+    }
+
+    #[test]
+    fn clicking_a_panel_focuses_it() {
+        let mut app = app();
+        app.open_page(crate::app::Page::Code);
+        let (column, row) = cell_in(&app, Panel::Output, 160, 48);
+
+        handle_mouse(
+            &mut app,
+            at(MouseEventKind::Down(MouseButton::Left), column, row),
+            160,
+            48,
+        );
+        assert_eq!(app.focus, Panel::Output);
+    }
+
+    #[test]
+    fn clicking_the_page_bar_opens_that_page() {
+        let mut app = app();
+        handle_mouse(
+            &mut app,
+            at(MouseEventKind::Down(MouseButton::Left), 10, 0),
+            160,
+            48,
+        );
+        assert_eq!(app.page, crate::app::Page::Debug);
+    }
+
+    #[test]
+    fn the_mouse_is_ignored_while_an_overlay_is_open() {
+        let mut app = app();
+        app.apply(&Command::OpenPalette);
+        let before = app.focus;
+
+        handle_mouse(
+            &mut app,
+            at(MouseEventKind::Down(MouseButton::Left), 40, 20),
+            160,
+            48,
+        );
+        assert_eq!(app.focus, before, "the palette owns the screen");
     }
 
     #[test]

@@ -81,6 +81,9 @@ pub async fn run(mut app: App, terminal: &mut Tui) -> Result<()> {
         let effect = tokio::select! {
             event = events.next() => match event {
                 Some(Ok(Event::Key(key))) => handle_key_event(&mut app, key),
+                Some(Ok(Event::Mouse(mouse))) => {
+                    crate::event::handle_mouse(&mut app, mouse, size.width, size.height)
+                }
                 Some(Ok(Event::Resize(..))) => Effect::None,
                 Some(Ok(_)) => Effect::None,
                 Some(Err(_)) | None => break,

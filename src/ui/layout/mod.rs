@@ -64,6 +64,32 @@ impl Layout {
     pub fn visible_panels(&self) -> Vec<Panel> {
         self.panels.iter().map(|(panel, _)| *panel).collect()
     }
+    /// The panel drawn at a cell, for routing a mouse event.
+    pub fn panel_at(&self, x: u16, y: u16) -> Option<Panel> {
+        self.panels
+            .iter()
+            .find(|(_, area)| {
+                x >= area.x && x < area.x + area.width && y >= area.y && y < area.y + area.height
+            })
+            .map(|(panel, _)| *panel)
+    }
+
+    /// The tab in the strip at a cell, given the panels sharing it.
+    pub fn tab_at(&self, x: u16, y: u16) -> Option<Panel> {
+        let bar = self.tab_bar?;
+        if y != bar.y || x < bar.x {
+            return None;
+        }
+        let mut offset = bar.x;
+        for panel in &self.tabbed {
+            let width = panel.title().chars().count() as u16 + 2;
+            if x < offset + width {
+                return Some(*panel);
+            }
+            offset += width;
+        }
+        None
+    }
 }
 
 /// Computes the layout for a terminal of `area` showing `page`, focused on

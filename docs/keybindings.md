@@ -83,6 +83,35 @@ assembled, and `rax=` removes it again. <kbd>Tab</kbd> still leaves the panel.
 | <kbd>Tab</kbd> | Next panel on this page (indents inside the editor) |
 | <kbd>Shift</kbd>+<kbd>Tab</kbd> | Previous panel (dedents inside the editor) |
 
+### Scrolling a panel
+
+Every panel but the editor and the scratchpad holds a list that is often taller
+than the room it has. A scrollbar down the right edge appears when there is more
+than fits.
+
+| Key | Action |
+| --- | --- |
+| <kbd>↑</kbd> / <kbd>↓</kbd> | Scroll the focused panel |
+| <kbd>PgUp</kbd> / <kbd>PgDn</kbd> | Scroll a screenful |
+| <kbd>Home</kbd> / <kbd>End</kbd> | First row / last screenful |
+
+The output panel keeps showing its newest line as a build writes to it. Scroll
+up and it stays where you put it; <kbd>End</kbd> makes it follow again.
+
+### The mouse
+
+| Action | Result |
+| --- | --- |
+| Wheel | Scrolls whatever is under the pointer, without taking focus |
+| Click a panel | Focuses it; in the editor, moves the cursor |
+| Click a page name | Opens that page |
+| Click a file name | Switches to that buffer |
+| Click a tab | Focuses that panel |
+
+Mouse reporting means the terminal's own text selection is off while ratasm is
+running. Hold <kbd>Shift</kbd> while dragging to select and copy the way the
+terminal normally would — most terminals reserve that for exactly this.
+
 ### Editing
 
 | Key | Action |
