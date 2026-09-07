@@ -1,15 +1,4 @@
 //! Application state, and what each command does to it.
-//!
-//! # Synchronous state, asynchronous work
-//!
-//! [`App::apply`] is a pure state transition: it takes a [`Command`], changes
-//! the state, and returns an [`Effect`] describing any I/O that has to happen.
-//! Building, running and talking to GDB are *not* performed here.
-//!
-//! That split is what makes the application testable. Every command can be
-//! exercised without a terminal, without a toolchain and without an async
-//! runtime, and the tests below do exactly that. The run loop is then a thin
-//! thing that performs effects and feeds results back.
 
 use std::path::PathBuf;
 
@@ -31,11 +20,9 @@ use crate::ui::Theme;
 use super::mode::{Mode, Palette, Prompt, PromptKind};
 use super::page::Page;
 use super::panel::Panel;
+use super::scroll::ScrollState;
 
 /// Work the run loop must perform on the application's behalf.
-///
-/// Returned by [`App::apply`] rather than done inside it, so state changes stay
-/// synchronous and testable.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Effect {
     /// Nothing to do.
@@ -172,6 +159,8 @@ pub struct App {
     pub page: Page,
     /// Which panel has focus. Always one of [`App::page`]'s panels.
     pub focus: Panel,
+    /// How far each panel is scrolled.
+    pub scroll: ScrollState,
     /// What the interface is doing.
     pub mode: Mode,
     /// The status bar message.
@@ -190,10 +179,6 @@ pub struct App {
     /// Stack contents around the stack pointer.
     pub stack: MemoryBlock,
     /// Whether execution is being recorded, so it can be stepped backwards.
-    ///
-    /// Distinct from the setting that asks for it: GDB may refuse, and the
-    /// interface must report what is actually true rather than what was
-    /// requested.
     pub recording: bool,
     /// The call stack at the last stop, innermost frame first.
     pub frames: Vec<crate::debugger::frames::Frame>,
@@ -228,9 +213,6 @@ pub struct App {
     /// Where the reader is in the material.
     pub learning: crate::learning::Progress,
     /// Text cut or copied, used by paste.
-    ///
-    /// ratasm keeps its own copy because the terminal will accept text for
-    /// the system clipboard but will not reliably give any back.
     pub clipboard: String,
 
     /// Instruction semantics, loaded once.
@@ -254,11 +236,6 @@ pub struct App {
 
 impl App {
     /// Creates the application for a project.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error only if the embedded databases fail to parse, which
-    /// would mean a corrupt build rather than anything the user did.
     pub fn new(project: Project, settings: Settings) -> Result<Self, serde_json::Error> {
         let (keymap, _) = settings.keymap();
         let theme = settings.theme();
@@ -270,6 +247,7 @@ impl App {
             theme,
             page: Page::default(),
             focus: Page::default().default_panel(),
+            scroll: ScrollState::default(),
             mode: Mode::default(),
             status: Status::default(),
 
@@ -313,10 +291,6 @@ impl App {
     }
 
     /// Opens a page, moving focus onto it.
-    ///
-    /// Focus follows the page rather than staying where it was, because a
-    /// focus on a panel the page does not draw is a keyboard that appears to
-    /// have stopped working.
     pub fn open_page(&mut self, page: Page) {
         if self.page == page {
             return;
@@ -326,9 +300,6 @@ impl App {
     }
 
     /// Focuses a panel, opening a page that shows it if necessary.
-    ///
-    /// A panel on the current page never moves the user off it, even when it
-    /// also appears elsewhere.
     pub fn focus_panel(&mut self, panel: Panel) {
         if !self.page.contains(panel) {
             self.page = Page::for_panel(panel);
@@ -337,10 +308,6 @@ impl App {
     }
 
     /// Copies the selection, or the whole line when there is none.
-    ///
-    /// Copying the current line with nothing selected is what every editor
-    /// does, and it is the common case: you want this instruction, and
-    /// selecting it first is a step you should not have to take.
     fn copy(&mut self, remove: bool) -> Effect {
         let document = self.workspace.active_mut();
         let selected = document.has_selection();
@@ -357,8 +324,6 @@ impl App {
             return Effect::None;
         }
 
-        // With nothing selected, cutting takes the line the copy took —
-        // including its newline, so the lines below move up.
         if remove && !document.delete_selection() {
             let line = document.cursor().line;
             let buffer = document.buffer();
@@ -382,7 +347,6 @@ impl App {
     /// Applies a command, returning any I/O the run loop must perform.
     pub fn apply(&mut self, command: &Command) -> Effect {
         match command {
-            // --- File ---
             Command::NewFile => {
                 self.workspace.new_document();
                 self.status = Status::info("New buffer");
@@ -405,7 +369,6 @@ impl App {
             }
             Command::Quit => {
                 if self.workspace.has_unsaved_changes() {
-                    // Never discard work without asking.
                     self.mode = Mode::Prompt(Prompt::new(PromptKind::ConfirmQuit, ""));
                     self.pending_prompt = Some(PromptKind::ConfirmQuit);
                     Effect::None
@@ -415,7 +378,6 @@ impl App {
                 }
             }
 
-            // --- Edit ---
             Command::Undo => {
                 if !self.workspace.active_mut().undo() {
                     self.status = Status::info("Nothing to undo");
@@ -453,7 +415,6 @@ impl App {
                 Effect::None
             }
 
-            // --- Navigate ---
             Command::GoToPage(page) => {
                 self.open_page(*page);
                 Effect::None
@@ -482,6 +443,24 @@ impl App {
                 self.workspace.next_document();
                 Effect::None
             }
+            Command::ScrollUp => self.scroll_focused(-(crate::app::scroll::STEP as isize)),
+            Command::ScrollDown => self.scroll_focused(crate::app::scroll::STEP as isize),
+            Command::ScrollPageUp => {
+                self.scroll.page(self.focus, false);
+                Effect::None
+            }
+            Command::ScrollPageDown => {
+                self.scroll.page(self.focus, true);
+                Effect::None
+            }
+            Command::ScrollToTop => {
+                self.scroll.to_start(self.focus);
+                Effect::None
+            }
+            Command::ScrollToEnd => {
+                self.scroll.to_end(self.focus);
+                Effect::None
+            }
             Command::PreviousDocument => {
                 self.workspace.previous_document();
                 Effect::None
@@ -497,7 +476,6 @@ impl App {
                 Effect::None
             }
 
-            // --- Search ---
             Command::Search => self.open_prompt(PromptKind::Search),
             Command::Replace => self.open_prompt(PromptKind::Replace),
             Command::SearchNext => {
@@ -509,24 +487,18 @@ impl App {
                 Effect::None
             }
 
-            // --- Build ---
             Command::Build => self.start_build(false),
             Command::BuildWithDebugInfo => self.start_build(true),
             Command::Run => {
                 if self.debugger.state() == DebuggerState::Paused {
-                    // F5 continues when a session is paused, which is what
-                    // every other debugger does.
                     return self.apply(&Command::DebugContinue);
                 }
                 Effect::Run
             }
             Command::Stop => Effect::StopProgram,
 
-            // --- Debug ---
             Command::DebugStart => {
                 if self.debugger.state().can_launch() || self.debugger.state().can_build() {
-                    // The registers and the stack are the reason to start a
-                    // session, so open the page that shows them.
                     self.open_page(Page::Debug);
                     Effect::DebugStart
                 } else {
@@ -569,7 +541,6 @@ impl App {
                 Effect::SyncBreakpoints
             }
 
-            // --- View ---
             Command::CycleRegisterFormat => {
                 self.register_format = self.register_format.next();
                 self.status = Status::info(format!(
@@ -606,7 +577,6 @@ impl App {
                 Effect::None
             }
 
-            // --- Application ---
             Command::OpenPalette => {
                 self.mode = Mode::Palette(Palette::open());
                 Effect::None
@@ -667,10 +637,6 @@ impl App {
     }
 
     /// Refuses a reverse step when nothing was recorded, explaining why.
-    ///
-    /// Stepping backwards only works if execution was recorded, and recording
-    /// is a setting. Saying so is far better than the command appearing to do
-    /// nothing.
     fn require_recording(&mut self, kind: StepKind) -> Effect {
         if !self.settings.debugger.record {
             self.status =
@@ -687,11 +653,6 @@ impl App {
     }
 
     /// Accepts the current prompt's answer.
-    ///
-    /// Returns the effect the answer implies. An answer that cannot be used —
-    /// a line number that is not a number, an address that does not parse — is
-    /// reported in the status bar and the prompt stays open, so the user can
-    /// correct it rather than retyping from scratch.
     pub fn accept_prompt(&mut self) -> Effect {
         let Mode::Prompt(prompt) = &self.mode else {
             return Effect::None;
@@ -892,9 +853,6 @@ impl App {
         let message = diagnostic.message.clone();
         let file = diagnostic.file.clone();
 
-        // The diagnostic names its own file, and in a project with several
-        // sources that is rarely the buffer on screen. Jumping to the line
-        // number in whatever was showing pointed at unrelated code.
         if let Some(file) = file {
             if !self.show_file(&file) {
                 self.status = Status::error(format!(
@@ -911,6 +869,14 @@ impl App {
         );
         self.focus_panel(Panel::Editor);
         self.status = Status::error(message);
+    }
+
+    /// Scrolls the focused panel, if it is one that scrolls this way.
+    fn scroll_focused(&mut self, rows: isize) -> Effect {
+        if ScrollState::is_scrollable(self.focus) {
+            self.scroll.scroll_by(self.focus, rows);
+        }
+        Effect::None
     }
 
     /// Makes `path` the active document, opening it if necessary.
@@ -985,8 +951,6 @@ impl App {
         );
         let count = edits.len();
 
-        // Applied in the order given: replace_all returns them in reverse
-        // document order so earlier edits cannot shift later ones.
         for (range, text) in edits {
             self.workspace.active_mut().replace_range(range, &text);
         }
@@ -1035,14 +999,6 @@ impl App {
     }
 
     /// The explanation for the instruction currently in view.
-    ///
-    /// While the program is stopped this is the instruction at the program
-    /// counter, because that is the one whose effects every other panel shows.
-    /// The source is taken from the file GDB reported, not from whichever
-    /// document happens to be active — otherwise looking at a second file
-    /// would silently explain the wrong line. When that file is not open, the
-    /// disassembled instruction is used instead, so the panel still works for
-    /// code with no source to hand.
     pub fn current_explanation(&self) -> Option<crate::instruction::Explanation> {
         let explanation = self.explanation_source()?;
         Some(if self.debugger.state().can_inspect() {
@@ -1056,17 +1012,12 @@ impl App {
     fn explanation_source(&self) -> Option<crate::instruction::Explanation> {
         let explain = |line: &str| crate::instruction::explain_line(&self.instructions, line);
 
-        // The reference page has no editor to move a cursor in, so the search
-        // box drives both halves of it: a name that is an instruction is
-        // explained beside the system calls that match it.
         if self.page == Page::Reference {
             if let Some(explanation) = explain(&self.syscall_query) {
                 return Some(explanation);
             }
         }
 
-        // On the learn page the instruction under discussion is the one being
-        // asked about or typed, not one in a file that may not even be open.
         if self.page == Page::Learn {
             if !self.scratchpad.snippet.trim().is_empty() {
                 return explain(&self.scratchpad.snippet);
@@ -1085,8 +1036,6 @@ impl App {
                 }
             }
 
-            // No source for the stop location; fall back to the machine code,
-            // which is always available.
             if let Some(address) = self.current_address {
                 if let Some(line) = self
                     .disassembly
@@ -1104,26 +1053,12 @@ impl App {
     }
 
     /// The open document for a path GDB reported.
-    ///
-    /// GDB reports the file name it was given, which may be relative where the
-    /// editor holds an absolute path, so the file names are compared when the
-    /// full paths do not match.
-    /// Shows where execution stopped: the debug page, on the right line.
-    ///
-    /// Called on every stop. Being stopped in a debugger is the one moment
-    /// when the machine state is unambiguously what you want to look at, so
-    /// this moves the user there rather than leaving them to notice.
     pub fn show_execution(&mut self) {
         self.open_page(Page::Debug);
         self.follow_execution();
     }
 
     /// Moves the editor to the file and line execution stopped on.
-    ///
-    /// Opens the file if it is not already in the workspace: stepping into a
-    /// second source is the normal way a multi-file program runs, and leaving
-    /// the editor on the previous file makes it look like execution never left.
-    /// Returns whether the editor moved.
     pub fn follow_execution(&mut self) -> bool {
         let Some((file, line)) = self.current_line.clone() else {
             return false;
@@ -1197,7 +1132,6 @@ mod tests {
     fn app() -> App {
         let dir = tempfile::tempdir().expect("temp dir");
         let project = Project::for_file(&dir.path().join("main.asm"));
-        // The directory is dropped here; nothing in these tests touches disk.
         App::new(project, Settings::default()).expect("databases load")
     }
 
@@ -1225,7 +1159,6 @@ mod tests {
         let mut app = app();
         assert_eq!(app.page, Page::Code);
 
-        // Tab stays on the page: the code page has three panels, not fourteen.
         assert_eq!(app.apply(&Command::NextPanel), Effect::None);
         assert_eq!(app.focus, Panel::Explorer);
         app.apply(&Command::PreviousPanel);
@@ -1252,7 +1185,6 @@ mod tests {
     fn focusing_a_panel_the_page_already_shows_stays_put() {
         let mut app = app();
         app.apply(&Command::GoToPage(Page::Debug));
-        // Output is on both pages; being on Debug already, it must not jump.
         app.apply(&Command::FocusPanel(Panel::Output));
 
         assert_eq!(app.page, Page::Debug);
@@ -1280,9 +1212,6 @@ mod tests {
 
     #[test]
     fn every_command_leaves_focus_on_the_current_page() {
-        // The invariant the whole page model rests on: if a command could
-        // leave focus on a panel the page does not draw, the keyboard would
-        // appear to stop working.
         for command in Command::all() {
             let mut app = app();
             app.apply(&command);
@@ -1404,7 +1333,6 @@ mod tests {
         app.open_page(Page::Reference);
         app.syscall_query = "write".to_owned();
 
-        // Falls back to the editor, which holds nothing to explain here.
         assert!(app.current_explanation().is_none());
     }
 
@@ -1436,7 +1364,6 @@ mod tests {
 
     #[test]
     fn quitting_with_unsaved_changes_asks_first() {
-        // Work must never be discarded without a question.
         let mut app = app();
         app.workspace.active_mut().insert_char('x');
 
@@ -1501,7 +1428,6 @@ mod tests {
 
     #[test]
     fn run_continues_when_the_program_is_paused() {
-        // F5 is "run" from a standstill and "continue" once stopped.
         let mut app = app();
         assert_eq!(app.apply(&Command::Run), Effect::Run);
 
@@ -1639,7 +1565,6 @@ mod tests {
 
     #[test]
     fn a_bad_line_number_keeps_the_prompt_open_and_says_why() {
-        // Retyping the whole thing because of one typo is a bad experience.
         let mut app = app_with_source("one\ntwo");
         app.apply(&Command::GoToLine);
         if let Mode::Prompt(prompt) = &mut app.mode {
@@ -1729,7 +1654,6 @@ mod tests {
     fn go_to_definition_jumps_to_the_label() {
         let source = "_start:\n    nop\n    jmp _start\n";
         let mut app = app_with_source(source);
-        // Put the cursor on the reference in the jump.
         app.workspace.active_mut().move_cursor(
             Movement::To(crate::editor::Position::new(2, 9)),
             SelectionMode::Collapse,
@@ -1972,15 +1896,12 @@ mod tests {
         app.workspace.active_mut().set_path("/tmp/main.asm");
         stopped_at(&mut app, "main.asm", 2);
 
-        // The cursor is on line 1, but execution is on line 2.
         let explanation = app.current_explanation().expect("an explanation");
         assert_eq!(explanation.mnemonic, "add");
     }
 
     #[test]
     fn the_explanation_comes_from_the_file_execution_stopped_in() {
-        // Looking at a second file must not make the panel explain a line from
-        // it as though it were the one running.
         let mut app = app_with_source("    nop\n    add rax, rbx\n");
         app.workspace.active_mut().set_path("/tmp/main.asm");
 
@@ -2006,7 +1927,6 @@ mod tests {
         let mut app = app();
         stopped_at(&mut app, "not-open.asm", 1);
         app.current_address = Some(0x1000);
-        // `xor edi, edi`
         app.disassembly = decode(&[0x31, 0xff], 0x1000, Syntax::Intel)
             .into_iter()
             .map(DisassemblyLine::bare)
@@ -2056,7 +1976,6 @@ mod tests {
 
     #[test]
     fn every_command_can_be_applied_without_panicking() {
-        // A blunt check that no command path has an unhandled case.
         for command in Command::all() {
             let mut app = app();
             app.workspace.active_mut().set_path("/tmp/main.asm");

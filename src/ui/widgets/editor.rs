@@ -1,7 +1,4 @@
 //! The source editor panel: highlighted text, gutter, breakpoints and the
-//! program counter. Highlighting consumes the token stream from
-//! [`crate::editor::syntax`], which tiles each line exactly, so one span per
-//! token reproduces the line without gaps.
 
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
@@ -25,7 +22,6 @@ pub fn draw(frame: &mut Frame, app: &App, area: Rect, focused: bool) {
     let theme = &app.theme;
     let symbols = theme.symbols();
 
-    // Sized to the largest line number the file actually has.
     let gutter = if app.settings.editor.line_numbers {
         buffer.line_count().to_string().len().max(2) + 1
     } else {
@@ -39,8 +35,6 @@ pub fn draw(frame: &mut Frame, app: &App, area: Rect, focused: bool) {
     let cursor = document.cursor();
     let path = document.path().map(std::path::Path::to_path_buf);
 
-    // The program counter belongs to one file. Without this check the marker
-    // lands on whatever line number happens to be showing in another buffer.
     let stopped_here = match (&app.current_line, path.as_deref()) {
         (Some((file, _)), Some(open)) => crate::editor::workspace::same_file(open, file),
         _ => false,
@@ -56,7 +50,6 @@ pub fn draw(frame: &mut Frame, app: &App, area: Rect, focused: bool) {
         let mut spans: Vec<Span> = Vec::new();
         let number = index + 1;
 
-        // Both markers share one column; the program counter wins.
         let has_breakpoint = path
             .as_deref()
             .is_some_and(|path| app.breakpoints.is_set_at(path, number));
@@ -126,9 +119,6 @@ pub fn draw(frame: &mut Frame, app: &App, area: Rect, focused: bool) {
 }
 
 /// Converts one line of NASM into styled spans.
-///
-/// The token stream tiles the line exactly, so concatenating the spans
-/// reproduces the input — nothing is dropped or duplicated.
 pub fn highlight<'a>(line: &'a str, palette: &Palette) -> Vec<Span<'a>> {
     syntax::tokenize(line)
         .into_iter()
@@ -172,7 +162,6 @@ mod tests {
 
     #[test]
     fn highlighting_reproduces_the_line_exactly() {
-        // The property that matters: colouring must never lose text.
         for line in [
             "",
             "    mov rax, 60          ; exit",
@@ -206,7 +195,6 @@ mod tests {
 
     #[test]
     fn comments_are_italic_as_well_as_coloured() {
-        // A second signal beyond colour, for monochrome terminals.
         let spans = highlight("; a comment", &palette());
         let comment = spans.last().expect("a span");
         assert!(comment.style.add_modifier.contains(Modifier::ITALIC));

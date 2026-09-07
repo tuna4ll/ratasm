@@ -1,20 +1,4 @@
 //! The pages the interface is divided into.
-//!
-//! # Why pages
-//!
-//! There are fourteen panels. Showing all of them at once means every one is
-//! too small to be read, and cycling through fourteen with Tab means the key
-//! stops being navigation and becomes a search. Neither is what someone
-//! actually does: you are *writing* code, or *debugging* it, or *reading*
-//! about it, and each of those wants a different half-dozen panels.
-//!
-//! So the interface is a small set of pages, each holding the panels for one
-//! activity. A page is switched with one key, Tab moves between the panels of
-//! the current page only, and every panel is large enough to be worth looking
-//! at.
-//!
-//! Every panel belongs to at least one page — a test pins that down, because a
-//! panel on no page would be unreachable except through the palette.
 
 use std::fmt;
 
@@ -69,9 +53,6 @@ impl Page {
     }
 
     /// The panels on this page, in Tab order.
-    ///
-    /// The order follows the eye rather than the enum: what you are working
-    /// on first, then what it produced.
     pub const fn panels(self) -> &'static [Panel] {
         match self {
             Page::Code => &[Panel::Editor, Panel::Explorer, Panel::Output],
@@ -107,11 +88,6 @@ impl Page {
     }
 
     /// The page a panel is reached from.
-    ///
-    /// Panels on several pages resolve to the first, so callers that already
-    /// know the current page should check [`Page::contains`] first and stay
-    /// where they are — moving the user off a page they are using, to show
-    /// them something already in front of them, would be worse than useless.
     pub fn for_panel(panel: Panel) -> Page {
         Self::ALL
             .into_iter()
@@ -143,9 +119,6 @@ impl Page {
     }
 
     /// The panel after `panel` on this page, wrapping around.
-    ///
-    /// A panel that is not on this page returns the page's first, so a focus
-    /// left somewhere stale still moves somewhere sensible.
     pub fn next_panel(self, panel: Panel) -> Panel {
         let panels = self.panels();
         match panels.iter().position(|p| *p == panel) {
@@ -176,8 +149,6 @@ mod tests {
 
     #[test]
     fn every_panel_is_on_a_page() {
-        // A panel on no page is reachable only through the palette, which is
-        // not what anyone would expect of a panel that exists.
         for panel in Panel::ALL {
             assert!(
                 Page::ALL.iter().any(|page| page.contains(panel)),
@@ -246,7 +217,6 @@ mod tests {
 
     #[test]
     fn a_panel_from_another_page_lands_on_the_first_one() {
-        // Not a crash and not a silent no-op: focus has to end up somewhere.
         assert_eq!(
             Page::Reference.next_panel(Panel::Registers),
             Panel::Syscalls

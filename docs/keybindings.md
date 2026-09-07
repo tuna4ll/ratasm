@@ -156,6 +156,12 @@ code, so a command missing here is a build failure rather than a surprise.
 | `navigate.previous-panel` | Previous panel |
 | `navigate.next-document` | Next document |
 | `navigate.previous-document` | Previous document |
+| `navigate.scroll-up` | Scroll up |
+| `navigate.scroll-down` | Scroll down |
+| `navigate.scroll-page-up` | Scroll up a page |
+| `navigate.scroll-page-down` | Scroll down a page |
+| `navigate.scroll-to-top` | Scroll to the top |
+| `navigate.scroll-to-end` | Scroll to the end |
 | `navigate.go-to-line` | Go to line |
 | `navigate.go-to-address` | Go to address |
 | `navigate.go-to-definition` | Go to definition |

@@ -1,17 +1,4 @@
 //! The loop that draws, reads input and performs effects.
-//!
-//! This is the only place the three worlds meet: the terminal, the async
-//! runtime, and the synchronous state in [`App`]. Everything it does is either
-//! "draw the state" or "perform an effect and put the result back into the
-//! state", which keeps the interesting logic in modules that need neither a
-//! terminal nor a runtime to test.
-//!
-//! # Why GDB lives here and not in `App`
-//!
-//! A [`GdbSession`] owns a child process. Putting it in `App` would make the
-//! state un-cloneable, un-testable and awkward to reason about; every test
-//! would need a debugger. The loop owns the session instead and hands `App`
-//! the *results* — registers, memory, a stop location — which are plain data.
 
 use std::path::Path;
 use std::time::Duration;
@@ -41,11 +28,6 @@ const STOP_TIMEOUT: Duration = Duration::from_secs(15);
 const TICK: Duration = Duration::from_millis(250);
 
 /// The result of work that ran off the event loop.
-///
-/// Running a program can take as long as its timeout, and the scratchpad has
-/// to assemble and debug one. Awaiting either inside the event loop would stop
-/// the interface redrawing and stop it reading keys, which is exactly when a
-/// user reaches for the stop key.
 enum Background {
     /// The program finished, or could not be started.
     Ran(Result<crate::process::ProcessOutput, String>),
@@ -67,10 +49,6 @@ impl Running {
     }
 
     /// Aborts the task, if any.
-    ///
-    /// The child process is killed with it: every command is spawned with
-    /// `kill_on_drop`, so dropping the future that owns it does not leave a
-    /// program running with nobody watching.
     fn cancel(&mut self) -> bool {
         match self.handle.take() {
             Some(task) if !task.is_finished() => {
@@ -83,13 +61,6 @@ impl Running {
 }
 
 /// Runs the interface until the user quits.
-///
-/// # Errors
-///
-/// Returns an error only for failures that make continuing impossible, such
-/// as the terminal becoming unusable. Everything a user can cause — a failed
-/// build, a missing debugger, a crashed program — is reported in the status
-/// bar and the loop keeps going.
 pub async fn run(mut app: App, terminal: &mut Tui) -> Result<()> {
     let mut events = EventStream::new();
     let mut session: Option<GdbSession> = None;
@@ -107,16 +78,11 @@ pub async fn run(mut app: App, terminal: &mut Tui) -> Result<()> {
             break;
         }
 
-        // Wake up either on input or on the tick, so asynchronous debugger
-        // events are noticed even while the user is not typing.
         let effect = tokio::select! {
             event = events.next() => match event {
                 Some(Ok(Event::Key(key))) => handle_key_event(&mut app, key),
                 Some(Ok(Event::Resize(..))) => Effect::None,
                 Some(Ok(_)) => Effect::None,
-                // The event stream ending means stdin closed; there is no
-                // way to receive further input, so exiting is the only
-                // sensible response.
                 Some(Err(_)) | None => break,
             },
             Some(done) = finished_rx.recv() => {
@@ -131,11 +97,8 @@ pub async fn run(mut app: App, terminal: &mut Tui) -> Result<()> {
         drain_debugger_events(&mut app, &mut session).await;
     }
 
-    // A program still running belongs to this session and nothing else will
-    // reap it.
     running.cancel();
 
-    // Never leave GDB holding the program's process group.
     if let Some(session) = session {
         session.shutdown().await;
     }
@@ -237,9 +200,6 @@ async fn perform(
         }
 
         Effect::SetSystemClipboard(text) => match clipboard::set_sequence(&text) {
-            // The sequence goes straight to the terminal rather than through
-            // ratatui: it draws nothing, it asks the terminal emulator for
-            // something.
             Some(sequence) => {
                 use std::io::Write as _;
                 let mut out = std::io::stdout();
@@ -247,9 +207,6 @@ async fn perform(
                     .and_then(|()| out.flush())
                     .is_err()
                 {
-                    // ratasm's own clipboard already holds the text, so
-                    // pasting still works; only the system clipboard missed
-                    // out, and saying so would be noise on every copy.
                     tracing::debug!("could not write the clipboard sequence");
                 }
             }
@@ -264,8 +221,6 @@ async fn perform(
 }
 
 /// Builds the project, reporting the outcome.
-///
-/// Returns whether an executable was produced.
 async fn build(app: &mut App, debug: bool) -> bool {
     let options = if debug {
         BuildOptions::debug()
@@ -273,10 +228,6 @@ async fn build(app: &mut App, debug: bool) -> bool {
         BuildOptions::release()
     };
 
-    // Announce the build to the state machine. Without this the machine stays
-    // where it was, and every transition that follows — build succeeded,
-    // launch requested, stopped — is rejected as illegal from that state, so
-    // the session silently never becomes Paused.
     if app.debugger.state().can_build() {
         let _ = app.debugger.apply(Transition::BuildStarted);
     }
@@ -318,8 +269,6 @@ fn start_program(
         let result = assembler::run_executable(&project, &executable)
             .await
             .map_err(|error| error.to_string());
-        // The receiver is gone only when the interface has already exited,
-        // in which case there is nobody left to tell.
         let _ = finished.send(Background::Ran(result));
     }));
 }
@@ -364,7 +313,6 @@ fn finish_background(app: &mut App, done: Background) {
 }
 
 /// Disassembles the built executable so the panel has something to show
-/// before any debugging starts.
 fn load_static_disassembly(app: &mut App, executable: &Path) {
     let Ok(image) = disassembler::ElfImage::load(executable) else {
         return;
@@ -382,7 +330,6 @@ fn load_static_disassembly(app: &mut App, executable: &Path) {
 
 /// Starts a debug session.
 async fn start_session(app: &mut App, session: &mut Option<GdbSession>) {
-    // A debug session needs debug information, so always build for it.
     if !build(app, true).await {
         return;
     }
@@ -441,7 +388,6 @@ async fn start_session(app: &mut App, session: &mut Option<GdbSession>) {
         return;
     }
 
-    // Breakpoints the user set before the session existed are replayed now.
     app.breakpoints.detach();
     let mut placed = Vec::new();
     for location in app.pending_breakpoints() {
@@ -463,13 +409,6 @@ async fn start_session(app: &mut App, session: &mut Option<GdbSession>) {
         app.breakpoints.adopt(&location, &record);
     }
 
-    // Stop at the entry point so the user can look before anything runs.
-    //
-    // `-exec-run --start` is the obvious way to do this and is wrong here: it
-    // sets a temporary breakpoint on `main`, which a `_start`-only assembly
-    // program does not have, so the program runs to completion instead of
-    // stopping. Breaking on the ELF entry address always works, whatever the
-    // entry symbol is called.
     match disassembler::ElfImage::load(&executable) {
         Ok(image) => {
             let _ = active
@@ -477,7 +416,6 @@ async fn start_session(app: &mut App, session: &mut Option<GdbSession>) {
                 .await;
         }
         Err(_) => {
-            // Without the ELF the symbol name is the best guess available.
             let _ = active
                 .try_execute(&mi::break_insert_temporary("_start"))
                 .await;
@@ -496,10 +434,6 @@ async fn start_session(app: &mut App, session: &mut Option<GdbSession>) {
 
     match active.wait_for_stop(STOP_TIMEOUT).await {
         Ok(record) => {
-            // Recording needs a live process, so it can only start once the
-            // program has stopped at the entry point — asking any earlier
-            // gets "Target native does not support this command". Starting
-            // here means everything from the entry onwards is replayable.
             if app.settings.debugger.record {
                 let recorded = active.execute(&mi::record_full()).await.is_ok();
                 if !recorded {
@@ -569,8 +503,6 @@ async fn resume(
 
 /// Records a stop and refreshes everything that depends on it.
 async fn handle_stop(app: &mut App, session: &mut Option<GdbSession>, record: &Record) {
-    // A program that has exited is not a program that is paused: stepping it
-    // would wait forever.
     if record.is_program_exit() {
         let code = record.exit_code();
         let _ = app.debugger.exited(code);
@@ -602,9 +534,6 @@ async fn handle_stop(app: &mut App, session: &mut Option<GdbSession>, record: &R
         }
     }
 
-    // Show where it stopped. A gutter marker on a line nobody can see is the
-    // same as no marker at all, and a stop on a page with no register view is
-    // a debugger nobody can watch.
     app.show_execution();
 
     if let Some(number) = record.get("bkptno").and_then(|value| value.as_str()) {
@@ -617,8 +546,6 @@ async fn handle_stop(app: &mut App, session: &mut Option<GdbSession>, record: &R
         Some("breakpoint-hit") => Status::success("Stopped at a breakpoint"),
         Some("signal-received") => {
             let signal = record.get_str("signal-name").unwrap_or("a signal");
-            // A segmentation fault is the interesting case, not an error in
-            // the tool, so the address it happened at is the useful part.
             match app.current_address {
                 Some(address) => Status::error(format!("{signal} at 0x{address:x}")),
                 None => Status::error(format!("Received {signal}")),
@@ -638,7 +565,6 @@ async fn refresh_state(app: &mut App, session: &mut Option<GdbSession>) {
         return;
     };
 
-    // Registers first: the stack and memory reads depend on RSP.
     let names = active.execute(&mi::data_list_register_names()).await;
     let values = active.execute(&mi::data_list_register_values()).await;
 
@@ -650,8 +576,6 @@ async fn refresh_state(app: &mut App, session: &mut Option<GdbSession>) {
         }
     }
 
-    // The call stack: how execution reached here, as distinct from the bytes
-    // around RSP that the stack memory panel shows.
     match active.execute(&mi::stack_list_frames()).await {
         Ok(record) => {
             app.frames = record
@@ -660,8 +584,6 @@ async fn refresh_state(app: &mut App, session: &mut Option<GdbSession>) {
                 .unwrap_or_default();
             app.frame_selected = 0;
         }
-        // GDB cannot always walk the stack — early in _start there is no frame
-        // chain yet. That is normal, not a session failure.
         Err(_) => app.frames.clear(),
     }
 
@@ -699,8 +621,6 @@ async fn refresh_state(app: &mut App, session: &mut Option<GdbSession>) {
         }
     }
 
-    // Refresh whatever the memory panel is looking at, so it tracks the
-    // program rather than showing a stale snapshot.
     if let Some(address) = app.memory_address {
         read_memory(app, session, address).await;
     }
@@ -728,8 +648,6 @@ async fn read_memory(app: &mut App, session: &mut Option<GdbSession>, address: u
             }
             None => app.status = Status::error(format!("Cannot read memory at 0x{address:x}")),
         },
-        // An unreadable address is a normal thing to ask for by accident, so
-        // it is reported rather than treated as a session failure.
         Err(error) => app.status = Status::error(error.to_string()),
     }
 }
@@ -842,7 +760,6 @@ mod tests {
     }
 
     /// Performs one effect the way the run loop does, then waits for any
-    /// background work it started so a test can assert on the result.
     async fn settle(app: &mut App, session: &mut Option<GdbSession>, effect: Effect) {
         let (finished, mut incoming) = tokio::sync::mpsc::unbounded_channel();
         let mut running = Running::default();
@@ -956,7 +873,6 @@ mod tests {
 
         let dir = tempfile::tempdir().expect("temp dir");
         let mut app = app_for(dir.path());
-        // A program that never exits on its own.
         std::fs::write(
             dir.path().join("src").join("main.asm"),
             "section .text\n    global _start\n_start:\n    jmp _start\n",
@@ -970,8 +886,6 @@ mod tests {
         perform(&mut app, &mut session, &finished, &mut running, Effect::Run).await;
         assert!(running.is_busy(), "the program should still be looping");
 
-        // The interface is still responsive, which is the point: this call
-        // happens while the program runs, not after it.
         perform(
             &mut app,
             &mut session,
@@ -1025,8 +939,6 @@ mod tests {
 
     #[tokio::test]
     async fn the_explanation_gains_real_values_once_the_program_stops() {
-        // End to end: build, stop, and check the explainer is reading the
-        // registers rather than only describing the instruction.
         for tool in ["nasm", "ld", "gdb"] {
             if !crate::process::is_available(Path::new(tool)) {
                 eprintln!("skipping: {tool} not installed");
@@ -1048,15 +960,12 @@ mod tests {
         start_session(&mut app, &mut session).await;
         assert!(session.is_some(), "session: {}", app.status.text);
 
-        // Step past the two movs so RAX and RBX hold known values.
         settle(&mut app, &mut session, Effect::Step(StepKind::Instruction)).await;
         settle(&mut app, &mut session, Effect::Step(StepKind::Instruction)).await;
 
         assert_eq!(app.registers.value_of("rax"), Some(1));
         assert_eq!(app.registers.value_of("rbx"), Some(2));
 
-        // The cursor follows the program counter while stopped, so the
-        // explanation is for `add rax, rbx`.
         let explanation = app.current_explanation().expect("an explanation");
         assert_eq!(explanation.mnemonic, "add");
         assert_eq!(
@@ -1070,8 +979,6 @@ mod tests {
 
     #[tokio::test]
     async fn stepping_backwards_restores_the_previous_register_values() {
-        // The feature only means anything if the machine really goes back, so
-        // the test checks a register's value, not just the program counter.
         for tool in ["nasm", "ld", "gdb"] {
             if !crate::process::is_available(Path::new(tool)) {
                 eprintln!("skipping: {tool} not installed");
@@ -1130,9 +1037,6 @@ mod tests {
 
     #[tokio::test]
     async fn the_flags_are_read_from_a_live_session() {
-        // A regression guard: GDB names the flags register `eflags`, and a
-        // filter that only accepted canonical names silently blanked the flag
-        // panel for every session.
         for tool in ["nasm", "ld", "gdb"] {
             if !crate::process::is_available(Path::new(tool)) {
                 eprintln!("skipping: {tool} not installed");
@@ -1168,8 +1072,6 @@ mod tests {
 
     #[tokio::test]
     async fn the_call_stack_shows_the_chain_of_calls() {
-        // The panel exists to answer "how did I get here?", so the test uses a
-        // program that actually calls into another function.
         for tool in ["nasm", "ld", "gdb"] {
             if !crate::process::is_available(Path::new(tool)) {
                 eprintln!("skipping: {tool} not installed");
@@ -1186,7 +1088,6 @@ mod tests {
         )
         .expect("write");
 
-        // Break inside the callee so there is a caller above it.
         app.breakpoints.add_symbol("helper");
 
         let mut session = None;
@@ -1213,8 +1114,6 @@ mod tests {
 
     #[tokio::test]
     async fn a_full_debug_session_steps_and_updates_the_registers() {
-        // The end-to-end path: build with debug info, start GDB, stop at the
-        // entry, step, and see the registers change.
         for tool in ["nasm", "ld", "gdb"] {
             if !crate::process::is_available(Path::new(tool)) {
                 eprintln!("skipping: {tool} not installed");

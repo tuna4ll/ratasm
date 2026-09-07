@@ -1,14 +1,6 @@
-//! Glyph sets used to convey state without relying on colour.
-//!
-//! Two requirements shape this module. Terminals with a limited font or with
-//! Unicode deliberately disabled must stay usable, so every glyph has an
-//! ASCII-safe counterpart. And because colour alone is not an accessible
-//! signal, state is always encoded in a distinct glyph as well.
+//! Glyph sets that convey state without relying on colour, each with an
 
-/// A complete set of status glyphs.
-///
-/// Obtain one with [`SymbolSet::unicode`] or [`SymbolSet::ascii`] rather than
-/// constructing it field by field, so the two variants stay in step.
+/// A complete set of status glyphs; build one with [`SymbolSet::for_unicode`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SymbolSet {
     /// Marks a line carrying an enabled breakpoint.
@@ -45,6 +37,10 @@ pub struct SymbolSet {
     pub flag_set: &'static str,
     /// Shown next to a cleared CPU flag.
     pub flag_clear: &'static str,
+    /// The unfilled part of a scrollbar track.
+    pub scroll_track: &'static str,
+    /// The part of a scrollbar showing what is on screen.
+    pub scroll_thumb: &'static str,
 }
 
 impl SymbolSet {
@@ -68,6 +64,8 @@ impl SymbolSet {
             selection: "\u{276f}",
             flag_set: "\u{25a0}",
             flag_clear: "\u{25a1}",
+            scroll_track: "\u{2502}",
+            scroll_thumb: "\u{2588}",
         }
     }
 
@@ -91,6 +89,8 @@ impl SymbolSet {
             selection: ">",
             flag_set: "[x]",
             flag_clear: "[ ]",
+            scroll_track: "|",
+            scroll_thumb: "#",
         }
     }
 
@@ -120,9 +120,6 @@ impl Default for SymbolSet {
 }
 
 /// Detects whether the environment appears to support Unicode output.
-///
-/// Checks `RATASM_ASCII` first so users can force ASCII, then falls back to
-/// inspecting the locale variables for a UTF-8 charset.
 pub fn detect_unicode_support() -> bool {
     if std::env::var_os("RATASM_ASCII").is_some() {
         return false;

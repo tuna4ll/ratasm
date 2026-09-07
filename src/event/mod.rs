@@ -1,22 +1,4 @@
 //! Turning terminal input into state changes.
-//!
-//! Key handling is a set of plain functions over `&mut App`. Nothing here
-//! touches a terminal, so every routing decision — does this key insert text,
-//! run a command, or move a selection? — is testable by constructing a
-//! [`KeyEvent`] and calling a function.
-//!
-//! # The order keys are considered
-//!
-//! 1. **An open overlay takes everything.** While the palette or a prompt is
-//!    up, keys go there; otherwise `p` in the palette would both type a letter
-//!    and run whatever `p` is bound to.
-//! 2. **Bound chords run their command**, unless the editor has focus and the
-//!    key is one the editor must own: a bare printable character, or Tab.
-//!    Typing `s` into source must insert an `s`, and Tab must indent — so in
-//!    the editor those beat the binding. Alt plus a digit focuses a panel
-//!    directly, which is how you leave the editor without reaching for Tab.
-//! 3. **The focused panel handles the rest**: arrows, page keys, and in the
-//!    editor, text.
 
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
@@ -34,8 +16,6 @@ const PAGE_LINES: usize = 20;
 
 /// Handles one key event, returning any I/O it implies.
 pub fn handle_key(app: &mut App, key: KeyEvent) -> Effect {
-    // Windows terminals report both press and release; acting on both would
-    // run every command twice.
     if key.kind == KeyEventKind::Release {
         return Effect::None;
     }
@@ -44,9 +24,6 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Effect {
         return handle_overlay(app, key);
     }
 
-    // Keys the editor must own, even though they are bound to commands:
-    // printable characters insert text, and Tab indents. Without this, typing
-    // `s` would save the file and Tab would jump to another panel.
     let editor_claims_key = app.focus.is_text_input()
         && matches!(key.code, KeyCode::Char(_) | KeyCode::Tab | KeyCode::BackTab)
         && !key
@@ -65,8 +42,26 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Effect {
         Panel::Breakpoints => handle_breakpoints(app, key),
         Panel::Scratchpad => handle_scratchpad(app, key),
         Panel::Learn => handle_learn(app, key),
-        _ => Effect::None,
+        panel => handle_scrollable(app, panel, key),
     }
+}
+
+/// Moves a panel that has no other use for the navigation keys.
+fn handle_scrollable(app: &mut App, panel: Panel, key: KeyEvent) -> Effect {
+    if !crate::app::ScrollState::is_scrollable(panel) {
+        return Effect::None;
+    }
+
+    let command = match key.code {
+        KeyCode::Up => Command::ScrollUp,
+        KeyCode::Down => Command::ScrollDown,
+        KeyCode::PageUp => Command::ScrollPageUp,
+        KeyCode::PageDown => Command::ScrollPageDown,
+        KeyCode::Home => Command::ScrollToTop,
+        KeyCode::End => Command::ScrollToEnd,
+        _ => return Effect::None,
+    };
+    app.apply(&command)
 }
 
 /// Handles a key while the palette or a prompt is open.
@@ -102,8 +97,6 @@ fn handle_overlay(app: &mut App, key: KeyEvent) -> Effect {
             match key.code {
                 KeyCode::Char(ch) => {
                     prompt.insert(ch);
-                    // A confirmation takes a single keypress rather than
-                    // needing Enter as well.
                     if let Mode::Prompt(prompt) = &app.mode {
                         if prompt.kind().is_some_and(|kind| kind.is_confirmation()) {
                             confirmed = Some(());
@@ -271,14 +264,8 @@ fn handle_breakpoints(app: &mut App, key: KeyEvent) -> Effect {
 }
 
 /// Handles a key with the scratchpad focused.
-///
-/// The scratchpad is a one-line editor with a second job: a line of the form
-/// `rax=1` sets a starting value instead of being assembled, so both halves of
-/// an experiment can be typed into the same place.
 fn handle_scratchpad(app: &mut App, key: KeyEvent) -> Effect {
     match key.code {
-        // The scratchpad claims printable keys, so Tab has to be handed back
-        // deliberately or there would be no way out of the panel.
         KeyCode::Tab => return app.apply(&Command::NextPanel),
         KeyCode::BackTab => return app.apply(&Command::PreviousPanel),
         KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
@@ -306,7 +293,6 @@ fn submit_scratchpad(app: &mut App) -> Effect {
         return Effect::RunScratchpad;
     };
 
-    // `rax=` with nothing after it removes the starting value again.
     if value.is_empty() {
         let removed = app.scratchpad.initial.remove(&name.to_ascii_lowercase());
         app.scratchpad.snippet.clear();
@@ -335,9 +321,6 @@ fn submit_scratchpad(app: &mut App) -> Effect {
 }
 
 /// Splits `name=value` into its halves, or returns `None` when there is no `=`.
-///
-/// The name must look like a register rather than merely be non-empty, so an
-/// instruction that happens to contain `=` is still assembled.
 fn parse_assignment(line: &str) -> Option<(&str, &str)> {
     let (name, value) = line.split_once('=')?;
     let name = name.trim();
@@ -348,9 +331,6 @@ fn parse_assignment(line: &str) -> Option<(&str, &str)> {
 }
 
 /// Handles a key with the learning panel focused.
-///
-/// Tab is left alone here so it keeps moving between panels; the material is
-/// one sequence, so the arrow keys are enough to move through all of it.
 fn handle_learn(app: &mut App, key: KeyEvent) -> Effect {
     match key.code {
         KeyCode::Right | KeyCode::Down | KeyCode::PageDown => app.learning.next(),
@@ -396,6 +376,22 @@ mod tests {
         KeyEvent::new(code, KeyModifiers::SHIFT)
     }
 
+    #[test]
+    fn arrow_keys_scroll_a_panel_that_has_no_other_use_for_them() {
+        let mut app = app();
+        app.open_page(crate::app::Page::Code);
+        app.output = (1..=80).map(|n| format!("line-{n}")).collect();
+        app.focus_panel(Panel::Output);
+        crate::ui::render::sync_scroll(&mut app, 160, 48);
+
+        let before = app.scroll.offset(Panel::Output);
+        handle_key(&mut app, press(KeyCode::Up));
+        assert!(app.scroll.offset(Panel::Output) < before);
+
+        handle_key(&mut app, press(KeyCode::Home));
+        assert_eq!(app.scroll.offset(Panel::Output), 0);
+    }
+
     fn type_text(app: &mut App, text: &str) {
         for ch in text.chars() {
             handle_key(app, press(KeyCode::Char(ch)));
@@ -411,7 +407,6 @@ mod tests {
 
     #[test]
     fn a_printable_character_does_not_run_a_bound_command() {
-        // 's' must insert an 's', not save the file, even though ctrl+s saves.
         let mut app = app();
         type_text(&mut app, "s");
         assert_eq!(app.workspace.active().buffer().to_text(), "s");
@@ -436,8 +431,6 @@ mod tests {
 
     #[test]
     fn key_release_events_are_ignored() {
-        // Some terminals report press and release; acting on both would run
-        // every command twice.
         let mut app = app();
         let mut event = press(KeyCode::Char('x'));
         event.kind = KeyEventKind::Release;
@@ -474,8 +467,6 @@ mod tests {
 
     #[test]
     fn control_with_an_arrow_moves_by_word() {
-        // Word-right lands at the end of the word under the cursor, the
-        // convention readline uses; from there it steps word by word.
         let mut app = app();
         type_text(&mut app, "mov rax, rbx");
         app.workspace
@@ -508,7 +499,6 @@ mod tests {
 
     #[test]
     fn an_open_overlay_swallows_every_key() {
-        // Otherwise typing into the palette would also act on the editor.
         let mut app = app();
         handle_key(&mut app, ctrl('p'));
         type_text(&mut app, "build");
@@ -587,7 +577,6 @@ mod tests {
 
     #[test]
     fn a_confirmation_prompt_acts_on_a_single_keypress() {
-        // Requiring Enter after "y" for a yes/no question is needless.
         let mut app = app();
         app.workspace.active_mut().insert_char('x');
         app.apply(&Command::Quit);
@@ -671,14 +660,12 @@ mod tests {
         handle_key(&mut app, press(KeyCode::Down));
         assert_eq!(app.breakpoint_selected, 1);
 
-        // Space toggles the highlighted breakpoint.
         assert_eq!(
             handle_key(&mut app, press(KeyCode::Char(' '))),
             Effect::SyncBreakpoints
         );
         assert!(!app.breakpoints.all()[1].enabled);
 
-        // Delete removes it.
         assert_eq!(
             handle_key(&mut app, press(KeyCode::Delete)),
             Effect::SyncBreakpoints
@@ -718,8 +705,6 @@ mod tests {
 
     #[test]
     fn alt_and_a_digit_leaves_the_editor_without_using_tab() {
-        // Since the editor keeps Tab for indentation, there has to be another
-        // way out that works from inside it.
         let mut app = app();
         app.focus_panel(Panel::Editor);
         handle_key(
@@ -737,7 +722,6 @@ mod tests {
 
     #[test]
     fn tab_indents_in_the_editor_rather_than_changing_panel() {
-        // The editor needs Tab for indentation, so it wins there.
         let mut app = app();
         app.focus_panel(Panel::Editor);
         type_text(&mut app, "ret");
@@ -855,7 +839,6 @@ mod tests {
         handle_key(&mut app, press(KeyCode::Left));
         assert_eq!(app.learning.position(), 1);
 
-        // Moving back from the first item wraps to the last.
         handle_key(&mut app, press(KeyCode::Left));
         assert_eq!(app.learning.position(), crate::learning::item_count());
     }

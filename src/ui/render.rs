@@ -1,9 +1,4 @@
-//! Drawing one frame.
-//!
-//! This is the only entry point into rendering. It takes an immutable `&App`,
-//! so a frame can be drawn at any moment without the act of drawing changing
-//! anything — a guarantee worth having when the alternative is chasing a
-//! redraw that quietly moved the cursor.
+//! Drawing one frame. [`draw`] takes an immutable `&App`, so drawing can never
 
 use ratatui::widgets::{Block, Borders};
 use ratatui::Frame;
@@ -16,8 +11,6 @@ use crate::ui::widgets::{self, chrome};
 pub fn draw(frame: &mut Frame, app: &App) {
     let area = frame.area();
 
-    // Paint the background explicitly: a transparent body would inherit the
-    // terminal's colours and fight the theme.
     frame.render_widget(
         Block::default()
             .borders(Borders::NONE)
@@ -44,39 +37,50 @@ pub fn draw(frame: &mut Frame, app: &App) {
 
     chrome::draw_status_bar(frame, app, layout.status_bar);
 
-    // Last, so it sits above everything and owns the cursor.
     chrome::draw_overlay(frame, app, area);
 }
 
-/// Scrolls the active document so the cursor is visible in `area`.
-///
-/// Called before drawing, because the viewport depends on the height the
-/// terminal happens to have and the document deliberately does not know it.
+/// Brings every viewport in line with the room the terminal actually has.
 pub fn sync_scroll(app: &mut App, width: u16, height: u16) {
+    use crate::app::panel::Panel;
+    use crate::app::scroll::ScrollState;
+
     let layout = layout::compute(
         ratatui::layout::Rect::new(0, 0, width, height),
         app.page,
         app.focus,
     );
-    let Some(area) = layout.area_of(crate::app::panel::Panel::Editor) else {
+
+    for (panel, area) in layout.panels.clone() {
+        if !ScrollState::is_scrollable(panel) {
+            continue;
+        }
+        let inner = inner_area(area);
+        let rows = widgets::content_rows(app, panel, inner.0);
+        app.scroll.fit(panel, rows, usize::from(inner.1));
+    }
+
+    let Some(area) = layout.area_of(Panel::Editor) else {
         return;
     };
 
-    // Subtract the borders and the gutter the editor draws inside its area.
     let buffer_lines = app.workspace.active().buffer().line_count();
     let gutter = if app.settings.editor.line_numbers {
         buffer_lines.to_string().len().max(2) + 1
     } else {
         0
     };
-    let text_width = usize::from(area.width)
-        .saturating_sub(2)
-        .saturating_sub(gutter + 2);
-    let text_height = usize::from(area.height).saturating_sub(2);
+    let (inner_width, inner_height) = inner_area(area);
+    let text_width = usize::from(inner_width).saturating_sub(gutter + 2);
 
     app.workspace
         .active_mut()
-        .scroll_into_view(text_height, text_width);
+        .scroll_into_view(usize::from(inner_height), text_width);
+}
+
+/// The width and height inside a panel's border and horizontal padding.
+fn inner_area(area: ratatui::layout::Rect) -> (u16, u16) {
+    (area.width.saturating_sub(4), area.height.saturating_sub(2))
 }
 
 #[cfg(test)]
@@ -116,6 +120,68 @@ mod tests {
         render(app, width, height).join("\n")
     }
 
+    /// Renders after a scroll sync, the way the run loop does.
+    fn settled(app: &mut App, width: u16, height: u16) -> String {
+        sync_scroll(app, width, height);
+        screen(app, width, height)
+    }
+
+    #[test]
+    fn a_long_build_log_can_be_read_from_either_end() {
+        let mut app = app();
+        app.output = (1..=60).map(|n| format!("line-{n:02}")).collect();
+        app.focus_panel(crate::app::Panel::Output);
+
+        let text = settled(&mut app, 120, 30);
+        assert!(text.contains("line-60"), "a log opens at its newest line");
+        assert!(!text.contains("line-01"), "which is not its oldest");
+
+        app.apply(&crate::command::Command::ScrollToTop);
+        let text = settled(&mut app, 120, 30);
+        assert!(text.contains("line-01"), "and can be wound back:\n{text}");
+
+        app.apply(&crate::command::Command::ScrollToEnd);
+        let text = settled(&mut app, 120, 30);
+        assert!(text.contains("line-60"));
+    }
+
+    #[test]
+    fn a_panel_with_more_content_than_room_says_so() {
+        let mut app = app();
+        app.output = (1..=60).map(|n| format!("line-{n:02}")).collect();
+        let crowded = settled(&mut app, 120, 30);
+
+        app.output = vec!["only one line".to_owned()];
+        app.scroll.reset(crate::app::Panel::Output);
+        let roomy = settled(&mut app, 120, 30);
+
+        let thumb = app.theme.symbols().scroll_thumb;
+        assert!(
+            crowded.contains(thumb),
+            "a scrollbar marks what is off-screen"
+        );
+        assert!(
+            !roomy.contains(thumb),
+            "and stays away when everything fits"
+        );
+    }
+
+    #[test]
+    fn scrolling_stops_where_the_content_does() {
+        let mut app = app();
+        app.output = (1..=60).map(|n| format!("line-{n:02}")).collect();
+        app.focus_panel(crate::app::Panel::Output);
+        sync_scroll(&mut app, 120, 30);
+
+        for _ in 0..100 {
+            app.apply(&crate::command::Command::ScrollDown);
+            sync_scroll(&mut app, 120, 30);
+        }
+        let extent = app.scroll.extent(crate::app::Panel::Output);
+        assert_eq!(extent.offset, extent.max_offset());
+        assert!(settled(&mut app, 120, 30).contains("line-60"));
+    }
+
     #[test]
     fn a_wide_terminal_shows_the_main_panels() {
         let mut app = app();
@@ -152,7 +218,6 @@ mod tests {
             app.open_page(page);
             let text = screen(&app, 160, 48);
             for panel in page.panels() {
-                // Panels sharing a slot are one tab away rather than drawn.
                 let shown = text.contains(panel.title());
                 assert!(shown, "{panel} is nowhere on the {page} page:\n{text}");
             }
@@ -183,7 +248,6 @@ mod tests {
 
     #[test]
     fn panels_with_no_data_explain_themselves() {
-        // An empty box reads as a bug; a sentence does not.
         let mut app = app();
         app.open_page(crate::app::Page::Debug);
         let text = screen(&app, 160, 48);
@@ -209,7 +273,6 @@ mod tests {
 
     #[test]
     fn every_size_renders_without_panicking() {
-        // Terminals get resized to strange shapes; none of them may crash.
         let app = app();
         for width in [1u16, 5, 20, 40, 79, 80, 119, 120, 200] {
             for height in [1u16, 3, 9, 10, 27, 28, 50] {
@@ -237,8 +300,6 @@ mod tests {
 
         let text = screen(&app, 160, 48);
         assert!(text.contains("Command palette"));
-        // A listed command, with its binding, from the palette itself rather
-        // than from a panel that happens to mention the same word.
         assert!(
             text.contains("New file"),
             "commands should be listed:\n{text}"
@@ -248,7 +309,6 @@ mod tests {
 
     #[test]
     fn the_palette_shows_the_shortcut_for_a_command() {
-        // So the palette teaches the bindings rather than replacing them.
         let mut app = app();
         app.apply(&crate::command::Command::OpenPalette);
         let text = screen(&app, 160, 48);
@@ -282,7 +342,6 @@ mod tests {
 
         let rows = render(&app, 100, 30);
         assert_eq!(rows.len(), 30, "the layout must not grow");
-        // Counted in characters, not bytes: the ellipsis is three bytes.
         assert_eq!(
             rows.last().map(|row| row.chars().count()),
             Some(100),
@@ -333,8 +392,6 @@ mod tests {
 
     #[test]
     fn rendering_does_not_change_the_application() {
-        // Drawing reads; commands write. A renderer with side effects would
-        // make every redraw a potential state change.
         let mut app = app();
         app.workspace.active_mut().insert("    mov rax, 1\n");
 
@@ -376,8 +433,6 @@ mod tests {
         app.apply(&crate::command::Command::ToggleBreakpoint);
 
         let text = screen(&app, 160, 48);
-        // Box-drawing characters come from ratatui's borders, so only the
-        // content glyphs are checked here.
         assert!(text.contains('*'), "the ASCII breakpoint marker is missing");
     }
 }

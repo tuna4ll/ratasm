@@ -26,7 +26,6 @@ pub fn draw_scratchpad(frame: &mut Frame, app: &App, area: Rect, focused: bool) 
         ])
         .split(inner);
 
-    // The starting registers.
     let setup: Vec<Span> = if app.scratchpad.initial.is_empty() {
         vec![Span::styled(
             "no starting values — type  rax=1  to set one",
@@ -52,7 +51,6 @@ pub fn draw_scratchpad(frame: &mut Frame, app: &App, area: Rect, focused: bool) 
         rows[0],
     );
 
-    // The snippet being edited.
     let snippet = if app.scratchpad.snippet.is_empty() {
         Span::styled("type an instruction, then Enter to run it", theme.dim())
     } else {
@@ -66,7 +64,6 @@ pub fn draw_scratchpad(frame: &mut Frame, app: &App, area: Rect, focused: bool) 
         rows[1],
     );
 
-    // The result.
     let mut lines: Vec<Line> = Vec::new();
     match &app.scratchpad_result {
         None => {
@@ -141,6 +138,14 @@ pub fn draw_learn(frame: &mut Frame, app: &App, area: Rect, focused: bool) {
         rows[0],
     );
 
+    let lines = learn_lines(app);
+    super::draw_scrolled(frame, app, Panel::Learn, rows[1], lines, true);
+}
+
+/// The lesson or question the reader is on.
+pub fn learn_lines<'a>(app: &App) -> Vec<Line<'a>> {
+    let theme = &app.theme;
+    let progress = &app.learning;
     let mut lines: Vec<Line> = Vec::new();
 
     if let Some(lesson) = progress.current_lesson() {
@@ -176,8 +181,6 @@ pub fn draw_learn(frame: &mut Frame, app: &App, area: Rect, focused: bool) {
                 lines.push(Line::from(Span::styled(question.explanation, theme.dim())));
             }
             Verdict::Wrong { given } => {
-                // A wrong answer is where the teaching happens, so the worked
-                // explanation appears rather than a bare "no".
                 lines.push(Line::from(Span::styled(
                     format!(
                         "{} Not {given}. The answer is {}.",
@@ -192,7 +195,7 @@ pub fn draw_learn(frame: &mut Frame, app: &App, area: Rect, focused: bool) {
         }
     }
 
-    frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: true }), rows[1]);
+    lines
 }
 
 #[cfg(test)]

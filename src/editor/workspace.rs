@@ -1,8 +1,4 @@
 //! The set of open documents and the file operations on them.
-//!
-//! Saves write a temporary file in the destination's own directory and rename
-//! it over the original, so an interrupted save cannot truncate the user's
-//! work. The directory has to match: a rename across filesystems fails.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -107,12 +103,6 @@ pub fn display_path(path: &Path) -> String {
 }
 
 /// Whether an open document's path is the file a tool named.
-///
-/// GDB and the assembler report the path they were given, usually relative to
-/// the project root, so an exact comparison misses. Matching whole trailing
-/// components accepts `src/main.asm` for a reported `main.asm` while keeping
-/// `lib/main.asm` and `src/main.asm` apart — a bare file-name comparison does
-/// not, and confuses two files that legitimately share a name.
 pub fn same_file(open: &Path, reported: &Path) -> bool {
     if open == reported {
         return true;
@@ -224,7 +214,6 @@ impl Workspace {
         let contents = read_file(path)?;
         let document = Document::from_file_contents(path, &contents);
 
-        // Replace a pristine untitled buffer rather than leaving it behind.
         let index = if self.documents.len() == 1
             && self.documents[0].path().is_none()
             && !self.documents[0].is_modified()
@@ -342,7 +331,6 @@ mod tests {
 
     #[test]
     fn two_files_sharing_a_name_stay_apart() {
-        // The bug this replaces matched on the file name alone.
         assert!(!same_file(
             Path::new("/w/lib/main.asm"),
             Path::new("src/main.asm")
@@ -400,7 +388,6 @@ mod tests {
 
     #[test]
     fn opening_the_same_file_twice_activates_the_existing_buffer() {
-        // Two buffers over one file would mean two divergent undo histories.
         let dir = temp_dir();
         let path = dir.path().join("main.asm");
         std::fs::write(&path, "ret\n").expect("write");
@@ -476,14 +463,11 @@ mod tests {
 
     #[test]
     fn a_failed_save_leaves_the_original_file_intact() {
-        // The reason saves go through a rename: a write that cannot complete
-        // must not destroy what was already on disk.
         let dir = temp_dir();
         let path = dir.path().join("subdir").join("main.asm");
         std::fs::create_dir_all(path.parent().expect("parent")).expect("mkdir");
         std::fs::write(&path, "original\n").expect("write");
 
-        // Saving into a path whose parent is a file cannot succeed.
         let blocked = dir.path().join("main.asm").join("impossible.asm");
         std::fs::write(dir.path().join("main.asm"), "blocker").expect("write");
 

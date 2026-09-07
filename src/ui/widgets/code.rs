@@ -2,7 +2,6 @@
 
 use ratatui::layout::Rect;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 
 use crate::app::page::Page;
@@ -30,27 +29,17 @@ pub fn draw_disassembly(frame: &mut Frame, app: &App, area: Rect, focused: bool)
         return;
     }
 
+    let lines = disassembly_lines(app);
+    super::draw_scrolled(frame, app, Panel::Disassembly, inner, lines, false);
+}
+
+/// One line per decoded instruction.
+pub fn disassembly_lines<'a>(app: &App) -> Vec<Line<'a>> {
     let theme = &app.theme;
     let symbols = theme.symbols();
-    let height = usize::from(inner.height);
 
-    // Keep the program counter in view: scroll so it sits a third of the way
-    // down, which shows both where execution came from and where it is going.
-    let current = app
-        .current_address
-        .and_then(|address| {
-            app.disassembly
-                .iter()
-                .position(|line| line.instruction.address == address)
-        })
-        .unwrap_or(0);
-    let first = current.saturating_sub(height / 3);
-
-    let lines: Vec<Line> = app
-        .disassembly
+    app.disassembly
         .iter()
-        .skip(first)
-        .take(height)
         .map(|line| {
             let instruction = &line.instruction;
             let is_current = app.current_address == Some(instruction.address);
@@ -79,8 +68,6 @@ pub fn draw_disassembly(frame: &mut Frame, app: &App, area: Rect, focused: bool)
                 Span::styled(instruction.text(), text_style),
             ];
 
-            // A branch with a known target is worth annotating; an indirect
-            // one has no target to show, and inventing one would be a lie.
             if let Some(target) = instruction.branch_target {
                 spans.push(Span::styled(
                     format!("  {} 0x{target:x}", symbols.stack_pointer),
@@ -89,19 +76,14 @@ pub fn draw_disassembly(frame: &mut Frame, app: &App, area: Rect, focused: bool)
             }
             Line::from(spans)
         })
-        .collect();
-
-    frame.render_widget(Paragraph::new(lines), inner);
+        .collect()
 }
 
 /// Draws the instruction explanation panel.
 pub fn draw_explanation(frame: &mut Frame, app: &App, area: Rect, focused: bool) {
     let block = super::panel_block(&app.theme, Panel::Explain, focused);
 
-    let Some(explanation) = app.current_explanation() else {
-        // Where the instruction comes from depends on the page, so telling
-        // the reader to move a cursor on a page with no editor would be
-        // advice they cannot follow.
+    if app.current_explanation().is_none() {
         let hint = match app.page {
             Page::Reference => "Type an instruction name in the search box to see what it does.",
             Page::Learn => "Type an instruction in the scratchpad to see what it does.",
@@ -109,13 +91,22 @@ pub fn draw_explanation(frame: &mut Frame, app: &App, area: Rect, focused: bool)
         };
         super::draw_placeholder(frame, area, &app.theme, block, hint);
         return;
-    };
+    }
     let inner = block.inner(area);
     frame.render_widget(block, area);
     if inner.width == 0 || inner.height == 0 {
         return;
     }
 
+    let lines = explanation_lines(app);
+    super::draw_scrolled(frame, app, Panel::Explain, inner, lines, true);
+}
+
+/// The explanation of whichever instruction is under discussion.
+pub fn explanation_lines<'a>(app: &App) -> Vec<Line<'a>> {
+    let Some(explanation) = app.current_explanation() else {
+        return Vec::new();
+    };
     let theme = &app.theme;
     let mut lines: Vec<Line> = Vec::new();
 
@@ -143,8 +134,6 @@ pub fn draw_explanation(frame: &mut Frame, app: &App, area: Rect, focused: bool)
             theme.base(),
         ));
 
-        // Show the same effect with real values right under the symbolic one,
-        // so the relationship between them is obvious.
         if label == "Effect" {
             if let Some(concrete) = &explanation.concrete {
                 lines.push(super::field_line(
@@ -157,7 +146,6 @@ pub fn draw_explanation(frame: &mut Frame, app: &App, area: Rect, focused: bool)
         }
     }
 
-    // The limits of what is known are stated, not hidden.
     if explanation.approximate {
         lines.push(Line::from(Span::styled(
             "Vector instruction: named, but its per-lane effect is not modelled.",
@@ -165,23 +153,14 @@ pub fn draw_explanation(frame: &mut Frame, app: &App, area: Rect, focused: bool)
         )));
     }
     if let Some(notes) = &explanation.notes {
-        if inner.height as usize > lines.len() + 1 {
-            lines.push(Line::from(""));
-            lines.push(Line::from(Span::styled(notes.clone(), theme.dim())));
-        }
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(notes.clone(), theme.dim())));
     }
 
-    frame.render_widget(
-        Paragraph::new(lines).wrap(ratatui::widgets::Wrap { trim: true }),
-        inner,
-    );
+    lines
 }
 
-/// Draws the call stack.
-///
-/// This is the chain of calls, not the stack memory: the panel next door shows
-/// the bytes around `RSP`, and confusing the two is exactly what this panel
-/// exists to prevent.
+/// Draws the call stack: the chain of calls, not the stack memory.
 pub fn draw_call_stack(frame: &mut Frame, app: &App, area: Rect, focused: bool) {
     let block = super::panel_block(&app.theme, Panel::CallStack, focused);
 
@@ -208,7 +187,6 @@ pub fn draw_call_stack(frame: &mut Frame, app: &App, area: Rect, focused: bool) 
         .frames
         .iter()
         .enumerate()
-        .take(usize::from(inner.height))
         .map(|(index, stack_frame)| {
             let selected = index == app.frame_selected && focused;
             let marker = if stack_frame.is_innermost() {
@@ -241,7 +219,7 @@ pub fn draw_call_stack(frame: &mut Frame, app: &App, area: Rect, focused: bool) 
         })
         .collect();
 
-    frame.render_widget(Paragraph::new(lines), inner);
+    super::draw_scrolled(frame, app, Panel::CallStack, inner, lines, false);
 }
 
 /// Draws the breakpoint list.
@@ -272,7 +250,6 @@ pub fn draw_breakpoints(frame: &mut Frame, app: &App, area: Rect, focused: bool)
         .all()
         .iter()
         .enumerate()
-        .take(usize::from(inner.height))
         .map(|(index, breakpoint)| {
             let glyph = if breakpoint.enabled {
                 symbols.breakpoint
@@ -294,7 +271,7 @@ pub fn draw_breakpoints(frame: &mut Frame, app: &App, area: Rect, focused: bool)
         })
         .collect();
 
-    frame.render_widget(Paragraph::new(lines), inner);
+    super::draw_scrolled(frame, app, Panel::Breakpoints, inner, lines, false);
 }
 
 #[cfg(test)]

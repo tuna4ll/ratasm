@@ -1,19 +1,4 @@
 //! Key bindings, and validating that they do not conflict.
-//!
-//! A binding is written the way people say it out loud: `ctrl+s`, `F5`,
-//! `shift+tab`. Parsing is deliberately forgiving about case and about
-//! `control`/`ctrl`, because a configuration file that rejects `Ctrl+S` for
-//! being capitalised is annoying for no benefit.
-//!
-//! # Conflicts are reported, not resolved
-//!
-//! Two commands bound to the same chord is a mistake the user wants to know
-//! about. Silently letting one shadow the other produces a key that
-//! mysteriously does the wrong thing, so [`Keymap::conflicts`] finds them and
-//! start-up reports them.
-//!
-//! The one intentional exception is a binding that *replaces* a default: that
-//! is a user overriding, not a conflict, and it is how customisation works.
 
 use std::collections::{BTreeMap, HashMap};
 use std::fmt;
@@ -24,9 +9,6 @@ use crate::app::page::Page;
 use crate::command::Command;
 
 /// A key plus its modifiers.
-///
-/// Not ordered: crossterm's `KeyCode` has no `Ord`, so keymaps are hashed and
-/// sorted by their rendered text when an order is needed for display.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct KeyBinding {
     /// The key itself.
@@ -52,9 +34,6 @@ impl KeyBinding {
     }
 
     /// Builds a binding from a terminal key event.
-    ///
-    /// Runs the same normalisation as [`parse_binding`], so a chord written in
-    /// a configuration file matches the event the terminal actually sends.
     pub fn from_event(event: KeyEvent) -> Self {
         let (code, modifiers) = normalise(event.code, event.modifiers);
         Self::new(code, modifiers)
@@ -62,24 +41,9 @@ impl KeyBinding {
 }
 
 /// Puts a key and its modifiers into the one canonical form.
-///
-/// Terminals encode shift into the character itself — `shift+p` arrives as
-/// `P` *and* the shift modifier — so a binding written either way has to end
-/// up identical or it can never match. Two rules do that:
-///
-/// - shift is dropped for character keys, because the character already
-///   carries it;
-/// - a character combined with control or alt is lowercased, so `ctrl+shift+p`
-///   and the `Ctrl+P` event the terminal sends are the same binding.
-///
-/// A plain character keeps its case, because in the editor `A` and `a` are
-/// genuinely different input.
 fn normalise(code: KeyCode, modifiers: KeyModifiers) -> (KeyCode, KeyModifiers) {
     let mut modifiers = modifiers;
 
-    // Terminals send shift+tab as BackTab with no modifier, so both spellings
-    // canonicalise to that. Without this, a configuration file saying
-    // "shift+tab" would never match the key the terminal actually reports.
     if code == KeyCode::BackTab || (code == KeyCode::Tab && modifiers.contains(KeyModifiers::SHIFT))
     {
         modifiers.remove(KeyModifiers::SHIFT);
@@ -164,11 +128,6 @@ pub enum KeyParseError {
 }
 
 /// Parses a binding such as `ctrl+shift+p`.
-///
-/// # Errors
-///
-/// Returns [`KeyParseError`] naming the part that was not understood, so a
-/// typo in a configuration file points at itself.
 pub fn parse_binding(text: &str) -> Result<KeyBinding, KeyParseError> {
     let text = text.trim();
     if text.is_empty() {
@@ -176,7 +135,6 @@ pub fn parse_binding(text: &str) -> Result<KeyBinding, KeyParseError> {
     }
 
     let parts: Vec<&str> = text.split('+').map(str::trim).collect();
-    // A lone "+" is the plus key, not an empty separator.
     let (key_part, modifier_parts) = match parts.split_last() {
         Some((last, rest)) if !last.is_empty() => (*last, rest),
         _ => ("+", &parts[..parts.len().saturating_sub(2)]),
@@ -233,8 +191,6 @@ fn parse_code(text: &str) -> Result<KeyCode, KeyParseError> {
         _ => {
             let mut chars = text.chars();
             match (chars.next(), chars.next()) {
-                // The character as written; normalise decides whether case
-                // is significant.
                 (Some(ch), None) => KeyCode::Char(ch),
                 _ => {
                     return Err(KeyParseError::UnknownKey {
@@ -276,7 +232,6 @@ impl Keymap {
             bindings.insert(binding, command);
         };
 
-        // Running and debugging, on the function keys.
         bind(KeyBinding::plain(KeyCode::F(5)), Command::Run);
         bind(KeyBinding::plain(KeyCode::F(6)), Command::Build);
         bind(KeyBinding::plain(KeyCode::F(7)), Command::StepInstruction);
@@ -284,8 +239,6 @@ impl Keymap {
         bind(KeyBinding::plain(KeyCode::F(9)), Command::ToggleBreakpoint);
         bind(KeyBinding::plain(KeyCode::F(10)), Command::StepLine);
         bind(KeyBinding::plain(KeyCode::F(11)), Command::StepOut);
-        // Shift with a step key reverses it, which is the mapping people
-        // already expect from step-into and step-over.
         bind(
             KeyBinding::new(KeyCode::F(7), KeyModifiers::SHIFT),
             Command::StepBack,
@@ -299,17 +252,14 @@ impl Keymap {
             Command::ReverseContinue,
         );
         bind(KeyBinding::plain(KeyCode::F(12)), Command::DebugStart);
-        // A program that loops forever needs one key to end it.
         bind(KeyBinding::ctrl(KeyCode::F(5)), Command::Stop);
 
-        // Files.
         bind(KeyBinding::ctrl(KeyCode::Char('s')), Command::SaveFile);
         bind(KeyBinding::ctrl(KeyCode::Char('o')), Command::OpenFile);
         bind(KeyBinding::ctrl(KeyCode::Char('n')), Command::NewFile);
         bind(KeyBinding::ctrl(KeyCode::Char('w')), Command::CloseFile);
         bind(KeyBinding::ctrl(KeyCode::Char('q')), Command::Quit);
 
-        // Editing.
         bind(KeyBinding::ctrl(KeyCode::Char('z')), Command::Undo);
         bind(KeyBinding::ctrl(KeyCode::Char('y')), Command::Redo);
         bind(KeyBinding::ctrl(KeyCode::Char('a')), Command::SelectAll);
@@ -317,7 +267,6 @@ impl Keymap {
         bind(KeyBinding::ctrl(KeyCode::Char('x')), Command::Cut);
         bind(KeyBinding::ctrl(KeyCode::Char('v')), Command::Paste);
 
-        // Navigation and search.
         bind(KeyBinding::ctrl(KeyCode::Char('p')), Command::OpenPalette);
         bind(KeyBinding::ctrl(KeyCode::Char('f')), Command::Search);
         bind(KeyBinding::ctrl(KeyCode::Char('g')), Command::GoToLine);
@@ -329,8 +278,6 @@ impl Keymap {
             KeyBinding::ctrl(KeyCode::Char('d')),
             Command::GoToDefinition,
         );
-        // Learning and the scratchpad. F1 is where a reader looks for help,
-        // and the material is what ratasm has instead of a help screen.
         bind(
             KeyBinding::plain(KeyCode::F(1)),
             Command::ToggleLearningMode,
@@ -341,8 +288,6 @@ impl Keymap {
         bind(KeyBinding::ctrl(KeyCode::PageDown), Command::NextDocument);
         bind(KeyBinding::ctrl(KeyCode::PageUp), Command::PreviousDocument);
 
-        // Alt plus a digit opens the page with that number, which is the
-        // number the page bar prints beside its name.
         for (index, page) in Page::ALL.iter().enumerate() {
             let digit = char::from_digit(index as u32 + 1, 10).unwrap_or('1');
             bindings.insert(
@@ -372,8 +317,6 @@ impl Keymap {
     }
 
     /// The chord bound to a command, if any.
-    ///
-    /// Used to show the shortcut beside a command in the palette.
     pub fn binding_for(&self, command: &Command) -> Option<KeyBinding> {
         self.sorted_bindings()
             .into_iter()
@@ -397,9 +340,6 @@ impl Keymap {
     }
 
     /// Every binding, sorted by its rendered chord.
-    ///
-    /// Hash order is not stable between runs, so anything the user sees — the
-    /// shortcut list, the palette — goes through this instead.
     pub fn sorted_bindings(&self) -> Vec<(KeyBinding, Command)> {
         let mut all: Vec<(KeyBinding, Command)> = self
             .bindings
@@ -421,10 +361,6 @@ impl Keymap {
     }
 
     /// Applies user overrides on top of these bindings.
-    ///
-    /// Returns the parse errors encountered. A bad entry is skipped rather
-    /// than aborting the whole file, so one typo does not cost the user every
-    /// other binding they configured — but it is reported.
     pub fn apply_overrides(&mut self, overrides: &BTreeMap<String, String>) -> Vec<KeymapError> {
         let mut errors = Vec::new();
 
@@ -440,7 +376,6 @@ impl Keymap {
                 }
             };
 
-            // An empty command name unbinds the chord.
             if command_id.trim().is_empty() {
                 self.unbind(binding);
                 continue;
@@ -459,12 +394,6 @@ impl Keymap {
     }
 
     /// Finds commands bound to more than one chord, and chords bound twice.
-    ///
-    /// A chord can only map to one command by construction, so what this
-    /// actually detects is the reverse: a command reachable from several
-    /// chords. That is usually deliberate, so only genuine duplicates — the
-    /// same command bound twice with no other command displaced — are
-    /// reported.
     pub fn conflicts(&self) -> Vec<Conflict> {
         let mut by_command: BTreeMap<String, Vec<KeyBinding>> = BTreeMap::new();
         for (binding, command) in &self.bindings {
@@ -545,15 +474,12 @@ mod tests {
     #[test]
     fn function_keys_parse_within_range() {
         assert_eq!(parse_binding("F12"), Ok(KeyBinding::plain(KeyCode::F(12))));
-        // F13 is not a key we bind; it falls through to the unknown-key error.
         assert!(parse_binding("F13").is_err());
         assert!(parse_binding("F0").is_err());
     }
 
     #[test]
     fn shift_is_dropped_for_characters() {
-        // The terminal reports shift+a as 'A', so keeping the modifier would
-        // make the binding unmatchable.
         let binding = parse_binding("ctrl+shift+p").expect("parses");
         assert!(!binding.modifiers.contains(KeyModifiers::SHIFT));
         assert!(binding.modifiers.contains(KeyModifiers::CONTROL));
@@ -561,8 +487,6 @@ mod tests {
 
     #[test]
     fn shift_tab_is_normalised_to_backtab() {
-        // Terminals report shift+tab as BackTab with no modifier, so both
-        // spellings must land on that or the binding could never fire.
         let expected = KeyBinding::plain(KeyCode::BackTab);
         assert_eq!(parse_binding("shift+tab"), Ok(expected));
         assert_eq!(parse_binding("backtab"), Ok(expected));
@@ -613,7 +537,6 @@ mod tests {
 
     #[test]
     fn the_documented_defaults_are_bound() {
-        // These are the shortcuts the README promises.
         let keymap = Keymap::defaults();
         for (text, expected) in [
             ("F5", Command::Run),
@@ -653,7 +576,6 @@ mod tests {
 
     #[test]
     fn no_default_binding_is_used_twice() {
-        // A chord bound twice would silently do the wrong thing.
         assert!(
             Keymap::defaults().conflicts().is_empty(),
             "the defaults conflict: {:?}",
@@ -680,9 +602,6 @@ mod tests {
 
     #[test]
     fn a_shifted_character_event_matches_the_binding_written_for_it() {
-        // The terminal sends 'P' with SHIFT for what a user writes as
-        // ctrl+shift+p. Both must normalise to the same binding or the chord
-        // could never fire.
         let mut keymap = Keymap::empty();
         keymap.bind(
             parse_binding("ctrl+shift+p").expect("parses"),
@@ -711,7 +630,6 @@ mod tests {
 
     #[test]
     fn a_plain_character_keeps_its_case() {
-        // In the editor, A and a are different input; only shortcuts fold.
         let upper = parse_binding("A").expect("parses");
         let lower = parse_binding("a").expect("parses");
         assert_ne!(upper, lower);
@@ -756,7 +674,6 @@ mod tests {
 
     #[test]
     fn a_bad_override_is_reported_without_discarding_the_good_ones() {
-        // One typo must not cost the user every other binding.
         let mut keymap = Keymap::empty();
         let overrides = BTreeMap::from([
             ("ctrl+b".to_owned(), "build.build".to_owned()),

@@ -1,9 +1,4 @@
 //! The panels the interface is made of, and which one has focus.
-//!
-//! Panels are named by an enum rather than by index or string so that focus
-//! handling, layout and key routing all refer to the same closed set. Adding a
-//! panel then means adding a variant, and the compiler points at every place
-//! that has to account for it.
 
 use std::fmt;
 
@@ -43,10 +38,6 @@ pub enum Panel {
 
 impl Panel {
     /// Every panel, in a fixed order used for cycling with Tab.
-    ///
-    /// The order follows how the work actually flows: write code, look at the
-    /// registers and flags it changed, look at memory, then at the machine
-    /// code, then at the supporting references.
     pub const ALL: [Panel; 14] = [
         Panel::Editor,
         Panel::Registers,
@@ -105,9 +96,6 @@ impl Panel {
     }
 
     /// Whether the panel needs a paused debug session to show anything.
-    ///
-    /// Used to draw a helpful "start a debug session" message instead of an
-    /// empty box, which would look like a bug.
     pub const fn needs_debug_session(self) -> bool {
         matches!(
             self,
@@ -116,9 +104,6 @@ impl Panel {
     }
 
     /// Whether typing into the panel inserts text.
-    ///
-    /// The editor consumes ordinary characters; every other panel is free to
-    /// use them as single-key shortcuts.
     pub const fn is_text_input(self) -> bool {
         matches!(self, Panel::Editor | Panel::Scratchpad)
     }
@@ -200,7 +185,6 @@ mod tests {
 
     #[test]
     fn only_the_text_panels_consume_typed_characters() {
-        // Every other panel is free to use letters as shortcuts.
         for panel in Panel::ALL {
             let expected = matches!(panel, Panel::Editor | Panel::Scratchpad);
             assert_eq!(panel.is_text_input(), expected, "{panel}");
@@ -214,7 +198,6 @@ mod tests {
         assert!(Panel::Stack.needs_debug_session());
         assert!(Panel::Memory.needs_debug_session());
 
-        // These have something to show without a running program.
         assert!(!Panel::Editor.needs_debug_session());
         assert!(!Panel::Disassembly.needs_debug_session());
         assert!(!Panel::Syscalls.needs_debug_session());

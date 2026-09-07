@@ -1,12 +1,7 @@
 //! The panels showing processor state: registers, flags, the stack and memory.
-//!
-//! All four depend on a paused debug session. When there is none they say so
-//! rather than drawing an empty box, because an empty box reads as a bug and
-//! sends the user looking for one.
 
 use ratatui::layout::Rect;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 
 use crate::app::panel::Panel;
@@ -23,10 +18,7 @@ const NO_SESSION: &str =
     "No debug session.\n\nPress F12 to start one, or F6 to build first.\nRegisters, flags, the \
      stack and memory are read from the running program.";
 
-/// Columns reserved for a register's name.
-///
-/// Wide enough for the longest name plus the space that separates it from its
-/// value; `RFLAGS` is six characters, so six is one too few.
+/// Columns reserved for a register's name; `RFLAGS` plus a separating space.
 const NAME_WIDTH: usize = 7;
 
 /// Columns one flag takes: two for the name, one space, the glyph, a gap.
@@ -46,25 +38,33 @@ pub fn draw_registers(frame: &mut Frame, app: &App, area: Rect, focused: bool) {
         return;
     }
 
+    let lines = register_lines(app, usize::from(inner.width));
+    super::draw_scrolled(frame, app, Panel::Registers, inner, lines, false);
+}
+
+/// The register rows for a panel `width` columns wide.
+pub fn register_lines<'a>(app: &App, width: usize) -> Vec<Line<'a>> {
     let theme = &app.theme;
     let symbols = theme.symbols();
     let entries = app.registers.entries();
+    if entries.is_empty() {
+        return Vec::new();
+    }
 
-    // Two columns when there is room; the general-purpose registers are the
-    // point of the panel and sixteen of them do not fit in one column.
     let value_width = match app.register_format {
         crate::debugger::registers::Format::Hex => 18,
         _ => 20,
     };
-    // One marker column, the name, the value, and a gap.
     let column_width = 1 + NAME_WIDTH + value_width + 2;
-    let columns = usize::from(inner.width).max(1) / column_width.max(1);
-    let columns = columns.clamp(1, 2);
+    let columns = (width.max(1) / column_width.max(1)).clamp(1, 2);
 
     let mut lines: Vec<Line> = Vec::new();
     let mut row: Vec<Span> = Vec::new();
 
     for (index, entry) in entries.iter().enumerate() {
+        if columns == 1 && entry.register.name == "rip" && !lines.is_empty() {
+            lines.push(Line::from(""));
+        }
         row.extend(register_spans(entry, app, theme));
         if (index + 1) % columns == 0 {
             lines.push(Line::from(std::mem::take(&mut row)));
@@ -76,22 +76,18 @@ pub fn draw_registers(frame: &mut Frame, app: &App, area: Rect, focused: bool) {
         lines.push(Line::from(row));
     }
 
-    // A footer explaining the highlighted register turns the panel from a
-    // dump into something that teaches.
     if let Some(entry) = entries.iter().find(|entry| entry.has_changed()) {
         lines.push(Line::from(""));
         lines.push(Line::from(vec![
             Span::styled(format!("{} ", symbols.changed), theme.changed()),
             Span::styled(
-                // Truncated rather than wrapped: wrapping this paragraph
-                // would also wrap the register rows above it.
                 super::truncate(
                     &format!(
                         "{} changed: {}",
                         entry.register.display_name(),
                         entry.register.summary
                     ),
-                    usize::from(inner.width).saturating_sub(2),
+                    width.saturating_sub(3),
                     symbols.ellipsis,
                 ),
                 theme.dim(),
@@ -99,7 +95,7 @@ pub fn draw_registers(frame: &mut Frame, app: &App, area: Rect, focused: bool) {
         ]));
     }
 
-    frame.render_widget(Paragraph::new(lines), inner);
+    lines
 }
 
 /// The spans for one register row.
@@ -139,27 +135,35 @@ fn register_spans<'a>(entry: &RegisterEntry, app: &App, theme: &Theme) -> Vec<Sp
 pub fn draw_flags(frame: &mut Frame, app: &App, area: Rect, focused: bool) {
     let block = super::panel_block(&app.theme, Panel::Flags, focused);
 
-    let Some(flags) = app.registers.flags() else {
+    if app.registers.flags().is_none() {
         super::draw_placeholder(frame, area, &app.theme, block, NO_SESSION);
         return;
-    };
+    }
     let inner = block.inner(area);
     frame.render_widget(block, area);
     if inner.width == 0 || inner.height == 0 {
         return;
     }
 
+    let lines = flag_lines(app, usize::from(inner.width));
+    super::draw_scrolled(frame, app, Panel::Flags, inner, lines, false);
+}
+
+/// The flag rows and the jumps they would take, for a panel `width` wide.
+pub fn flag_lines<'a>(app: &App, width: usize) -> Vec<Line<'a>> {
+    let Some(flags) = app.registers.flags() else {
+        return Vec::new();
+    };
+
     let theme = &app.theme;
     let symbols = theme.symbols();
-    let previous = app.registers.previous_flags();
-    let changed = previous
+    let changed = app
+        .registers
+        .previous_flags()
         .map(|previous| flags.changed_from(previous))
         .unwrap_or_default();
 
-    // As many flags per row as the panel is wide enough for, in multiples of
-    // three so the rows stay even. Every row saved here is a row the
-    // conditional-jump list gets, and that list is the point of the panel.
-    let per_row = match usize::from(inner.width) / FLAG_WIDTH {
+    let per_row = match width / FLAG_WIDTH {
         fits if fits >= Flag::ALL.len() => Flag::ALL.len(),
         fits if fits >= 6 => 6,
         _ => 3,
@@ -170,9 +174,7 @@ pub fn draw_flags(frame: &mut Frame, app: &App, area: Rect, focused: bool) {
 
     for (index, flag) in Flag::ALL.iter().enumerate() {
         let set = flags.has(*flag);
-        let just_changed = changed.contains(flag);
-
-        let style = if just_changed {
+        let style = if changed.contains(flag) {
             theme.changed()
         } else if set {
             theme.success()
@@ -193,24 +195,21 @@ pub fn draw_flags(frame: &mut Frame, app: &App, area: Rect, focused: bool) {
         lines.push(Line::from(row));
     }
 
-    // The panel's real value: which branches would be taken right now.
     let taken: Vec<String> = ConditionCode::ALL
         .into_iter()
         .filter(|code| code.evaluate(flags))
         .flat_map(ConditionCode::jump_mnemonics)
         .collect();
 
-    if !taken.is_empty() && inner.height > lines.len() as u16 + 1 {
-        // The blank separator is a luxury; the list is not.
-        if inner.height > lines.len() as u16 + 2 {
-            lines.push(Line::from(""));
-        }
+    if !taken.is_empty() {
+        lines.push(Line::from(""));
         lines.push(Line::from(Span::styled("Would be taken:", theme.dim())));
-        let text = super::truncate(&taken.join(" "), usize::from(inner.width), symbols.ellipsis);
-        lines.push(Line::from(Span::styled(text, theme.success())));
+        for chunk in taken.chunks(width.max(8) / 5) {
+            lines.push(Line::from(Span::styled(chunk.join(" "), theme.success())));
+        }
     }
 
-    frame.render_widget(Paragraph::new(lines), inner);
+    lines
 }
 
 /// Draws the stack panel.
@@ -227,6 +226,12 @@ pub fn draw_stack(frame: &mut Frame, app: &App, area: Rect, focused: bool) {
         return;
     }
 
+    let lines = stack_lines(app);
+    super::draw_scrolled(frame, app, Panel::Stack, inner, lines, false);
+}
+
+/// One row per eight-byte stack slot, the width the architecture pushes.
+pub fn stack_lines<'a>(app: &App) -> Vec<Line<'a>> {
     let theme = &app.theme;
     let symbols = theme.symbols();
     let rsp = app.registers.rsp();
@@ -235,27 +240,23 @@ pub fn draw_stack(frame: &mut Frame, app: &App, area: Rect, focused: bool) {
     let mut lines: Vec<Line> = Vec::new();
     let mut address = app.stack.address;
 
-    // The stack is read eight bytes at a time because that is the width the
-    // architecture pushes and pops.
-    while address + 8 <= app.stack.end_address() && lines.len() < usize::from(inner.height) {
+    while address + 8 <= app.stack.end_address() {
         let Some(value) = app.stack.read_integer(address, 8) else {
             break;
         };
 
-        let marker = if Some(address) == rsp {
-            Span::styled(format!("{} ", symbols.stack_pointer), theme.current_line())
+        let (marker, label) = if Some(address) == rsp {
+            (
+                Span::styled(format!("{} ", symbols.stack_pointer), theme.current_line()),
+                Span::styled("RSP ", theme.current_line()),
+            )
         } else if Some(address) == rbp {
-            Span::styled(format!("{} ", symbols.base_pointer), theme.accent())
+            (
+                Span::styled(format!("{} ", symbols.base_pointer), theme.accent()),
+                Span::styled("RBP ", theme.accent()),
+            )
         } else {
-            Span::raw("  ".to_owned())
-        };
-
-        let label = if Some(address) == rsp {
-            Span::styled("RSP ", theme.current_line())
-        } else if Some(address) == rbp {
-            Span::styled("RBP ", theme.accent())
-        } else {
-            Span::raw("    ".to_owned())
+            (Span::raw("  ".to_owned()), Span::raw("    ".to_owned()))
         };
 
         lines.push(Line::from(vec![
@@ -268,7 +269,7 @@ pub fn draw_stack(frame: &mut Frame, app: &App, area: Rect, focused: bool) {
         address = address.wrapping_add(8);
     }
 
-    frame.render_widget(Paragraph::new(lines), inner);
+    lines
 }
 
 /// Draws the memory panel.
@@ -290,10 +291,13 @@ pub fn draw_memory(frame: &mut Frame, app: &App, area: Rect, focused: bool) {
         return;
     }
 
-    frame.render_widget(
-        Paragraph::new(hex_dump(&app.memory, &app.theme, usize::from(inner.height))),
-        inner,
-    );
+    let lines = memory_lines(app);
+    super::draw_scrolled(frame, app, Panel::Memory, inner, lines, false);
+}
+
+/// The hex dump of the memory panel's block.
+pub fn memory_lines<'a>(app: &App) -> Vec<Line<'a>> {
+    hex_dump(&app.memory, &app.theme, usize::MAX)
 }
 
 /// Renders a memory block as hex-dump lines.
@@ -352,15 +356,12 @@ mod tests {
 
     #[test]
     fn the_no_session_message_says_what_to_press() {
-        // A dead end with no next step is the worst kind of empty state.
         assert!(NO_SESSION.contains("F12"));
         assert!(NO_SESSION.contains("F6"));
     }
 
     #[test]
     fn the_name_column_leaves_a_space_after_the_longest_name() {
-        // RFLAGS is six characters. A six-wide field ran the name straight
-        // into its value, which is how this was noticed.
         let longest = crate::instruction::registers::all()
             .iter()
             .map(|register| register.display_name().chars().count())

@@ -1,27 +1,4 @@
 //! Working out where each panel goes.
-//!
-//! # Pages first, then size
-//!
-//! Which panels are on screen is decided by the [`Page`], not by the layout:
-//! the layout's job is only to arrange the panels that page holds. That split
-//! is what keeps this module small — it never has to decide whether the
-//! register view is relevant, only how much room it gets.
-//!
-//! # Three shapes, not a squeeze
-//!
-//! Below a certain width a panel stops being useful rather than merely small:
-//! a register view narrower than `RAX  0x0000000000000000` shows nothing at
-//! all. So instead of scaling every panel down, the layout picks one of three
-//! arrangements and puts whatever does not fit behind tabs.
-//!
-//! - **Wide** — the page's full arrangement.
-//! - **Medium** — the page's main panel with one side slot; the rest share a
-//!   tab strip.
-//! - **Narrow** — one panel at a time, the page's panels in tabs.
-//!
-//! The focused panel is always visible. That is the invariant the tests pin
-//! down, because a focus that lands on a hidden panel makes the keyboard
-//! appear to stop working.
 
 use ratatui::layout::{Constraint, Direction, Layout as RatatuiLayout, Rect};
 
@@ -90,10 +67,6 @@ impl Layout {
 }
 
 /// Computes the layout for a terminal of `area` showing `page`, focused on
-/// `focus`.
-///
-/// The focused panel is guaranteed an area in every mode except
-/// [`LayoutMode::TooSmall`].
 pub fn compute(area: Rect, page: Page, focus: Panel) -> Layout {
     if area.width < MINIMUM_WIDTH || area.height < MINIMUM_HEIGHT {
         return Layout {
@@ -106,10 +79,6 @@ pub fn compute(area: Rect, page: Page, focus: Panel) -> Layout {
         };
     }
 
-    // One row for the page bar at the top, one for the status bar at the
-    // bottom. Both are always present: losing the page bar would hide the only
-    // sign that the other pages exist, and losing the status bar would hide
-    // the only place errors are reported.
     let bars = RatatuiLayout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -205,16 +174,11 @@ fn wide_code(body: Rect) -> Layout {
 
 /// The source and its machine code on the left, the CPU state on the right.
 fn wide_debug(body: Rect, focus: Panel) -> Layout {
-    // The output is the least of it while stepping, so it gets the smallest
-    // share; the registers get the most, because they carry a footnote about
-    // what changed that is worth more than another blank row elsewhere.
     let stacked = rows(body, &[82, 18]);
     let halves = columns(stacked[0], &[58, 42]);
     let left = rows(halves[0], &[50, 26, 24]);
     let right = rows(halves[1], &[44, 24, 32]);
 
-    // The bottom-right slot is shared between four panels, with a tab strip
-    // above it: a shared slot without one is a panel nobody discovers.
     let shared_area = RatatuiLayout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Length(1), Constraint::Min(3)])
@@ -287,7 +251,6 @@ fn medium(body: Rect, page: Page, focus: Panel) -> Layout {
         .filter(|panel| *panel != main)
         .collect();
 
-    // With only one panel on the page there is nothing to put beside it.
     if tabbed.is_empty() {
         return assembled(LayoutMode::Medium, vec![(main, body)], Vec::new(), None);
     }
@@ -380,8 +343,6 @@ mod tests {
 
     #[test]
     fn a_short_but_wide_terminal_does_not_get_the_full_layout() {
-        // Height matters as much as width: the wide arrangement needs several
-        // stacked rows to be worth anything.
         let layout = compute(Rect::new(0, 0, 160, 20), Page::Debug, Panel::Editor);
         assert_ne!(layout.mode, LayoutMode::Wide);
     }
@@ -402,8 +363,6 @@ mod tests {
 
     #[test]
     fn the_focused_panel_is_always_visible() {
-        // The invariant that keeps the keyboard working: focus can never land
-        // somewhere the user cannot see.
         for area in [wide_area(), medium_area(), narrow_area()] {
             for (page, focus) in every_focus() {
                 let layout = compute(area, page, focus);
@@ -420,8 +379,6 @@ mod tests {
 
     #[test]
     fn only_the_pages_own_panels_are_drawn() {
-        // Otherwise the page would not be a page, just a differently sorted
-        // pile of the same fourteen panels.
         for area in [wide_area(), medium_area(), narrow_area()] {
             for (page, focus) in every_focus() {
                 for panel in compute(area, page, focus).visible_panels() {
@@ -433,8 +390,6 @@ mod tests {
 
     #[test]
     fn every_panel_on_a_page_is_reachable_when_wide() {
-        // Drawn outright or one tab away — but never absent, or Tab would
-        // move focus somewhere invisible.
         for page in Page::ALL {
             let layout = compute(wide_area(), page, page.default_panel());
             for panel in page.panels() {
@@ -504,7 +459,6 @@ mod tests {
 
     #[test]
     fn no_panel_is_given_a_zero_sized_area() {
-        // A zero-sized panel draws nothing and looks like a bug.
         for area in [wide_area(), medium_area(), narrow_area()] {
             for (page, focus) in every_focus() {
                 for (panel, rect) in compute(area, page, focus).panels {
@@ -521,7 +475,6 @@ mod tests {
 
     #[test]
     fn the_status_bar_is_always_present_and_one_row_tall() {
-        // It is the only place errors are reported, so it never disappears.
         for area in [wide_area(), medium_area(), narrow_area()] {
             let layout = compute(area, Page::Code, Panel::Editor);
             assert_eq!(layout.status_bar.height, 1);
@@ -561,8 +514,6 @@ mod tests {
 
     #[test]
     fn the_code_page_gives_the_editor_most_of_the_screen() {
-        // The whole point of splitting the pages up: writing code should not
-        // be done in a third of the terminal.
         let area = wide_area();
         let editor = compute(area, Page::Code, Panel::Editor)
             .area_of(Panel::Editor)
@@ -609,8 +560,6 @@ mod tests {
 
     #[test]
     fn focusing_a_shared_slot_swaps_which_panel_it_shows() {
-        // The debug page's bottom-right slot is shared; focusing one of its
-        // members must bring that member forward, in the same place.
         let stack = compute(wide_area(), Page::Debug, Panel::Stack);
         let memory = compute(wide_area(), Page::Debug, Panel::Memory);
 
@@ -636,8 +585,6 @@ mod tests {
 
     #[test]
     fn resizing_across_a_threshold_keeps_the_focus_visible() {
-        // The moment a user drags a terminal narrower is exactly when a
-        // layout bug would bite.
         for width in (MINIMUM_WIDTH..=WIDE_THRESHOLD + 10).step_by(3) {
             for height in [MINIMUM_HEIGHT, 20, 30, 50] {
                 let area = Rect::new(0, 0, width, height);

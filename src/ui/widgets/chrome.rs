@@ -32,12 +32,14 @@ pub fn draw_output(frame: &mut Frame, app: &App, area: Rect, focused: bool) {
         return;
     }
 
-    let theme = &app.theme;
-    let height = usize::from(inner.height);
-    // Show the end of the output: the most recent line is the interesting one.
-    let first = app.output.len().saturating_sub(height);
+    let lines = output_lines(app);
+    super::draw_scrolled(frame, app, Panel::Output, inner, lines, false);
+}
 
-    let lines: Vec<Line> = app.output[first..]
+/// One line per line of tool output, coloured by what it says.
+pub fn output_lines<'a>(app: &App) -> Vec<Line<'a>> {
+    let theme = &app.theme;
+    app.output
         .iter()
         .map(|text| {
             let lowered = text.to_ascii_lowercase();
@@ -52,16 +54,10 @@ pub fn draw_output(frame: &mut Frame, app: &App, area: Rect, focused: bool) {
             };
             Line::from(Span::styled(text.clone(), style))
         })
-        .collect();
-
-    frame.render_widget(Paragraph::new(lines), inner);
+        .collect()
 }
 
 /// Draws the system call reference.
-/// The most matches listed above the details.
-///
-/// Past this the list stops being something you scan and becomes something
-/// you scroll, and the details are what answer the question.
 const MOST_LISTED_SYSCALLS: u16 = 12;
 
 /// Draws the system call finder.
@@ -100,15 +96,10 @@ pub fn draw_syscalls(frame: &mut Frame, app: &App, area: Rect, focused: bool) {
         return;
     }
 
-    // With room to spare, show the highlighted call in full; otherwise just
-    // list them, because a truncated detail view helps nobody.
     let selected = app.syscall_selected.min(matches.len() - 1);
     let show_detail = rows[1].height >= 10 && rows[1].width >= 46;
 
     let (list_area, detail_area) = if show_detail {
-        // The list takes only the rows it has matches for, up to a cap. A
-        // fixed share leaves a gap the size of the panel when three calls
-        // match, which reads as a rendering bug.
         let listed = u16::try_from(matches.len())
             .unwrap_or(u16::MAX)
             .clamp(1, MOST_LISTED_SYSCALLS)
@@ -192,7 +183,6 @@ pub fn draw_syscalls(frame: &mut Frame, app: &App, area: Rect, focused: bool) {
             ));
         }
     } else {
-        // The honest empty state: the number is known, the arguments are not.
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled(
             format!(
@@ -203,15 +193,11 @@ pub fn draw_syscalls(frame: &mut Frame, app: &App, area: Rect, focused: bool) {
         )));
     }
 
-    // The example is the part people copy, so it goes in rather than staying
-    // in the database where nobody sees it.
     if let Some(example) = &call.example {
         let room = usize::from(detail_area.height).saturating_sub(lines.len() + 2);
         if room >= example.lines().count() {
             lines.push(Line::from(""));
             for source in example.lines() {
-                // Highlighted the same way the editor would, so an example
-                // and the code it is copied into look alike.
                 lines.push(Line::from(super::editor::highlight(
                     source,
                     theme.palette(),
@@ -229,6 +215,12 @@ pub fn draw_explorer(frame: &mut Frame, app: &App, area: Rect, focused: bool) {
         return;
     };
 
+    let lines = explorer_lines(app);
+    super::draw_scrolled(frame, app, Panel::Explorer, inner, lines, false);
+}
+
+/// The open documents and the active one's symbols.
+pub fn explorer_lines<'a>(app: &App) -> Vec<Line<'a>> {
     let theme = &app.theme;
     let mut lines: Vec<Line> = Vec::new();
 
@@ -236,9 +228,11 @@ pub fn draw_explorer(frame: &mut Frame, app: &App, area: Rect, focused: bool) {
         format!("Project: {}", app.project.name()),
         theme.bright(),
     )));
+    lines.push(Line::from(""));
 
     for (index, document) in app.workspace.documents().iter().enumerate() {
-        let marker = if index == app.workspace.active_index() {
+        let active = index == app.workspace.active_index();
+        let marker = if active {
             theme.symbols().selection
         } else {
             " "
@@ -250,11 +244,7 @@ pub fn draw_explorer(frame: &mut Frame, app: &App, area: Rect, focused: bool) {
         };
         lines.push(Line::from(Span::styled(
             format!("{marker} {modified} {}", document.display_name()),
-            if index == app.workspace.active_index() {
-                theme.base()
-            } else {
-                theme.dim()
-            },
+            if active { theme.base() } else { theme.dim() },
         )));
     }
 
@@ -262,19 +252,16 @@ pub fn draw_explorer(frame: &mut Frame, app: &App, area: Rect, focused: bool) {
     if !symbols.is_empty() {
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled("Symbols", theme.dim())));
-        for symbol in symbols.iter().take(inner.height as usize) {
-            // The line number matters: a name can appear twice, once where it
-            // is exported with `global` and once where it is defined, and
-            // without the number those two rows look like a duplicate.
+        for symbol in &symbols {
             lines.push(Line::from(vec![
-                Span::styled(format!("  {:<18}", symbol.name), theme.base()),
+                Span::styled(format!("  {:<14}", symbol.name), theme.base()),
                 Span::styled(format!("{:>4}  ", symbol.position.line + 1), theme.dim()),
                 Span::styled(symbol.kind.description(), theme.dim()),
             ]));
         }
     }
 
-    frame.render_widget(Paragraph::new(lines), inner);
+    lines
 }
 
 /// Draws the bar listing open documents.
@@ -285,8 +272,6 @@ pub fn draw_page_bar(frame: &mut Frame, app: &App, area: Rect) {
     let theme = &app.theme;
     let symbols = theme.symbols();
 
-    // Each page is numbered because the number is also its shortcut. Showing
-    // it is cheaper than a help screen nobody opens.
     let mut spans: Vec<Span> = Vec::new();
     for page in Page::ALL {
         let active = page == app.page;
@@ -300,8 +285,6 @@ pub fn draw_page_bar(frame: &mut Frame, app: &App, area: Rect) {
         ));
     }
 
-    // The open documents follow, so the page bar doubles as the file tabs
-    // rather than costing a second row.
     let mut documents: Vec<Span> = Vec::new();
     for (index, document) in app.workspace.documents().iter().enumerate() {
         let active = index == app.workspace.active_index();
@@ -316,8 +299,6 @@ pub fn draw_page_bar(frame: &mut Frame, app: &App, area: Rect) {
         ));
     }
 
-    // Pages first: they are how you get anywhere, so they are the part that
-    // must survive a narrow terminal.
     let used: usize = spans.iter().map(|span| span.content.chars().count()).sum();
     let room = usize::from(area.width).saturating_sub(used);
     let listed: usize = documents
@@ -542,8 +523,6 @@ fn draw_palette(frame: &mut Frame, app: &App, area: Rect, palette: &crate::app::
                 .map(|binding| binding.to_string())
                 .unwrap_or_default();
 
-            // Commands that will ask for something get an ellipsis, the usual
-            // signal that another step follows.
             let suffix = if command.prompts_for_input() {
                 symbols.ellipsis
             } else {
@@ -597,7 +576,6 @@ mod tests {
 
     #[test]
     fn a_syscall_without_modelled_arguments_is_marked_as_such() {
-        // The panel must not imply it knows more than it does.
         let app = app();
         let call = app
             .syscalls

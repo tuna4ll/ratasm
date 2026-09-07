@@ -1,16 +1,4 @@
 //! Every action the application can perform.
-//!
-//! Key bindings, the command palette and tests all go through [`Command`].
-//! Nothing is invoked by matching on a key event deep inside an input handler,
-//! which has two consequences worth the discipline:
-//!
-//! - anything reachable by a shortcut is reachable from the palette, so a
-//!   binding you have not memorised is never a dead end;
-//! - every action is testable without synthesising terminal input.
-//!
-//! Each command carries a stable identifier such as `file.save`. That is what
-//! appears in configuration files, so renaming a variant does not silently
-//! break someone's key bindings — the identifier is the contract.
 
 pub mod palette;
 
@@ -77,13 +65,8 @@ impl fmt::Display for Category {
 }
 
 /// An action the application can perform.
-///
-/// Commands that need a value the user must supply — a line number, an
-/// address, a file name — open a prompt rather than carrying the value, so a
-/// key binding and a palette entry invoke exactly the same thing.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Command {
-    // --- File ---
     /// Create a new empty buffer.
     NewFile,
     /// Prompt for a file to open.
@@ -97,7 +80,6 @@ pub enum Command {
     /// Leave the application.
     Quit,
 
-    // --- Edit ---
     /// Undo the last change.
     Undo,
     /// Redo the last undone change.
@@ -115,7 +97,6 @@ pub enum Command {
     /// Remove one indent level.
     Dedent,
 
-    // --- Navigate ---
     /// Open a named page.
     GoToPage(Page),
     /// Open the next page.
@@ -132,6 +113,18 @@ pub enum Command {
     NextDocument,
     /// Show the previous open document.
     PreviousDocument,
+    /// Scroll the focused panel up a few rows.
+    ScrollUp,
+    /// Scroll the focused panel down a few rows.
+    ScrollDown,
+    /// Scroll the focused panel up one screenful.
+    ScrollPageUp,
+    /// Scroll the focused panel down one screenful.
+    ScrollPageDown,
+    /// Scroll the focused panel to its first row.
+    ScrollToTop,
+    /// Scroll the focused panel to its last screenful.
+    ScrollToEnd,
     /// Prompt for a line number and go to it.
     GoToLine,
     /// Prompt for an address and show it in the memory panel.
@@ -141,7 +134,6 @@ pub enum Command {
     /// Jump to the first error from the last build.
     GoToFirstError,
 
-    // --- Search ---
     /// Open the search prompt.
     Search,
     /// Go to the next match.
@@ -151,7 +143,6 @@ pub enum Command {
     /// Open the replace prompt.
     Replace,
 
-    // --- Build ---
     /// Assemble and link.
     Build,
     /// Assemble and link with debug information.
@@ -161,7 +152,6 @@ pub enum Command {
     /// Stop the running program.
     Stop,
 
-    // --- Debug ---
     /// Start a debug session.
     DebugStart,
     /// Resume a paused program.
@@ -189,7 +179,6 @@ pub enum Command {
     /// Remove every breakpoint.
     ClearBreakpoints,
 
-    // --- View ---
     /// Change how register values are displayed.
     CycleRegisterFormat,
     /// Switch between Intel and AT&T disassembly.
@@ -199,7 +188,6 @@ pub enum Command {
     /// Show or hide the learning-mode panel.
     ToggleLearningMode,
 
-    // --- Application ---
     /// Open the command palette.
     OpenPalette,
     /// Open the system call reference.
@@ -212,9 +200,6 @@ pub enum Command {
 
 impl Command {
     /// Every command, in a stable order.
-    ///
-    /// Used to populate the palette and, in tests, to assert that every
-    /// command carries complete metadata.
     pub fn all() -> Vec<Command> {
         let mut commands = vec![
             Command::NewFile,
@@ -235,6 +220,12 @@ impl Command {
             Command::PreviousPanel,
             Command::NextDocument,
             Command::PreviousDocument,
+            Command::ScrollUp,
+            Command::ScrollDown,
+            Command::ScrollPageUp,
+            Command::ScrollPageDown,
+            Command::ScrollToTop,
+            Command::ScrollToEnd,
             Command::GoToLine,
             Command::GoToAddress,
             Command::GoToDefinition,
@@ -275,9 +266,6 @@ impl Command {
     }
 
     /// The stable identifier used in configuration files.
-    ///
-    /// This is the contract with users' key bindings; changing one is a
-    /// breaking change even though the Rust variant name is not.
     pub fn id(&self) -> String {
         match self {
             Command::NewFile => "file.new".into(),
@@ -304,6 +292,12 @@ impl Command {
             Command::FocusPanel(panel) => format!("navigate.focus.{}", panel.id()),
             Command::NextDocument => "navigate.next-document".into(),
             Command::PreviousDocument => "navigate.previous-document".into(),
+            Command::ScrollUp => "navigate.scroll-up".into(),
+            Command::ScrollDown => "navigate.scroll-down".into(),
+            Command::ScrollPageUp => "navigate.scroll-page-up".into(),
+            Command::ScrollPageDown => "navigate.scroll-page-down".into(),
+            Command::ScrollToTop => "navigate.scroll-to-top".into(),
+            Command::ScrollToEnd => "navigate.scroll-to-end".into(),
             Command::GoToLine => "navigate.go-to-line".into(),
             Command::GoToAddress => "navigate.go-to-address".into(),
             Command::GoToDefinition => "navigate.go-to-definition".into(),
@@ -370,6 +364,12 @@ impl Command {
             Command::NextPanel => "Next panel".into(),
             Command::PreviousPanel => "Previous panel".into(),
             Command::FocusPanel(panel) => format!("Focus {}", panel.title().to_lowercase()),
+            Command::ScrollUp => "Scroll up".into(),
+            Command::ScrollDown => "Scroll down".into(),
+            Command::ScrollPageUp => "Scroll up a page".into(),
+            Command::ScrollPageDown => "Scroll down a page".into(),
+            Command::ScrollToTop => "Scroll to the top".into(),
+            Command::ScrollToEnd => "Scroll to the end".into(),
             Command::NextDocument => "Next document".into(),
             Command::PreviousDocument => "Previous document".into(),
             Command::GoToLine => "Go to line".into(),
@@ -480,7 +480,13 @@ impl Command {
             | Command::GoToLine
             | Command::GoToAddress
             | Command::GoToDefinition
-            | Command::GoToFirstError => Category::Navigate,
+            | Command::GoToFirstError
+            | Command::ScrollUp
+            | Command::ScrollDown
+            | Command::ScrollPageUp
+            | Command::ScrollPageDown
+            | Command::ScrollToTop
+            | Command::ScrollToEnd => Category::Navigate,
 
             Command::Search | Command::SearchNext | Command::SearchPrevious | Command::Replace => {
                 Category::Search
@@ -518,9 +524,6 @@ impl Command {
     }
 
     /// Whether the command opens a prompt for a value.
-    ///
-    /// The palette shows these with a trailing ellipsis, the convention that
-    /// tells a user something else will be asked before anything happens.
     pub fn prompts_for_input(&self) -> bool {
         matches!(
             self,
@@ -559,9 +562,6 @@ impl Command {
     }
 
     /// The text the palette searches, combining title and identifier.
-    ///
-    /// Including the identifier means a user who knows `debug.step-over` from
-    /// their configuration can type it and find the command.
     pub fn search_text(&self) -> String {
         format!("{} {}", self.title(), self.id())
     }
@@ -600,7 +600,6 @@ mod tests {
 
     #[test]
     fn identifiers_follow_the_group_dot_name_convention() {
-        // The convention is what makes a configuration file readable.
         for command in Command::all() {
             let id = command.id();
             assert!(id.contains('.'), "{id} has no group prefix");
@@ -663,7 +662,6 @@ mod tests {
         ] {
             assert!(command.needs_debug_session(), "{command}");
         }
-        // Starting one obviously cannot require one to already exist.
         assert!(!Command::DebugStart.needs_debug_session());
         assert!(!Command::Build.needs_debug_session());
         assert!(!Command::SaveFile.needs_debug_session());
@@ -698,7 +696,6 @@ mod tests {
 
     #[test]
     fn the_documented_shortcuts_all_name_a_real_command() {
-        // Guards against the README and the code drifting apart.
         for id in [
             "build.run",
             "build.build",
@@ -722,8 +719,6 @@ mod tests {
 
     #[test]
     fn every_command_identifier_is_documented() {
-        // The identifiers are what a user types into `[keys]`, so a command
-        // that is not written down is a command nobody can rebind.
         let docs = include_str!("../../docs/keybindings.md");
         for command in Command::all() {
             let row = format!("| `{}` | {} |", command.id(), command.title());
