@@ -1,12 +1,4 @@
 //! Entry point for the `ratasm` binary.
-//!
-//! The binary has two jobs. With no subcommand it opens the terminal
-//! interface; with one it does a single thing and exits, so `ratasm build`
-//! works from a Makefile or a CI script without a terminal attached.
-//!
-//! Terminal restoration is arranged before anything else runs. Every path out
-//! of `main` — including a panic — goes through the guard installed here, so
-//! the shell is never left in raw mode.
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -27,9 +19,9 @@ use ratasm::project::Project;
     disable_help_subcommand = true
 )]
 struct Cli {
-    /// Assembly file or project directory to open.
+    /// Assembly files, or one project directory, to open.
     #[arg(value_name = "PATH")]
-    path: Option<PathBuf>,
+    paths: Vec<PathBuf>,
 
     /// Write diagnostics to this file.
     #[arg(long, value_name = "FILE", global = true)]
@@ -72,8 +64,6 @@ enum Command {
 }
 
 fn main() -> ExitCode {
-    // Installed first so that even a panic during start-up restores the
-    // terminal before printing.
     ratasm::ui::install_panic_hook();
 
     let cli = Cli::parse();
@@ -88,8 +78,6 @@ fn main() -> ExitCode {
     match run(cli) {
         Ok(code) => code,
         Err(error) => {
-            // The terminal has already been restored by the guard's Drop, so
-            // this reaches a usable screen.
             eprintln!("ratasm: {error:#}");
             ExitCode::FAILURE
         }
@@ -110,7 +98,7 @@ fn run(cli: Cli) -> Result<ExitCode> {
         }
         Some(Command::Run { path }) => runtime.block_on(run_project(path.as_deref())),
         Some(Command::Doctor) => Ok(doctor()),
-        None => runtime.block_on(open_interface(cli.path.as_deref())),
+        None => runtime.block_on(open_interface(&cli.paths)),
     }
 }
 
@@ -141,8 +129,6 @@ fn resolve_project(path: Option<&Path>) -> Result<Project> {
     if path.is_file() {
         return Ok(Project::for_file_or_discover(&path));
     }
-    // ProjectError::NotFound already names the file and where the search
-    // started, so adding context here would print the same sentence twice.
     Project::discover(&path).map_err(Into::into)
 }
 
@@ -162,8 +148,6 @@ async fn build_project(path: Option<&Path>, debug: bool) -> Result<ExitCode> {
     print!("{}", outcome.raw_output());
     println!("{}", outcome.summary());
 
-    // A failed build is a normal result, reported through the exit status so
-    // scripts can act on it.
     Ok(if outcome.success {
         ExitCode::SUCCESS
     } else {
@@ -206,9 +190,6 @@ async fn run_project(path: Option<&Path>) -> Result<ExitCode> {
 }
 
 /// Reports whether the external tools ratasm needs are installed.
-///
-/// Distinguishes the tools that are required from the one that is optional,
-/// so a missing `gdb` does not read as a broken installation.
 fn doctor() -> ExitCode {
     use ratasm::process::is_available;
 
@@ -248,15 +229,13 @@ fn doctor() -> ExitCode {
 }
 
 /// Opens the terminal interface.
-async fn open_interface(path: Option<&Path>) -> Result<ExitCode> {
+async fn open_interface(paths: &[PathBuf]) -> Result<ExitCode> {
     let settings = ratasm::config::Settings::load_default().unwrap_or_else(|error| {
-        // A broken settings file must not stop the editor opening; the
-        // problem is reported once the status bar exists.
         eprintln!("ratasm: {error}");
         ratasm::config::Settings::default()
     });
 
-    let project = match path {
+    let project = match paths.first() {
         Some(path) => Project::for_file_or_discover(path),
         None => Project::discover(Path::new("."))
             .unwrap_or_else(|_| Project::for_file(Path::new("main.asm"))),
@@ -265,22 +244,40 @@ async fn open_interface(path: Option<&Path>) -> Result<ExitCode> {
     let mut app =
         ratasm::app::App::new(project, settings).context("cannot load the built-in databases")?;
 
-    // Report key binding problems where the user will see them.
     let (keymap, errors) = app.settings.keymap();
     app.keymap = keymap;
     if let Some(error) = errors.first() {
         app.status = ratasm::app::Status::warning(error.to_string());
     }
 
-    match path {
-        Some(path) if path.is_file() => ratasm::app::run::open_initial_file(&mut app, path),
-        _ => ratasm::app::run::open_project_entry(&mut app),
-    }
-    app.workspace
-        .active_mut()
-        .set_indent_width(app.settings.indent_width());
+    let (files, missing): (Vec<&Path>, Vec<&Path>) = paths
+        .iter()
+        .map(PathBuf::as_path)
+        .filter(|path| !path.is_dir())
+        .partition(|path| path.is_file());
 
-    // The guard restores the terminal on every path out, including a panic.
+    if files.is_empty() {
+        ratasm::app::run::open_project_entry(&mut app);
+    } else {
+        for path in files.iter().rev() {
+            ratasm::app::run::open_initial_file(&mut app, path);
+        }
+    }
+
+    if let Some(first) = missing.first() {
+        app.status = ratasm::app::Status::warning(match missing.len() {
+            1 => format!("{}: no such file", first.display()),
+            count => format!("{}: no such file, and {} more", first.display(), count - 1),
+        });
+    }
+
+    let indent = app.settings.indent_width();
+    for index in 0..app.workspace.len() {
+        app.workspace.set_active(index);
+        app.workspace.active_mut().set_indent_width(indent);
+    }
+    app.workspace.set_active(0);
+
     let mut guard = ratasm::ui::TerminalGuard::new()
         .context("cannot set up the terminal; is this running in a real terminal?")?;
 
@@ -297,8 +294,6 @@ mod tests {
 
     #[test]
     fn the_command_line_definition_is_valid() {
-        // clap panics on a malformed definition; this catches it in CI rather
-        // than on a user's first run.
         Cli::command().debug_assert();
     }
 
@@ -306,14 +301,23 @@ mod tests {
     fn no_arguments_opens_the_interface() {
         let cli = Cli::try_parse_from(["ratasm"]).expect("parse");
         assert!(cli.command.is_none());
-        assert!(cli.path.is_none());
+        assert!(cli.paths.is_empty());
     }
 
     #[test]
     fn a_bare_path_is_the_file_to_open() {
         let cli = Cli::try_parse_from(["ratasm", "src/main.asm"]).expect("parse");
-        assert_eq!(cli.path, Some(PathBuf::from("src/main.asm")));
+        assert_eq!(cli.paths, vec![PathBuf::from("src/main.asm")]);
         assert!(cli.command.is_none());
+    }
+
+    #[test]
+    fn several_paths_are_all_files_to_open() {
+        let cli = Cli::try_parse_from(["ratasm", "src/main.asm", "src/util.asm"]).expect("parse");
+        assert_eq!(
+            cli.paths,
+            vec![PathBuf::from("src/main.asm"), PathBuf::from("src/util.asm")]
+        );
     }
 
     #[test]
@@ -338,7 +342,6 @@ mod tests {
 
     #[test]
     fn version_and_help_are_available() {
-        // CI and the install script both call --version.
         let error = Cli::try_parse_from(["ratasm", "--version"]).expect_err("exits");
         assert_eq!(error.kind(), clap::error::ErrorKind::DisplayVersion);
         assert!(error.to_string().contains(env!("CARGO_PKG_VERSION")));
@@ -348,8 +351,15 @@ mod tests {
     }
 
     #[test]
-    fn an_unknown_subcommand_is_rejected() {
-        assert!(Cli::try_parse_from(["ratasm", "frobnicate", "x"]).is_err());
+    fn a_word_that_is_not_a_subcommand_is_taken_as_a_path() {
+        let cli = Cli::try_parse_from(["ratasm", "frobnicate", "x"]).expect("parse");
+        assert!(cli.command.is_none());
+        assert_eq!(cli.paths.len(), 2);
+    }
+
+    #[test]
+    fn an_unknown_flag_is_still_rejected() {
+        assert!(Cli::try_parse_from(["ratasm", "--frobnicate"]).is_err());
     }
 
     #[test]

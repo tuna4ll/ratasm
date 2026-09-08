@@ -180,7 +180,8 @@ The TUI owns the terminal, so logs never go to the console. Without
 
 | Command | What it does |
 | --- | --- |
-| `ratasm` | Open the interface. |
+| `ratasm` | Open the interface on this directory's project. |
+| `ratasm FILE...` | Open the interface with those files; the first is the one on screen. |
 | `ratasm new NAME` | Create a project with a working hello-world program. |
 | `ratasm build [PATH]` | Assemble and link, then exit. |
 | `ratasm run [PATH]` | Build and run, then exit. |
