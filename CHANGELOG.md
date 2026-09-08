@@ -6,6 +6,28 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-09-08
+
+### Added
+
+- Every panel scrolls. Only the editor had a viewport, so anything that did not
+  fit was never drawn and nothing said so: eighteen registers into the eight
+  rows a 120x30 terminal allows, or a build log three lines deep. A scrollbar
+  appears when there is more content than room, and the output panel follows
+  its newest line until the reader scrolls away from it.
+- The mouse works. Capture was enabled from the first release but no event was
+  ever read. The wheel scrolls whatever is under the pointer without taking
+  focus, a click focuses a panel and places the editor cursor, and clicks on
+  the page bar open a page or switch file.
+- `ratasm` takes more than one file: the first decides the project, the rest
+  are opened alongside it.
+
+### Fixed
+
+- Every edited buffer is written before assembling. The build read files from
+  disk and never consulted the workspace, so an unsaved buffer was assembled
+  from its previous contents without a word. `Ctrl+Alt+S` saves them on demand.
+
 ## [0.1.1] - 2026-09-06
 
 ### Fixed
@@ -114,6 +136,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   panel-sized gap above the details, and shows the NASM example that was
   already in the database.
 
-[Unreleased]: https://github.com/tuna4ll/ratasm/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/tuna4ll/ratasm/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/tuna4ll/ratasm/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/tuna4ll/ratasm/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/tuna4ll/ratasm/releases/tag/v0.1.0
