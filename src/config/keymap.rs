@@ -255,6 +255,13 @@ impl Keymap {
         bind(KeyBinding::ctrl(KeyCode::F(5)), Command::Stop);
 
         bind(KeyBinding::ctrl(KeyCode::Char('s')), Command::SaveFile);
+        bind(
+            KeyBinding::new(
+                KeyCode::Char('s'),
+                KeyModifiers::CONTROL | KeyModifiers::ALT,
+            ),
+            Command::SaveAll,
+        );
         bind(KeyBinding::ctrl(KeyCode::Char('o')), Command::OpenFile);
         bind(KeyBinding::ctrl(KeyCode::Char('n')), Command::NewFile);
         bind(KeyBinding::ctrl(KeyCode::Char('w')), Command::CloseFile);

@@ -267,6 +267,27 @@ impl Workspace {
         Ok(path.to_path_buf())
     }
 
+    /// Saves every modified document that has a path.
+    pub fn save_all(&mut self) -> Result<(usize, usize), FileError> {
+        let mut written = 0;
+        let mut skipped = 0;
+
+        for index in 0..self.documents.len() {
+            if !self.documents[index].is_modified() {
+                continue;
+            }
+            let Some(path) = self.documents[index].path().map(Path::to_path_buf) else {
+                skipped += 1;
+                continue;
+            };
+            write_file_atomically(&path, &self.documents[index].buffer().to_text())?;
+            self.documents[index].mark_saved();
+            written += 1;
+        }
+
+        Ok((written, skipped))
+    }
+
     /// Closes the document at `index`, returning whether it had unsaved changes.
     pub fn close(&mut self, index: usize) -> Result<bool, FileError> {
         if index >= self.documents.len() {
@@ -314,6 +335,46 @@ mod tests {
 
     fn temp_dir() -> tempfile::TempDir {
         tempfile::tempdir().expect("temp dir")
+    }
+
+    #[test]
+    fn saving_everything_writes_each_modified_file() {
+        let dir = temp_dir();
+        let first = dir.path().join("main.asm");
+        let second = dir.path().join("util.asm");
+        std::fs::write(&first, "old\n").expect("write");
+        std::fs::write(&second, "old\n").expect("write");
+
+        let mut workspace = Workspace::new();
+        workspace.open(&first).expect("open");
+        workspace.active_mut().insert("new ");
+        workspace.open(&second).expect("open");
+        workspace.active_mut().insert("new ");
+
+        assert_eq!(workspace.save_all().expect("save"), (2, 0));
+        assert!(std::fs::read_to_string(&first)
+            .expect("read")
+            .starts_with("new"));
+        assert!(std::fs::read_to_string(&second)
+            .expect("read")
+            .starts_with("new"));
+        assert!(!workspace.has_unsaved_changes());
+        assert_eq!(workspace.save_all().expect("save"), (0, 0));
+    }
+
+    #[test]
+    fn saving_everything_counts_buffers_with_no_file_name() {
+        let dir = temp_dir();
+        let path = dir.path().join("main.asm");
+        std::fs::write(&path, "old\n").expect("write");
+
+        let mut workspace = Workspace::new();
+        workspace.open(&path).expect("open");
+        workspace.active_mut().insert("x");
+        workspace.new_document();
+        workspace.active_mut().insert("scratch");
+
+        assert_eq!(workspace.save_all().expect("save"), (1, 1));
     }
 
     #[test]

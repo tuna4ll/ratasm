@@ -149,6 +149,13 @@ async fn perform(
             Err(error) => app.status = Status::error(error.to_string()),
         },
 
+        Effect::SaveAll => {
+            app.status = match save_everything(app) {
+                Ok(status) => status,
+                Err(error) => Status::error(error.to_string()),
+            };
+        }
+
         Effect::OpenFile(path) => match app.workspace.open(&path) {
             Ok(_) => {
                 app.status = Status::success(format!("Opened {}", path.display()));
@@ -224,7 +231,23 @@ async fn perform(
 }
 
 /// Builds the project, reporting the outcome.
+fn save_everything(app: &mut App) -> Result<Status, crate::editor::workspace::FileError> {
+    let (written, skipped) = app.workspace.save_all()?;
+    Ok(match (written, skipped) {
+        (0, 0) => Status::info("Nothing to save"),
+        (_, 0) => Status::success(format!("Saved {written} file(s)")),
+        (_, _) => Status::warning(format!(
+            "Saved {written} file(s); {skipped} buffer(s) have no file name yet"
+        )),
+    })
+}
+
 async fn build(app: &mut App, debug: bool) -> bool {
+    if let Err(error) = app.workspace.save_all() {
+        app.fail_build(error.to_string());
+        return false;
+    }
+
     let options = if debug {
         BuildOptions::debug()
     } else {
@@ -772,6 +795,50 @@ mod tests {
                 finish_background(app, done);
             }
         }
+    }
+
+    #[tokio::test]
+    async fn building_writes_every_edited_buffer_first() {
+        if !crate::process::is_available(Path::new("nasm"))
+            || !crate::process::is_available(Path::new("ld"))
+        {
+            eprintln!("skipping: nasm or ld not installed");
+            return;
+        }
+
+        let dir = tempfile::tempdir().expect("temp dir");
+        let mut app = app_for(dir.path());
+        let entry = app.project.entry_path();
+
+        open_initial_file(&mut app, &entry);
+        app.workspace.active_mut().insert("; edited\n");
+        assert!(app.workspace.has_unsaved_changes());
+
+        assert!(build(&mut app, false).await, "the build should succeed");
+        assert!(
+            !app.workspace.has_unsaved_changes(),
+            "an unsaved buffer would have been assembled from its old contents"
+        );
+        assert!(std::fs::read_to_string(&entry)
+            .expect("read")
+            .contains("; edited"));
+    }
+
+    #[tokio::test]
+    async fn saving_everything_reports_what_it_wrote() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let mut app = app_for(dir.path());
+        let mut session = None;
+
+        settle(&mut app, &mut session, Effect::SaveAll).await;
+        assert_eq!(app.status.severity, crate::app::Severity::Info);
+
+        let entry = app.project.entry_path();
+        open_initial_file(&mut app, &entry);
+        app.workspace.active_mut().insert("x");
+        settle(&mut app, &mut session, Effect::SaveAll).await;
+        assert_eq!(app.status.severity, crate::app::Severity::Success);
+        assert!(!app.workspace.has_unsaved_changes());
     }
 
     #[tokio::test]

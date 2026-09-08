@@ -69,6 +69,7 @@ assembled, and `rax=` removes it again. <kbd>Tab</kbd> still leaves the panel.
 | Key | Action |
 | --- | --- |
 | <kbd>Ctrl</kbd>+<kbd>S</kbd> | Save |
+| <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>S</kbd> | Save every modified buffer |
 | <kbd>Ctrl</kbd>+<kbd>O</kbd> | Open |
 | <kbd>Ctrl</kbd>+<kbd>Q</kbd> | Quit |
 
@@ -170,6 +171,7 @@ code, so a command missing here is a build failure rather than a surprise.
 | `file.new` | New file |
 | `file.open` | Open file |
 | `file.save` | Save |
+| `file.save-all` | Save all |
 | `file.save-as` | Save as |
 | `file.close` | Close file |
 | `app.quit` | Quit |

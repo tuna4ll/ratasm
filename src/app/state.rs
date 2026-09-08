@@ -54,6 +54,8 @@ pub enum Effect {
     ReadMemory(u64),
     /// Write the active buffer to disk.
     SaveFile(PathBuf),
+    /// Write every modified buffer to disk.
+    SaveAll,
     /// Read a file into a new buffer.
     OpenFile(PathBuf),
     /// Assemble and run the scratchpad snippet.
@@ -358,6 +360,7 @@ impl App {
                 None => self.open_prompt(PromptKind::SaveAs),
             },
             Command::SaveFileAs => self.open_prompt(PromptKind::SaveAs),
+            Command::SaveAll => Effect::SaveAll,
             Command::CloseFile => {
                 let index = self.workspace.active_index();
                 match self.workspace.close(index) {

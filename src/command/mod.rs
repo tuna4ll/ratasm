@@ -73,6 +73,8 @@ pub enum Command {
     OpenFile,
     /// Save the active buffer.
     SaveFile,
+    /// Save every modified buffer.
+    SaveAll,
     /// Prompt for a name and save the active buffer under it.
     SaveFileAs,
     /// Close the active buffer.
@@ -206,6 +208,7 @@ impl Command {
             Command::OpenFile,
             Command::SaveFile,
             Command::SaveFileAs,
+            Command::SaveAll,
             Command::CloseFile,
             Command::Quit,
             Command::Undo,
@@ -271,6 +274,7 @@ impl Command {
             Command::NewFile => "file.new".into(),
             Command::OpenFile => "file.open".into(),
             Command::SaveFile => "file.save".into(),
+            Command::SaveAll => "file.save-all".into(),
             Command::SaveFileAs => "file.save-as".into(),
             Command::CloseFile => "file.close".into(),
             Command::Quit => "app.quit".into(),
@@ -345,6 +349,7 @@ impl Command {
             Command::NewFile => "New file".into(),
             Command::OpenFile => "Open file".into(),
             Command::SaveFile => "Save".into(),
+            Command::SaveAll => "Save all".into(),
             Command::SaveFileAs => "Save as".into(),
             Command::CloseFile => "Close file".into(),
             Command::Quit => "Quit".into(),
@@ -417,6 +422,7 @@ impl Command {
     pub fn description(&self) -> String {
         match self {
             Command::SaveFile => "Write the active buffer to its file".into(),
+            Command::SaveAll => "Write every modified buffer to its file".into(),
             Command::Quit => "Leave ratasm, confirming any unsaved changes".into(),
             Command::Build => "Assemble and link the project".into(),
             Command::BuildWithDebugInfo => "Assemble with -g so source-level stepping works".into(),
@@ -458,6 +464,7 @@ impl Command {
             | Command::OpenFile
             | Command::SaveFile
             | Command::SaveFileAs
+            | Command::SaveAll
             | Command::CloseFile => Category::File,
 
             Command::Undo
