@@ -149,6 +149,16 @@ async fn perform(
             Err(error) => app.status = Status::error(error.to_string()),
         },
 
+        Effect::SaveProject => match app.project.save() {
+            Ok(path) => {
+                app.status = Status::success(format!(
+                    "Added to {}; it is assembled with the project now",
+                    crate::editor::workspace::display_path(&path)
+                ));
+            }
+            Err(error) => app.status = Status::error(error.to_string()),
+        },
+
         Effect::SaveAll => {
             app.status = match save_everything(app) {
                 Ok(status) => status,

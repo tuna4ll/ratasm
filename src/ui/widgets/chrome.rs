@@ -242,10 +242,17 @@ pub fn explorer_lines<'a>(app: &App) -> Vec<Line<'a>> {
         } else {
             " "
         };
-        lines.push(Line::from(Span::styled(
+
+        let mut spans = vec![Span::styled(
             format!("{marker} {modified} {}", document.display_name()),
             if active { theme.base() } else { theme.dim() },
-        )));
+        )];
+
+        let in_build = document.path().is_some_and(|path| app.project.builds(path));
+        if !in_build {
+            spans.push(Span::styled("  not built", theme.warning()));
+        }
+        lines.push(Line::from(spans));
     }
 
     let symbols = crate::editor::symbols::extract(app.workspace.active().buffer());

@@ -1,17 +1,4 @@
 //! Project discovery, configuration and scaffolding.
-//!
-//! A [`Project`] is a configuration plus the directory it was found in. All
-//! path resolution happens here, so no other module has to reason about
-//! whether a path in the configuration is relative to the project root, the
-//! current directory, or something else.
-//!
-//! # Working without a project file
-//!
-//! Opening a single `.asm` file with no `.ratasm.toml` anywhere above it is a
-//! completely normal thing to do, and it must work. [`Project::for_file`]
-//! builds an implicit project rooted at the file's directory with the default
-//! toolchain, so build, run and debug behave identically whether or not the
-//! user has written a project file.
 
 pub mod config;
 pub mod template;
@@ -54,6 +41,14 @@ pub enum ProjectError {
     AlreadyExists {
         /// The path that is already occupied.
         path: PathBuf,
+    },
+    /// A file outside the project root cannot be one of its sources.
+    #[error("{path} is outside {root}")]
+    OutsideRoot {
+        /// The offending file.
+        path: PathBuf,
+        /// The project root it is not under.
+        root: PathBuf,
     },
 }
 
@@ -101,12 +96,6 @@ impl Project {
     }
 
     /// Searches `start` and its parents for a project file and loads it.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`ProjectError::NotFound`] when no project file exists in the
-    /// directory or any ancestor, or a [`ProjectError::Config`] when one
-    /// exists but is invalid.
     pub fn discover(start: &Path) -> Result<Self, ProjectError> {
         let mut directory = if start.is_dir() {
             start.to_path_buf()
@@ -128,11 +117,6 @@ impl Project {
     }
 
     /// Loads a project from an explicit project file path.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`ProjectError::Io`] if the file cannot be read, or
-    /// [`ProjectError::Config`] if it is invalid.
     pub fn load(path: &Path) -> Result<Self, ProjectError> {
         let text = std::fs::read_to_string(path).map_err(|source| ProjectError::Io {
             path: path.to_path_buf(),
@@ -162,10 +146,6 @@ impl Project {
     }
 
     /// Builds an implicit project for a single source file.
-    ///
-    /// Used when a user opens a `.asm` file directly. The file becomes the
-    /// entry point, its directory becomes the root, and everything else takes
-    /// its default.
     pub fn for_file(source: &Path) -> Self {
         let root = source
             .parent()
@@ -193,20 +173,11 @@ impl Project {
     }
 
     /// Loads the project containing `source`, falling back to an implicit one.
-    ///
-    /// This is what the application calls when a file is opened: use a real
-    /// project file if there is one, otherwise still provide a usable project.
     pub fn for_file_or_discover(source: &Path) -> Self {
         Self::discover(source).unwrap_or_else(|_| Self::for_file(source))
     }
 
     /// Creates a new project directory with a working hello-world program.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`ProjectError::AlreadyExists`] if a project file is already
-    /// there, so an existing project is never overwritten, or
-    /// [`ProjectError::Io`] if the files cannot be written.
     pub fn create(root: &Path, name: &str) -> Result<Self, ProjectError> {
         let config_path = root.join(Self::FILE_NAME);
         if config_path.exists() {
@@ -228,11 +199,6 @@ impl Project {
     }
 
     /// Writes the configuration back to the project file.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`ProjectError::Io`] when the file cannot be written, or
-    /// [`ProjectError::Config`] when the configuration cannot be serialised.
     pub fn save(&self) -> Result<PathBuf, ProjectError> {
         let path = self
             .config_path
@@ -253,10 +219,6 @@ impl Project {
     }
 
     /// Resolves a project-relative path against the root.
-    ///
-    /// An absolute path is returned unchanged, which matters for paths that
-    /// come from somewhere other than the configuration file — the
-    /// configuration's own paths are validated to be relative.
     pub fn resolve(&self, path: &Path) -> PathBuf {
         if path.is_absolute() {
             path.to_path_buf()
@@ -268,6 +230,43 @@ impl Project {
     /// The absolute path of the entry source file.
     pub fn entry_path(&self) -> PathBuf {
         self.resolve(&self.config.project.entry)
+    }
+
+    /// Expresses `path` relative to the project root, if it is inside it.
+    pub fn relative(&self, path: &Path) -> Option<PathBuf> {
+        if path.is_relative() {
+            return Some(path.to_path_buf());
+        }
+        let root = self
+            .root
+            .canonicalize()
+            .unwrap_or_else(|_| self.root.clone());
+        let path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+        path.strip_prefix(&root).ok().map(Path::to_path_buf)
+    }
+
+    /// Whether `path` is one of the sources the build assembles.
+    pub fn builds(&self, path: &Path) -> bool {
+        let Some(relative) = self.relative(path) else {
+            return false;
+        };
+        self.config.all_sources().contains(&relative)
+    }
+
+    /// Adds `path` to the sources the build assembles.
+    pub fn add_source(&mut self, path: &Path) -> Result<bool, ProjectError> {
+        let relative = self
+            .relative(path)
+            .ok_or_else(|| ProjectError::OutsideRoot {
+                path: path.to_path_buf(),
+                root: self.root.clone(),
+            })?;
+
+        if self.config.all_sources().contains(&relative) {
+            return Ok(false);
+        }
+        self.config.project.sources.push(relative);
+        Ok(true)
     }
 
     /// The absolute paths of every source file.
@@ -285,11 +284,6 @@ impl Project {
     }
 
     /// The object file produced for `source`.
-    ///
-    /// Object files are named after the source's stem and placed in the
-    /// output directory, so two sources in different directories with the
-    /// same name would collide; the name includes the parent directory when
-    /// there is one to keep them apart.
     pub fn object_path(&self, source: &Path) -> PathBuf {
         let stem = source
             .file_stem()
@@ -334,9 +328,6 @@ impl Project {
 }
 
 /// Writes `contents` to `path`, creating parent directories.
-///
-/// Refuses to overwrite an existing file: project creation must never destroy
-/// something the user already has.
 fn write_new(path: &Path, contents: &str) -> Result<(), ProjectError> {
     if path.exists() {
         return Err(ProjectError::AlreadyExists {
@@ -379,7 +370,6 @@ mod tests {
 
     #[test]
     fn creating_over_an_existing_project_is_refused() {
-        // Scaffolding must never overwrite someone's work.
         let dir = temp_dir();
         Project::create(dir.path(), "first").expect("create");
         let error = Project::create(dir.path(), "second").expect_err("must refuse");
@@ -445,7 +435,6 @@ mod tests {
 
     #[test]
     fn a_lone_source_file_gets_an_implicit_project() {
-        // Opening one file with no project file must still build and run.
         let dir = temp_dir();
         let source = dir.path().join("scratch.asm");
         std::fs::write(&source, "ret\n").expect("write");
@@ -507,12 +496,54 @@ mod tests {
 
     #[test]
     fn sources_in_different_directories_do_not_collide() {
-        // Two files both called main.asm must produce different objects.
         let dir = temp_dir();
         let project = Project::create(dir.path(), "hello").expect("create");
         let first = project.object_path(Path::new("boot/main.asm"));
         let second = project.object_path(Path::new("kernel/main.asm"));
         assert_ne!(first, second);
+    }
+
+    #[test]
+    fn a_new_source_joins_the_ones_the_build_assembles() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let mut project = Project::create(dir.path(), "adds").expect("create");
+        let extra = dir.path().join("src/util.asm");
+        std::fs::write(&extra, "ret\n").expect("write");
+
+        assert!(!project.builds(&extra));
+        assert!(project.add_source(&extra).expect("add"));
+        assert!(project.builds(&extra));
+        assert!(project
+            .source_paths()
+            .iter()
+            .any(|path| path.ends_with("util.asm")));
+
+        assert!(!project.add_source(&extra).expect("add"), "no duplicate");
+    }
+
+    #[test]
+    fn the_entry_file_is_already_built() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let mut project = Project::create(dir.path(), "entry").expect("create");
+        let entry = project.entry_path();
+
+        assert!(project.builds(&entry));
+        assert!(!project.add_source(&entry).expect("add"));
+    }
+
+    #[test]
+    fn a_file_outside_the_root_cannot_be_a_source() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let elsewhere = tempfile::tempdir().expect("temp dir");
+        let mut project = Project::create(dir.path(), "outside").expect("create");
+
+        let stray = elsewhere.path().join("stray.asm");
+        std::fs::write(&stray, "ret\n").expect("write");
+
+        assert!(matches!(
+            project.add_source(&stray),
+            Err(ProjectError::OutsideRoot { .. })
+        ));
     }
 
     #[test]

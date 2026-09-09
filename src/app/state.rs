@@ -1,6 +1,6 @@
 //! Application state, and what each command does to it.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::assembler::{BuildOutcome, Diagnostic};
 use crate::command::Command;
@@ -56,6 +56,8 @@ pub enum Effect {
     SaveFile(PathBuf),
     /// Write every modified buffer to disk.
     SaveAll,
+    /// Write the project file back after its sources changed.
+    SaveProject,
     /// Read a file into a new buffer.
     OpenFile(PathBuf),
     /// Assemble and run the scratchpad snippet.
@@ -361,6 +363,7 @@ impl App {
             },
             Command::SaveFileAs => self.open_prompt(PromptKind::SaveAs),
             Command::SaveAll => Effect::SaveAll,
+            Command::AddToProject => self.add_active_to_project(),
             Command::CloseFile => {
                 let index = self.workspace.active_index();
                 match self.workspace.close(index) {
@@ -880,6 +883,29 @@ impl App {
             self.scroll.scroll_by(self.focus, rows);
         }
         Effect::None
+    }
+
+    /// Adds the active document to the sources the build assembles.
+    fn add_active_to_project(&mut self) -> Effect {
+        let Some(path) = self.workspace.active().path().map(Path::to_path_buf) else {
+            self.status = Status::warning("Save the buffer first; a source needs a file name");
+            return Effect::None;
+        };
+
+        match self.project.add_source(&path) {
+            Ok(false) => {
+                self.status = Status::info(format!(
+                    "{} is already built with the project",
+                    crate::editor::workspace::display_path(&path)
+                ));
+                Effect::None
+            }
+            Ok(true) => Effect::SaveProject,
+            Err(error) => {
+                self.status = Status::error(error.to_string());
+                Effect::None
+            }
+        }
     }
 
     /// Makes `path` the active document, opening it if necessary.

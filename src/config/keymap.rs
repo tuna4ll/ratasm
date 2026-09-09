@@ -263,6 +263,13 @@ impl Keymap {
             Command::SaveAll,
         );
         bind(KeyBinding::ctrl(KeyCode::Char('o')), Command::OpenFile);
+        bind(
+            KeyBinding::new(
+                KeyCode::Char('a'),
+                KeyModifiers::CONTROL | KeyModifiers::ALT,
+            ),
+            Command::AddToProject,
+        );
         bind(KeyBinding::ctrl(KeyCode::Char('n')), Command::NewFile);
         bind(KeyBinding::ctrl(KeyCode::Char('w')), Command::CloseFile);
         bind(KeyBinding::ctrl(KeyCode::Char('q')), Command::Quit);
