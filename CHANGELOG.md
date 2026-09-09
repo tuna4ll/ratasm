@@ -6,6 +6,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-09-09
+
+### Added
+
+- `Ctrl+Alt+A` adds the active file to the project's sources and writes the
+  project file back. Opening a second file put it in a buffer and nowhere else,
+  so it was never assembled, and the only sign was a linker error about an
+  undefined symbol. The explorer marks any open document the build does not
+  know about.
+- The output panel wraps long tool output instead of cutting it at the right
+  edge, which is where the informative half of a `nasm` error lives, and its
+  border carries the last build's error and warning counts.
+
 ## [0.1.2] - 2026-09-08
 
 ### Added
@@ -136,7 +149,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   panel-sized gap above the details, and shows the NASM example that was
   already in the database.
 
-[Unreleased]: https://github.com/tuna4ll/ratasm/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/tuna4ll/ratasm/compare/v0.1.3...HEAD
+[0.1.3]: https://github.com/tuna4ll/ratasm/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/tuna4ll/ratasm/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/tuna4ll/ratasm/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/tuna4ll/ratasm/releases/tag/v0.1.0
