@@ -2,6 +2,7 @@
 
 use ratatui::layout::Rect;
 use ratatui::text::{Line, Span};
+use ratatui::widgets::Wrap;
 use ratatui::Frame;
 
 use crate::app::page::Page;
@@ -30,7 +31,7 @@ pub fn draw_disassembly(frame: &mut Frame, app: &App, area: Rect, focused: bool)
     }
 
     let lines = disassembly_lines(app);
-    super::draw_scrolled(frame, app, Panel::Disassembly, inner, lines, false);
+    super::draw_scrolled(frame, app, Panel::Disassembly, inner, lines, None);
 }
 
 /// One line per decoded instruction.
@@ -99,7 +100,14 @@ pub fn draw_explanation(frame: &mut Frame, app: &App, area: Rect, focused: bool)
     }
 
     let lines = explanation_lines(app);
-    super::draw_scrolled(frame, app, Panel::Explain, inner, lines, true);
+    super::draw_scrolled(
+        frame,
+        app,
+        Panel::Explain,
+        inner,
+        lines,
+        Some(Wrap { trim: true }),
+    );
 }
 
 /// The explanation of whichever instruction is under discussion.
@@ -219,7 +227,7 @@ pub fn draw_call_stack(frame: &mut Frame, app: &App, area: Rect, focused: bool) 
         })
         .collect();
 
-    super::draw_scrolled(frame, app, Panel::CallStack, inner, lines, false);
+    super::draw_scrolled(frame, app, Panel::CallStack, inner, lines, None);
 }
 
 /// Draws the breakpoint list.
@@ -271,7 +279,7 @@ pub fn draw_breakpoints(frame: &mut Frame, app: &App, area: Rect, focused: bool)
         })
         .collect();
 
-    super::draw_scrolled(frame, app, Panel::Breakpoints, inner, lines, false);
+    super::draw_scrolled(frame, app, Panel::Breakpoints, inner, lines, None);
 }
 
 #[cfg(test)]

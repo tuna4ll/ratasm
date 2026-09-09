@@ -14,7 +14,7 @@ use crate::debugger::state::DebuggerState;
 
 /// Draws the build and program output.
 pub fn draw_output(frame: &mut Frame, app: &App, area: Rect, focused: bool) {
-    let block = super::panel_block(&app.theme, Panel::Output, focused);
+    let block = output_block(app, focused);
 
     if app.output.is_empty() {
         super::draw_placeholder(
@@ -33,7 +33,44 @@ pub fn draw_output(frame: &mut Frame, app: &App, area: Rect, focused: bool) {
     }
 
     let lines = output_lines(app);
-    super::draw_scrolled(frame, app, Panel::Output, inner, lines, false);
+    super::draw_scrolled(
+        frame,
+        app,
+        Panel::Output,
+        inner,
+        lines,
+        Some(Wrap { trim: false }),
+    );
+}
+
+/// The output panel's frame, carrying the last build's error count.
+fn output_block(app: &App, focused: bool) -> Block<'static> {
+    let block = super::panel_block(&app.theme, Panel::Output, focused);
+    let Some(build) = &app.build else {
+        return block;
+    };
+
+    let (errors, warnings) = build.counts();
+    if errors == 0 && warnings == 0 {
+        return block;
+    }
+
+    let theme = &app.theme;
+    let symbols = theme.symbols();
+    let mut spans = Vec::new();
+    if errors > 0 {
+        spans.push(Span::styled(
+            format!(" {} {errors} ", symbols.error),
+            theme.error(),
+        ));
+    }
+    if warnings > 0 {
+        spans.push(Span::styled(
+            format!(" {} {warnings} ", symbols.warning),
+            theme.warning(),
+        ));
+    }
+    block.title_top(Line::from(spans).right_aligned())
 }
 
 /// One line per line of tool output, coloured by what it says.
@@ -216,7 +253,7 @@ pub fn draw_explorer(frame: &mut Frame, app: &App, area: Rect, focused: bool) {
     };
 
     let lines = explorer_lines(app);
-    super::draw_scrolled(frame, app, Panel::Explorer, inner, lines, false);
+    super::draw_scrolled(frame, app, Panel::Explorer, inner, lines, None);
 }
 
 /// The open documents and the active one's symbols.

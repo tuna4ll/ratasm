@@ -139,7 +139,14 @@ pub fn draw_learn(frame: &mut Frame, app: &App, area: Rect, focused: bool) {
     );
 
     let lines = learn_lines(app);
-    super::draw_scrolled(frame, app, Panel::Learn, rows[1], lines, true);
+    super::draw_scrolled(
+        frame,
+        app,
+        Panel::Learn,
+        rows[1],
+        lines,
+        Some(Wrap { trim: true }),
+    );
 }
 
 /// The lesson or question the reader is on.

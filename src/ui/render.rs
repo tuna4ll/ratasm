@@ -183,6 +183,57 @@ mod tests {
     }
 
     #[test]
+    fn a_long_tool_line_wraps_rather_than_running_off_the_edge() {
+        let mut app = app();
+        app.focus_panel(crate::app::Panel::Output);
+        app.output = vec![format!(
+            "main.asm:12: error: {}",
+            "symbol `a_very_long_undefined_name' not defined and cannot be resolved here"
+        )];
+
+        let text = settled(&mut app, 120, 30);
+        assert!(
+            text.contains("cannot be resolved here"),
+            "the informative end of the message must survive:\n{text}"
+        );
+    }
+
+    #[test]
+    fn the_output_border_counts_the_last_build_s_diagnostics() {
+        use crate::assembler::diagnostics;
+
+        let mut app = app();
+        app.output = vec!["$ nasm".to_owned()];
+        let (error, warning) = {
+            let symbols = app.theme.symbols();
+            (symbols.error, symbols.warning)
+        };
+        let text = settled(&mut app, 120, 30);
+        assert!(
+            !text.contains(&format!("{error} ")),
+            "nothing to count before a build"
+        );
+
+        app.diagnostics = diagnostics::parse_assembler_output(
+            "main.asm:1: error: one\nmain.asm:2: error: two\nmain.asm:3: warning: three\n",
+        );
+        app.build = Some(crate::assembler::BuildOutcome {
+            success: false,
+            steps: Vec::new(),
+            diagnostics: app.diagnostics.clone(),
+            executable: None,
+            duration: std::time::Duration::ZERO,
+        });
+
+        let border = settled(&mut app, 120, 30);
+        assert!(
+            border.contains(&format!("{error} 2")),
+            "two errors should be on the border:\n{border}"
+        );
+        assert!(border.contains(&format!("{warning} 1")));
+    }
+
+    #[test]
     fn a_wide_terminal_shows_the_main_panels() {
         let mut app = app();
         app.open_page(crate::app::Page::Debug);

@@ -39,7 +39,7 @@ pub fn draw_registers(frame: &mut Frame, app: &App, area: Rect, focused: bool) {
     }
 
     let lines = register_lines(app, usize::from(inner.width));
-    super::draw_scrolled(frame, app, Panel::Registers, inner, lines, false);
+    super::draw_scrolled(frame, app, Panel::Registers, inner, lines, None);
 }
 
 /// The register rows for a panel `width` columns wide.
@@ -146,7 +146,7 @@ pub fn draw_flags(frame: &mut Frame, app: &App, area: Rect, focused: bool) {
     }
 
     let lines = flag_lines(app, usize::from(inner.width));
-    super::draw_scrolled(frame, app, Panel::Flags, inner, lines, false);
+    super::draw_scrolled(frame, app, Panel::Flags, inner, lines, None);
 }
 
 /// The flag rows and the jumps they would take, for a panel `width` wide.
@@ -227,7 +227,7 @@ pub fn draw_stack(frame: &mut Frame, app: &App, area: Rect, focused: bool) {
     }
 
     let lines = stack_lines(app);
-    super::draw_scrolled(frame, app, Panel::Stack, inner, lines, false);
+    super::draw_scrolled(frame, app, Panel::Stack, inner, lines, None);
 }
 
 /// One row per eight-byte stack slot, the width the architecture pushes.
@@ -292,7 +292,7 @@ pub fn draw_memory(frame: &mut Frame, app: &App, area: Rect, focused: bool) {
     }
 
     let lines = memory_lines(app);
-    super::draw_scrolled(frame, app, Panel::Memory, inner, lines, false);
+    super::draw_scrolled(frame, app, Panel::Memory, inner, lines, None);
 }
 
 /// The hex dump of the memory panel's block.

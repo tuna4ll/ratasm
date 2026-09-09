@@ -153,7 +153,7 @@ pub fn content_rows(app: &App, panel: Panel, width: u16) -> usize {
         Panel::Disassembly => app.disassembly.len(),
         Panel::CallStack => app.frames.len(),
         Panel::Breakpoints => app.breakpoints.all().len(),
-        Panel::Output => app.output.len(),
+        Panel::Output => wrapped_rows(&chrome::output_lines(app), width),
         Panel::Explorer => chrome::explorer_lines(app).len(),
         Panel::Explain => wrapped_rows(&code::explanation_lines(app), width),
         Panel::Learn => wrapped_rows(&learn::learn_lines(app), width.saturating_sub(0)),
@@ -168,7 +168,7 @@ pub fn draw_scrolled(
     panel: Panel,
     inner: Rect,
     lines: Vec<Line<'_>>,
-    wrap: bool,
+    wrap: Option<Wrap>,
 ) {
     let extent = app.scroll.extent(panel);
     let text_area = if extent.overflows() && inner.width > 1 {
@@ -180,10 +180,9 @@ pub fn draw_scrolled(
 
     let offset = u16::try_from(extent.offset).unwrap_or(u16::MAX);
     let paragraph = Paragraph::new(lines).scroll((offset, 0));
-    let paragraph = if wrap {
-        paragraph.wrap(Wrap { trim: true })
-    } else {
-        paragraph
+    let paragraph = match wrap {
+        Some(wrap) => paragraph.wrap(wrap),
+        None => paragraph,
     };
     frame.render_widget(paragraph, text_area);
 }
