@@ -30,14 +30,45 @@ pub fn draw_disassembly(frame: &mut Frame, app: &App, area: Rect, focused: bool)
         return;
     }
 
-    let lines = disassembly_lines(app);
+    let lines = disassembly_lines(app, usize::from(inner.width));
     super::draw_scrolled(frame, app, Panel::Disassembly, inner, lines, None);
 }
 
-/// One line per decoded instruction.
-pub fn disassembly_lines<'a>(app: &App) -> Vec<Line<'a>> {
+/// Columns kept for the mnemonic and its operands, whatever else is dropped.
+const INSTRUCTION_WIDTH: usize = 20;
+
+/// How wide the address and byte columns should be for this listing.
+fn column_widths(app: &App, width: usize) -> (usize, usize) {
+    let widest_address = app
+        .disassembly
+        .iter()
+        .map(|line| line.instruction.address)
+        .max()
+        .unwrap_or(0);
+    let digits = (16 - widest_address.leading_zeros() as usize / 4).max(8);
+    let address = digits.min(16);
+
+    let bytes = app
+        .disassembly
+        .iter()
+        .map(|line| line.instruction.bytes_text().chars().count())
+        .max()
+        .unwrap_or(0)
+        .min(24);
+
+    let fixed = 2 + address + 2;
+    if fixed + bytes + 2 + INSTRUCTION_WIDTH > width {
+        (address, 0)
+    } else {
+        (address, bytes)
+    }
+}
+
+/// One line per decoded instruction, for a panel `width` columns wide.
+pub fn disassembly_lines<'a>(app: &App, width: usize) -> Vec<Line<'a>> {
     let theme = &app.theme;
     let symbols = theme.symbols();
+    let (address_width, byte_width) = column_widths(app, width);
 
     app.disassembly
         .iter()
@@ -64,10 +95,18 @@ pub fn disassembly_lines<'a>(app: &App) -> Vec<Line<'a>> {
 
             let mut spans = vec![
                 marker,
-                Span::styled(format!("{:016x}  ", instruction.address), theme.address()),
-                Span::styled(format!("{:<24}", instruction.bytes_text()), theme.bytes()),
-                Span::styled(instruction.text(), text_style),
+                Span::styled(
+                    format!("{:0address_width$x}  ", instruction.address),
+                    theme.address(),
+                ),
             ];
+            if byte_width > 0 {
+                spans.push(Span::styled(
+                    format!("{:<byte_width$}  ", instruction.bytes_text()),
+                    theme.bytes(),
+                ));
+            }
+            spans.push(Span::styled(instruction.text(), text_style));
 
             if let Some(target) = instruction.branch_target {
                 spans.push(Span::styled(
@@ -291,6 +330,43 @@ mod tests {
     fn app() -> App {
         let project = Project::for_file(std::path::Path::new("/tmp/ratasm-test/main.asm"));
         App::new(project, Settings::default()).expect("databases load")
+    }
+
+    fn decoded(address: u64, bytes: Vec<u8>) -> crate::disassembler::DisassemblyLine {
+        let mut decoded = crate::disassembler::decode(&bytes, address, Default::default());
+        crate::disassembler::DisassemblyLine::bare(decoded.pop().expect("one instruction"))
+    }
+
+    #[test]
+    fn a_low_address_does_not_pay_for_sixteen_hex_digits() {
+        let mut app = app();
+        app.disassembly = vec![decoded(0x40_00b0, vec![0x90])];
+
+        let (address, _) = super::column_widths(&app, 120);
+        assert_eq!(address, 8, "a user program sits well below 2^32");
+
+        app.disassembly = vec![decoded(0x7fff_0000_1000, vec![0x90])];
+        let (address, _) = super::column_widths(&app, 120);
+        assert!(address > 8, "a high address still gets the digits it needs");
+    }
+
+    #[test]
+    fn the_byte_column_fits_the_listing_and_goes_when_there_is_no_room() {
+        let mut app = app();
+        app.disassembly = vec![decoded(0x40_00b0, vec![0x90])];
+
+        let (_, bytes) = super::column_widths(&app, 120);
+        assert_eq!(bytes, 2, "one byte needs two columns, not twenty-four");
+
+        let (_, bytes) = super::column_widths(&app, 24);
+        assert_eq!(bytes, 0, "the mnemonic outranks the machine code");
+    }
+
+    #[test]
+    fn an_empty_listing_still_produces_usable_widths() {
+        let app = app();
+        let (address, bytes) = super::column_widths(&app, 120);
+        assert_eq!((address, bytes), (8, 0));
     }
 
     #[test]
