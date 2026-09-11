@@ -40,6 +40,8 @@ pub fn draw(frame: &mut Frame, app: &App, area: Rect, focused: bool) {
         _ => false,
     };
 
+    let selection = document.selection();
+
     let mut lines: Vec<Line> = Vec::with_capacity(height);
     for offset in 0..height {
         let index = first + offset;
@@ -91,7 +93,11 @@ pub fn draw(frame: &mut Frame, app: &App, area: Rect, focused: bool) {
         }
 
         let text = buffer.line_or_empty(index);
-        spans.extend(highlight(text, theme.palette()));
+        let mut text_spans = highlight(text, theme.palette());
+        if let Some(range) = selected_columns(selection, index, text.chars().count()) {
+            text_spans = mark_selection(text_spans, range, theme.text_selection());
+        }
+        spans.extend(text_spans);
 
         let mut line = Line::from(spans);
         if index == cursor.line && app.settings.editor.highlight_current_line {
@@ -116,6 +122,77 @@ pub fn draw(frame: &mut Frame, app: &App, area: Rect, focused: bool) {
             frame.set_cursor_position((x, y));
         }
     }
+}
+
+/// The columns of `line` covered by `selection`, if any.
+fn selected_columns(
+    selection: Option<crate::editor::Range>,
+    line: usize,
+    length: usize,
+) -> Option<(usize, usize)> {
+    let selection = selection?;
+    if line < selection.start.line || line > selection.end.line {
+        return None;
+    }
+
+    let start = if line == selection.start.line {
+        selection.start.column
+    } else {
+        0
+    };
+    let end = if line == selection.end.line {
+        selection.end.column
+    } else {
+        length + 1
+    };
+
+    (start < end).then_some((start.min(length), end.min(length + 1)))
+}
+
+/// Repaints the spans covering `range` with the selection style.
+fn mark_selection<'a>(spans: Vec<Span<'a>>, range: (usize, usize), style: Style) -> Vec<Span<'a>> {
+    let (from, to) = range;
+    let mut out: Vec<Span<'a>> = Vec::with_capacity(spans.len() + 2);
+    let mut column = 0;
+
+    for span in spans {
+        let length = span.content.chars().count();
+        let (start, end) = (column, column + length);
+        column = end;
+
+        if end <= from || start >= to {
+            out.push(span);
+            continue;
+        }
+
+        let take = |span: &Span<'a>, first: usize, last: usize| -> Span<'a> {
+            let text: String = span
+                .content
+                .chars()
+                .skip(first)
+                .take(last.saturating_sub(first))
+                .collect();
+            Span::styled(text, span.style)
+        };
+
+        if start < from {
+            out.push(take(&span, 0, from - start));
+        }
+        let inner_start = from.saturating_sub(start);
+        let inner_end = (to - start).min(length);
+        let mut selected = take(&span, inner_start, inner_end);
+        selected.style = selected.style.patch(style);
+        out.push(selected);
+        if end > to {
+            out.push(take(&span, to - start, length));
+        }
+    }
+
+    if to > column {
+        out.push(Span::styled(" ".repeat(to - column.max(from)), style));
+    }
+
+    out
 }
 
 /// Converts one line of NASM into styled spans.

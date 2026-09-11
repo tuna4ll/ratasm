@@ -139,12 +139,20 @@ terminal normally would; most terminals reserve that for exactly this.
 | <kbd>Ctrl</kbd>+<kbd>A</kbd> | Select all |
 | <kbd>Home</kbd> | First non-blank character, then column zero |
 | <kbd>Ctrl</kbd>+<kbd>←</kbd> / <kbd>→</kbd> | Word left / right |
+| <kbd>Ctrl</kbd>+<kbd>Backspace</kbd> | Delete the word before the cursor |
+| <kbd>Ctrl</kbd>+<kbd>Delete</kbd> | Delete the word after the cursor |
 
 Selection works the way it does anywhere else: <kbd>Shift</kbd> with any
 movement key extends it, <kbd>Ctrl</kbd>+<kbd>A</kbd> takes the whole buffer,
 and typing replaces what is selected. <kbd>Ctrl</kbd>+<kbd>C</kbd>,
 <kbd>Ctrl</kbd>+<kbd>X</kbd> and <kbd>Ctrl</kbd>+<kbd>V</kbd> copy, cut and
 paste; with nothing selected, copy and cut take the whole line.
+
+<kbd>Ctrl</kbd>+<kbd>Backspace</kbd> takes the whitespace before the cursor and
+then one run: letters or punctuation, not both, so repeated presses are
+predictable. In a line's indentation it clears to column zero in one press, and
+at column zero it joins with the line above. <kbd>Ctrl</kbd>+<kbd>Delete</kbd>
+does the same forwards.
 
 Typing `(`, `[`, `{`, `"`, `'` or `` ` `` inserts its partner and leaves the
 cursor between them, unless the next character is part of a word. Typing the

@@ -471,6 +471,72 @@ impl Document {
         }
     }
 
+    /// Deletes the word before the cursor, or the indentation it sits in.
+    pub fn delete_word_before(&mut self) {
+        if self.delete_selection() {
+            return;
+        }
+        if self.cursor.column == 0 {
+            self.backspace();
+            return;
+        }
+
+        let line = self.buffer.line_or_empty(self.cursor.line);
+        let before: Vec<char> = line.chars().take(self.cursor.column).collect();
+
+        let mut column = before.len();
+        while column > 0 && before[column - 1].is_whitespace() {
+            column -= 1;
+        }
+        if column > 0 {
+            let word = Self::is_word_char(before[column - 1]);
+            while column > 0
+                && !before[column - 1].is_whitespace()
+                && Self::is_word_char(before[column - 1]) == word
+            {
+                column -= 1;
+            }
+        }
+
+        let target = Position::new(self.cursor.line, column);
+        if target != self.cursor {
+            self.apply(Range::new(target, self.cursor), "");
+        }
+    }
+
+    /// Deletes the word after the cursor, mirroring [`Self::delete_word_before`].
+    pub fn delete_word_after(&mut self) {
+        if self.delete_selection() {
+            return;
+        }
+
+        let line = self.buffer.line_or_empty(self.cursor.line);
+        let after: Vec<char> = line.chars().skip(self.cursor.column).collect();
+        if after.is_empty() {
+            self.delete_forward();
+            return;
+        }
+
+        let mut taken = 0;
+        while taken < after.len() && after[taken].is_whitespace() {
+            taken += 1;
+        }
+        if taken < after.len() {
+            let word = Self::is_word_char(after[taken]);
+            while taken < after.len()
+                && !after[taken].is_whitespace()
+                && Self::is_word_char(after[taken]) == word
+            {
+                taken += 1;
+            }
+        }
+
+        let target = Position::new(self.cursor.line, self.cursor.column + taken);
+        if target != self.cursor {
+            self.apply(Range::new(self.cursor, target), "");
+        }
+    }
+
     /// Deletes the character after the cursor, or the selection.
     pub fn delete_forward(&mut self) {
         if self.delete_selection() {
@@ -647,6 +713,68 @@ mod tests {
         for ch in text.chars() {
             document.type_char(ch);
         }
+    }
+
+    #[test]
+    fn ctrl_backspace_in_indentation_clears_it_to_the_margin() {
+        let mut document = Document::from_text("        mov rax, 1\n");
+        document.move_cursor(Movement::To(Position::new(0, 8)), SelectionMode::Collapse);
+
+        document.delete_word_before();
+        assert_eq!(document.buffer().to_text(), "mov rax, 1\n");
+        assert_eq!(document.cursor().column, 0);
+    }
+
+    #[test]
+    fn ctrl_backspace_takes_a_word_and_the_space_before_it() {
+        let mut document = Document::from_text("    mov rax, message\n");
+        document.move_cursor(Movement::LineEnd, SelectionMode::Collapse);
+
+        document.delete_word_before();
+        assert_eq!(document.buffer().to_text(), "    mov rax, \n");
+
+        document.delete_word_before();
+        assert_eq!(
+            document.buffer().to_text(),
+            "    mov rax\n",
+            "space and word"
+        );
+    }
+
+    #[test]
+    fn ctrl_backspace_at_the_margin_joins_the_line_above() {
+        let mut document = Document::from_text("one\ntwo\n");
+        document.move_cursor(Movement::To(Position::new(1, 0)), SelectionMode::Collapse);
+
+        document.delete_word_before();
+        assert_eq!(document.buffer().to_text(), "onetwo\n");
+    }
+
+    #[test]
+    fn ctrl_backspace_removes_a_selection_rather_than_a_word() {
+        let mut document = Document::from_text("mov rax, 1\n");
+        document.select_range(Range::new(Position::new(0, 0), Position::new(0, 4)));
+
+        document.delete_word_before();
+        assert_eq!(document.buffer().to_text(), "rax, 1\n");
+    }
+
+    #[test]
+    fn ctrl_delete_takes_the_word_after_the_cursor() {
+        let mut document = Document::from_text("mov rax, 1\n");
+        document.move_cursor(Movement::To(Position::new(0, 4)), SelectionMode::Collapse);
+
+        document.delete_word_after();
+        assert_eq!(document.buffer().to_text(), "mov , 1\n");
+    }
+
+    #[test]
+    fn ctrl_delete_in_trailing_whitespace_clears_to_the_line_end() {
+        let mut document = Document::from_text("mov rax    \nnext\n");
+        document.move_cursor(Movement::To(Position::new(0, 7)), SelectionMode::Collapse);
+
+        document.delete_word_after();
+        assert_eq!(document.buffer().to_text(), "mov rax\nnext\n");
     }
 
     #[test]

@@ -344,6 +344,72 @@ mod tests {
         );
     }
 
+    /// The background colours on the row `line` (zero-based) of the editor.
+    fn editor_row_backgrounds(app: &App, line: u16) -> Vec<ratatui::style::Color> {
+        let backend = TestBackend::new(120, 30);
+        let mut terminal = Terminal::new(backend).expect("terminal");
+        terminal.draw(|frame| draw(frame, app)).expect("draw");
+
+        let buffer = terminal.backend().buffer();
+        (0..120)
+            .map(|x| buffer.cell((x, line + 2)).expect("cell").bg)
+            .collect()
+    }
+
+    #[test]
+    fn a_selection_is_visible_on_screen() {
+        let mut app = app();
+        app.workspace.active_mut().insert("mov rax, 1\n");
+        app.workspace.active_mut().move_cursor(
+            crate::editor::Movement::To(crate::editor::Position::new(0, 0)),
+            crate::editor::SelectionMode::Collapse,
+        );
+
+        let plain = editor_row_backgrounds(&app, 0);
+
+        app.workspace
+            .active_mut()
+            .select_range(crate::editor::Range::new(
+                crate::editor::Position::new(0, 4),
+                crate::editor::Position::new(0, 7),
+            ));
+        let selected = editor_row_backgrounds(&app, 0);
+
+        let changed = plain
+            .iter()
+            .zip(&selected)
+            .filter(|(before, after)| before != after)
+            .count();
+        assert_eq!(changed, 3, "exactly the three selected cells should change");
+    }
+
+    #[test]
+    fn a_selection_across_lines_covers_both() {
+        let mut app = app();
+        app.workspace
+            .active_mut()
+            .insert("mov rax, 1\nmov rdi, 0\n");
+        app.workspace
+            .active_mut()
+            .select_range(crate::editor::Range::new(
+                crate::editor::Position::new(0, 8),
+                crate::editor::Position::new(1, 3),
+            ));
+
+        let first = editor_row_backgrounds(&app, 0);
+        let second = editor_row_backgrounds(&app, 1);
+        let plain = first[60];
+
+        assert!(
+            first.iter().filter(|bg| **bg != plain).count() >= 2,
+            "the tail of the first line is selected"
+        );
+        assert!(
+            second.iter().filter(|bg| **bg != plain).count() >= 3,
+            "the head of the second line is selected"
+        );
+    }
+
     #[test]
     fn a_wide_terminal_shows_the_main_panels() {
         let mut app = app();

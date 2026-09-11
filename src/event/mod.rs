@@ -347,7 +347,9 @@ fn handle_editor(app: &mut App, key: KeyEvent) -> Effect {
         KeyCode::Char(ch) if auto_pairs => document.type_char(ch),
         KeyCode::Char(ch) => document.insert_char(ch),
         KeyCode::Enter => document.insert_newline(),
+        KeyCode::Backspace if word_wise => document.delete_word_before(),
         KeyCode::Backspace => document.backspace(),
+        KeyCode::Delete if word_wise => document.delete_word_after(),
         KeyCode::Delete => document.delete_forward(),
         KeyCode::Tab => document.indent(),
         KeyCode::BackTab => document.dedent(),
@@ -568,6 +570,10 @@ mod tests {
         KeyEvent::new(code, KeyModifiers::NONE)
     }
 
+    fn ctrl_key(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::CONTROL)
+    }
+
     fn ctrl(ch: char) -> KeyEvent {
         KeyEvent::new(KeyCode::Char(ch), KeyModifiers::CONTROL)
     }
@@ -623,6 +629,28 @@ mod tests {
 
         handle_key(&mut app, ctrl('v'));
         assert_eq!(app.workspace.active().buffer().to_text(), "mov rax, 1");
+    }
+
+    #[test]
+    fn ctrl_backspace_clears_indentation_in_one_press() {
+        let mut app = app();
+        type_text(&mut app, "        mov");
+        for _ in 0..3 {
+            handle_key(&mut app, press(KeyCode::Backspace));
+        }
+
+        handle_key(&mut app, ctrl_key(KeyCode::Backspace));
+        assert_eq!(app.workspace.active().buffer().to_text(), "");
+    }
+
+    #[test]
+    fn ctrl_delete_takes_the_word_ahead() {
+        let mut app = app();
+        type_text(&mut app, "mov rax");
+        handle_key(&mut app, press(KeyCode::Home));
+
+        handle_key(&mut app, ctrl_key(KeyCode::Delete));
+        assert_eq!(app.workspace.active().buffer().to_text(), " rax");
     }
 
     #[test]
