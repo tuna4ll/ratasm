@@ -256,9 +256,10 @@ pub fn draw_explorer(frame: &mut Frame, app: &App, area: Rect, focused: bool) {
     super::draw_scrolled(frame, app, Panel::Explorer, inner, lines, None);
 }
 
-/// The open documents and the active one's symbols.
+/// The project's files and the active document's symbols.
 pub fn explorer_lines<'a>(app: &App) -> Vec<Line<'a>> {
     let theme = &app.theme;
+    let symbols = theme.symbols();
     let mut lines: Vec<Line> = Vec::new();
 
     lines.push(Line::from(Span::styled(
@@ -267,36 +268,54 @@ pub fn explorer_lines<'a>(app: &App) -> Vec<Line<'a>> {
     )));
     lines.push(Line::from(""));
 
-    for (index, document) in app.workspace.documents().iter().enumerate() {
-        let active = index == app.workspace.active_index();
-        let marker = if active {
-            theme.symbols().selection
-        } else {
-            " "
-        };
-        let modified = if document.is_modified() {
-            theme.symbols().modified
-        } else {
-            " "
+    for (index, path) in app.project_files.iter().enumerate() {
+        let open = app.index_of_document(path);
+        let document = open.and_then(|index| app.workspace.documents().get(index));
+        let selected = index == app.explorer_selected;
+
+        let marker = if selected { symbols.selection } else { " " };
+        let state = match document {
+            Some(document) if document.is_modified() => symbols.modified,
+            Some(_) => symbols.flag_set,
+            None => " ",
         };
 
-        let mut spans = vec![Span::styled(
-            format!("{marker} {modified} {}", document.display_name()),
-            if active { theme.base() } else { theme.dim() },
-        )];
+        let name = app
+            .project
+            .relative(path)
+            .unwrap_or_else(|| path.to_path_buf())
+            .display()
+            .to_string();
 
-        let in_build = document.path().is_some_and(|path| app.project.builds(path));
-        if !in_build {
+        let style = if selected {
+            theme.selection()
+        } else if document.is_some() {
+            theme.base()
+        } else {
+            theme.dim()
+        };
+
+        let mut spans = vec![Span::styled(format!("{marker}{state} {name}"), style)];
+        if !app.project.builds(path) {
             spans.push(Span::styled("  not built", theme.warning()));
         }
         lines.push(Line::from(spans));
     }
 
-    let symbols = crate::editor::symbols::extract(app.workspace.active().buffer());
-    if !symbols.is_empty() {
+    for document in app.workspace.documents() {
+        if document.path().is_none() {
+            lines.push(Line::from(Span::styled(
+                format!("  {} {}", symbols.modified, document.display_name()),
+                theme.dim(),
+            )));
+        }
+    }
+
+    let found = crate::editor::symbols::extract(app.workspace.active().buffer());
+    if !found.is_empty() {
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled("Symbols", theme.dim())));
-        for symbol in &symbols {
+        for symbol in &found {
             lines.push(Line::from(vec![
                 Span::styled(format!("  {:<14}", symbol.name), theme.base()),
                 Span::styled(format!("{:>4}  ", symbol.position.line + 1), theme.dim()),
@@ -306,6 +325,11 @@ pub fn explorer_lines<'a>(app: &App) -> Vec<Line<'a>> {
     }
 
     lines
+}
+
+/// The line the explorer's selected file sits on.
+pub fn explorer_selected_row(app: &App) -> usize {
+    2 + app.explorer_selected
 }
 
 /// Draws the bar listing open documents.

@@ -58,6 +58,11 @@ pub fn sync_scroll(app: &mut App, width: u16, height: u16) {
         let inner = inner_area(area);
         let rows = widgets::content_rows(app, panel, inner.0);
         app.scroll.fit(panel, rows, usize::from(inner.1));
+
+        if panel == Panel::Explorer {
+            let row = widgets::chrome::explorer_selected_row(app);
+            app.scroll.reveal(Panel::Explorer, row);
+        }
     }
 
     let Some(area) = layout.area_of(Panel::Editor) else {

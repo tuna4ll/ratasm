@@ -165,6 +165,10 @@ pub struct App {
     pub focus: Panel,
     /// How far each panel is scrolled.
     pub scroll: ScrollState,
+    /// The project's files, as the explorer last found them.
+    pub project_files: Vec<PathBuf>,
+    /// Which row of the explorer's file list is selected.
+    pub explorer_selected: usize,
     /// What the interface is doing.
     pub mode: Mode,
     /// The status bar message.
@@ -252,6 +256,8 @@ impl App {
             page: Page::default(),
             focus: Page::default().default_panel(),
             scroll: ScrollState::default(),
+            project_files: Vec::new(),
+            explorer_selected: 0,
             mode: Mode::default(),
             status: Status::default(),
 
@@ -952,6 +958,51 @@ impl App {
         );
         self.focus_panel(Panel::Editor);
         self.status = Status::error(message);
+    }
+
+    /// Re-reads the project's files for the explorer.
+    pub fn refresh_project_files(&mut self) {
+        let mut files = crate::project::source_files_under(
+            self.project.root(),
+            &self.project.output_directory(),
+            3,
+        );
+
+        for path in self.project.source_paths() {
+            if !files.contains(&path) {
+                files.push(path);
+            }
+        }
+        for document in self.workspace.documents() {
+            if let Some(path) = document.path() {
+                if !files.iter().any(|known| known == path) {
+                    files.push(path.to_path_buf());
+                }
+            }
+        }
+
+        files.sort();
+        files.dedup();
+        self.explorer_selected = self.explorer_selected.min(files.len().saturating_sub(1));
+        self.project_files = files;
+    }
+
+    /// Moves the explorer's selection by `rows`, keeping it in the list.
+    pub fn move_explorer_selection(&mut self, rows: isize) {
+        if self.project_files.is_empty() {
+            return;
+        }
+        let last = self.project_files.len() - 1;
+        let target = self.explorer_selected as isize + rows;
+        self.explorer_selected = target.clamp(0, last as isize) as usize;
+    }
+
+    /// Opens the file the explorer has selected.
+    pub fn open_selected_file(&mut self) -> Effect {
+        match self.project_files.get(self.explorer_selected) {
+            Some(path) => Effect::OpenFile(path.clone()),
+            None => Effect::None,
+        }
     }
 
     /// Scrolls the focused panel, if it is one that scrolls this way.
@@ -1833,6 +1884,59 @@ mod tests {
         assert_eq!(app.workspace.active().path(), Some(other.as_path()));
         assert_eq!(app.workspace.active().cursor().line, 1);
         assert!(app.status.text.contains("util.asm"), "{}", app.status.text);
+    }
+
+    #[test]
+    fn the_explorer_finds_the_project_s_files_on_disk() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let project = Project::create(dir.path(), "listed").expect("create");
+        std::fs::write(dir.path().join("src/util.asm"), "ret\n").expect("write");
+        std::fs::create_dir_all(dir.path().join("build")).expect("mkdir");
+        std::fs::write(dir.path().join("build/stray.asm"), "ret\n").expect("write");
+
+        let mut app = App::new(project, Settings::default()).expect("databases load");
+        app.refresh_project_files();
+
+        let names: Vec<String> = app
+            .project_files
+            .iter()
+            .filter_map(|path| path.file_name())
+            .map(|name| name.to_string_lossy().into_owned())
+            .collect();
+
+        assert!(names.contains(&"main.asm".to_owned()), "{names:?}");
+        assert!(names.contains(&"util.asm".to_owned()), "not yet a source");
+        assert!(
+            !names.contains(&"stray.asm".to_owned()),
+            "the build output is not source: {names:?}"
+        );
+    }
+
+    #[test]
+    fn the_explorer_selection_stays_inside_the_list() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let project = Project::create(dir.path(), "select").expect("create");
+        std::fs::write(dir.path().join("src/util.asm"), "ret\n").expect("write");
+
+        let mut app = App::new(project, Settings::default()).expect("databases load");
+        app.refresh_project_files();
+        let count = app.project_files.len();
+        assert!(count >= 2);
+
+        app.move_explorer_selection(-5);
+        assert_eq!(app.explorer_selected, 0);
+        app.move_explorer_selection(100);
+        assert_eq!(app.explorer_selected, count - 1);
+
+        assert!(matches!(app.open_selected_file(), Effect::OpenFile(_)));
+    }
+
+    #[test]
+    fn an_empty_file_list_has_nothing_to_open() {
+        let mut app = app();
+        app.project_files.clear();
+        app.move_explorer_selection(1);
+        assert_eq!(app.open_selected_file(), Effect::None);
     }
 
     #[test]

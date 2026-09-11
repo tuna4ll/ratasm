@@ -145,7 +145,10 @@ async fn perform(
         }
 
         Effect::SaveFile(path) => match app.workspace.save_active_as(&path) {
-            Ok(path) => app.status = Status::success(format!("Saved {}", path.display())),
+            Ok(path) => {
+                app.status = Status::success(format!("Saved {}", path.display()));
+                app.refresh_project_files();
+            }
             Err(error) => app.status = Status::error(error.to_string()),
         },
 
@@ -155,6 +158,7 @@ async fn perform(
                     "Added to {}; it is assembled with the project now",
                     crate::editor::workspace::display_path(&path)
                 ));
+                app.refresh_project_files();
             }
             Err(error) => app.status = Status::error(error.to_string()),
         },
@@ -168,8 +172,12 @@ async fn perform(
 
         Effect::OpenFile(path) => match app.workspace.open(&path) {
             Ok(_) => {
+                app.workspace
+                    .active_mut()
+                    .set_indent_width(app.settings.indent_width());
                 app.status = Status::success(format!("Opened {}", path.display()));
                 app.focus = super::Panel::Editor;
+                app.refresh_project_files();
             }
             Err(error) => app.status = Status::error(error.to_string()),
         },

@@ -44,7 +44,29 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Effect {
         Panel::Breakpoints => handle_breakpoints(app, key),
         Panel::Scratchpad => handle_scratchpad(app, key),
         Panel::Learn => handle_learn(app, key),
+        Panel::Explorer => handle_explorer(app, key),
         panel => handle_scrollable(app, panel, key),
+    }
+}
+
+/// Moves the explorer's selection, or opens the file it is on.
+fn handle_explorer(app: &mut App, key: KeyEvent) -> Effect {
+    match key.code {
+        KeyCode::Up => {
+            app.move_explorer_selection(-1);
+            Effect::None
+        }
+        KeyCode::Down => {
+            app.move_explorer_selection(1);
+            Effect::None
+        }
+        KeyCode::Enter => app.open_selected_file(),
+        KeyCode::Char('r') => {
+            app.refresh_project_files();
+            app.status = Status::info("File list refreshed");
+            Effect::None
+        }
+        _ => handle_scrollable(app, Panel::Explorer, key),
     }
 }
 
@@ -107,16 +129,39 @@ pub fn handle_mouse(app: &mut App, mouse: MouseEvent, width: u16, height: u16) -
                 return Effect::None;
             };
             app.focus_panel(panel);
-            if panel == Panel::Editor {
-                if let Some(area) = layout.area_of(Panel::Editor) {
-                    place_cursor(app, area, column, row);
+            match panel {
+                Panel::Editor => {
+                    if let Some(area) = layout.area_of(Panel::Editor) {
+                        place_cursor(app, area, column, row);
+                    }
+                    Effect::None
                 }
+                Panel::Explorer => layout
+                    .area_of(Panel::Explorer)
+                    .map_or(Effect::None, |area| select_file(app, area, row)),
+                _ => Effect::None,
             }
-            Effect::None
         }
 
         _ => Effect::None,
     }
+}
+
+/// Selects and opens the explorer file the pointer landed on.
+fn select_file(app: &mut App, area: ratatui::layout::Rect, row: u16) -> Effect {
+    let first = area.y + 1;
+    if row < first {
+        return Effect::None;
+    }
+    let line = app.scroll.offset(Panel::Explorer) + usize::from(row - first);
+    let Some(index) = line.checked_sub(2) else {
+        return Effect::None;
+    };
+    if index >= app.project_files.len() {
+        return Effect::None;
+    }
+    app.explorer_selected = index;
+    app.open_selected_file()
 }
 
 /// Scrolls the editor or scratchpad, which move a cursor rather than a view.

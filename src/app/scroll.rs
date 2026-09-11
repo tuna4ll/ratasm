@@ -112,6 +112,21 @@ impl ScrollState {
         self.scroll_by(panel, if forward { rows } else { -rows });
     }
 
+    /// Scrolls the least amount that brings `row` into view.
+    pub fn reveal(&mut self, panel: Panel, row: usize) {
+        let entry = self.entry(panel);
+        if entry.viewport == 0 {
+            return;
+        }
+        if row < entry.offset {
+            entry.offset = row;
+        } else if row >= entry.offset + entry.viewport {
+            entry.offset = row + 1 - entry.viewport;
+        }
+        entry.offset = entry.offset.min(entry.max_offset());
+        entry.following = Self::follows_the_end(panel) && entry.offset == entry.max_offset();
+    }
+
     /// Jumps to the first row.
     pub fn to_start(&mut self, panel: Panel) {
         let entry = self.entry(panel);
@@ -176,6 +191,19 @@ mod tests {
         assert_eq!(scroll.offset(Panel::Disassembly), 60);
         scroll.fit(Panel::Disassembly, 12, 40);
         assert_eq!(scroll.offset(Panel::Disassembly), 0);
+    }
+
+    #[test]
+    fn revealing_a_row_moves_the_least_it_can() {
+        let mut scroll = fitted(Panel::Explorer, 100, 10);
+        scroll.reveal(Panel::Explorer, 5);
+        assert_eq!(scroll.offset(Panel::Explorer), 0, "already in view");
+
+        scroll.reveal(Panel::Explorer, 12);
+        assert_eq!(scroll.offset(Panel::Explorer), 3);
+
+        scroll.reveal(Panel::Explorer, 1);
+        assert_eq!(scroll.offset(Panel::Explorer), 1);
     }
 
     #[test]

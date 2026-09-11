@@ -277,6 +277,7 @@ async fn open_interface(paths: &[PathBuf]) -> Result<ExitCode> {
         app.workspace.active_mut().set_indent_width(indent);
     }
     app.workspace.set_active(0);
+    app.refresh_project_files();
 
     let mut guard = ratasm::ui::TerminalGuard::new()
         .context("cannot set up the terminal; is this running in a real terminal?")?;

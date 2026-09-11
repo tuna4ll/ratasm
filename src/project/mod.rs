@@ -361,6 +361,38 @@ fn write_new(path: &Path, contents: &str) -> Result<(), ProjectError> {
     })
 }
 
+/// Assembly sources found under `root`, for the file list.
+pub fn source_files_under(root: &Path, skip: &Path, depth: usize) -> Vec<PathBuf> {
+    fn walk(directory: &Path, skip: &Path, depth: usize, found: &mut Vec<PathBuf>) {
+        let Ok(entries) = std::fs::read_dir(directory) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if name.starts_with('.') || path == skip {
+                continue;
+            }
+            if path.is_dir() {
+                if depth > 0 {
+                    walk(&path, skip, depth - 1, found);
+                }
+            } else if matches!(
+                path.extension().and_then(|e| e.to_str()),
+                Some("asm" | "inc" | "s" | "nasm")
+            ) {
+                found.push(path);
+            }
+        }
+    }
+
+    let mut found = Vec::new();
+    walk(root, skip, depth, &mut found);
+    found.sort();
+    found
+}
+
 /// Makes `path` absolute against the current directory.
 fn absolute(path: &Path) -> PathBuf {
     if path.is_absolute() {

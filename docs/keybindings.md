@@ -100,6 +100,19 @@ than fits.
 The output panel keeps showing its newest line as a build writes to it. Scroll
 up and it stays where you put it; <kbd>End</kbd> makes it follow again.
 
+### The explorer
+
+| Key | Action |
+| --- | --- |
+| <kbd>↑</kbd> / <kbd>↓</kbd> | Move between the project's files |
+| <kbd>Enter</kbd> | Open the selected file |
+| <kbd>R</kbd> | Re-read the file list from disk |
+
+The list is the project's sources plus any other assembly file under the root,
+so a file that exists but is not in the build is visible rather than something
+you have to remember. Files the build does not know about are marked; add one
+with <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>A</kbd>.
+
 ### The mouse
 
 | Action | Result |
@@ -109,6 +122,7 @@ up and it stays where you put it; <kbd>End</kbd> makes it follow again.
 | Click a page name | Opens that page |
 | Click a file name | Switches to that buffer |
 | Click a tab | Focuses that panel |
+| Click a file in the explorer | Opens it |
 
 Mouse reporting means the terminal's own text selection is off while ratasm is
 running. Hold <kbd>Shift</kbd> while dragging to select and copy the way the
