@@ -128,7 +128,7 @@ with <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>A</kbd>.
 
 Mouse reporting means the terminal's own text selection is off while ratasm is
 running. Hold <kbd>Shift</kbd> while dragging to select and copy the way the
-terminal normally would — most terminals reserve that for exactly this.
+terminal normally would; most terminals reserve that for exactly this.
 
 ### Editing
 
