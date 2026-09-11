@@ -294,6 +294,57 @@ mod tests {
     }
 
     #[test]
+    fn the_symbol_list_shows_what_the_panel_is_wide_enough_for() {
+        let mut app = app();
+        app.workspace
+            .active_mut()
+            .insert("section .text\n_start:\n    ret\n");
+
+        let roomy = settled(&mut app, 160, 48);
+        assert!(roomy.contains("_start"), "the name always shows");
+        assert!(roomy.contains("label"), "and its kind when there is room");
+
+        let cramped = settled(&mut app, 120, 30);
+        assert!(cramped.contains("_start"), "{cramped}");
+    }
+
+    #[test]
+    fn the_registers_separate_what_the_program_set_from_what_the_cpu_did() {
+        let mut app = app();
+        app.open_page(crate::app::Page::Debug);
+        app.registers.update(
+            [
+                ("rax".to_owned(), 1u64),
+                ("rip".to_owned(), 0x40_00b0),
+                ("rflags".to_owned(), 0x202),
+            ]
+            .into_iter()
+            .collect(),
+        );
+
+        let lines = crate::ui::widgets::cpu::register_lines(&app, 60);
+        let text: Vec<String> = lines
+            .iter()
+            .map(|line| {
+                line.spans
+                    .iter()
+                    .map(|span| span.content.as_ref())
+                    .collect::<String>()
+            })
+            .collect();
+
+        let rip = text
+            .iter()
+            .position(|line| line.contains("RIP"))
+            .expect("RIP is listed");
+        assert!(rip > 0, "RIP should not be the first row");
+        assert!(
+            text[rip - 1].trim().is_empty(),
+            "a blank row should divide the groups: {text:?}"
+        );
+    }
+
+    #[test]
     fn a_wide_terminal_shows_the_main_panels() {
         let mut app = app();
         app.open_page(crate::app::Page::Debug);

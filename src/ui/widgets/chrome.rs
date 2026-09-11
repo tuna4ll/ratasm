@@ -252,12 +252,12 @@ pub fn draw_explorer(frame: &mut Frame, app: &App, area: Rect, focused: bool) {
         return;
     };
 
-    let lines = explorer_lines(app);
+    let lines = explorer_lines(app, usize::from(inner.width));
     super::draw_scrolled(frame, app, Panel::Explorer, inner, lines, None);
 }
 
 /// The project's files and the active document's symbols.
-pub fn explorer_lines<'a>(app: &App) -> Vec<Line<'a>> {
+pub fn explorer_lines<'a>(app: &App, width: usize) -> Vec<Line<'a>> {
     let theme = &app.theme;
     let symbols = theme.symbols();
     let mut lines: Vec<Line> = Vec::new();
@@ -315,12 +315,30 @@ pub fn explorer_lines<'a>(app: &App) -> Vec<Line<'a>> {
     if !found.is_empty() {
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled("Symbols", theme.dim())));
+        let longest = found
+            .iter()
+            .map(|symbol| symbol.name.chars().count())
+            .max()
+            .unwrap_or(0);
+        let name_width = longest.clamp(6, 18).min(width.saturating_sub(8));
+        let describe = width >= name_width + 16;
+        let number = width >= name_width + 8;
+
         for symbol in &found {
-            lines.push(Line::from(vec![
-                Span::styled(format!("  {:<14}", symbol.name), theme.base()),
-                Span::styled(format!("{:>4}  ", symbol.position.line + 1), theme.dim()),
-                Span::styled(symbol.kind.description(), theme.dim()),
-            ]));
+            let mut spans = vec![Span::styled(
+                format!("  {:<name_width$}", symbol.name),
+                theme.base(),
+            )];
+            if number {
+                spans.push(Span::styled(
+                    format!("{:>4}  ", symbol.position.line + 1),
+                    theme.dim(),
+                ));
+            }
+            if describe {
+                spans.push(Span::styled(symbol.kind.description(), theme.dim()));
+            }
+            lines.push(Line::from(spans));
         }
     }
 

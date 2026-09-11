@@ -53,26 +53,39 @@ pub fn register_lines<'a>(app: &App, width: usize) -> Vec<Line<'a>> {
 
     let value_width = match app.register_format {
         crate::debugger::registers::Format::Hex => 18,
+        crate::debugger::registers::Format::Binary => 66,
         _ => 20,
     };
     let column_width = 1 + NAME_WIDTH + value_width + 2;
-    let columns = (width.max(1) / column_width.max(1)).clamp(1, 2);
+    let columns = (width.max(1) / column_width.max(1)).clamp(1, 3);
 
     let mut lines: Vec<Line> = Vec::new();
     let mut row: Vec<Span> = Vec::new();
+    let mut filled = 0;
 
-    for (index, entry) in entries.iter().enumerate() {
-        if columns == 1 && entry.register.name == "rip" && !lines.is_empty() {
-            lines.push(Line::from(""));
+    for entry in &entries {
+        if entry.register.name == "rip" {
+            if filled > 0 {
+                lines.push(Line::from(std::mem::take(&mut row)));
+                filled = 0;
+            }
+            if !lines.is_empty() {
+                lines.push(Line::from(""));
+            }
         }
-        row.extend(register_spans(entry, app, theme));
-        if (index + 1) % columns == 0 {
-            lines.push(Line::from(std::mem::take(&mut row)));
-        } else {
+
+        if filled > 0 {
             row.push(Span::raw("  "));
         }
+        row.extend(register_spans(entry, app, theme));
+        filled += 1;
+
+        if filled == columns {
+            lines.push(Line::from(std::mem::take(&mut row)));
+            filled = 0;
+        }
     }
-    if !row.is_empty() {
+    if filled > 0 {
         lines.push(Line::from(row));
     }
 

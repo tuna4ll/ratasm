@@ -154,7 +154,7 @@ pub fn content_rows(app: &App, panel: Panel, width: u16) -> usize {
         Panel::CallStack => app.frames.len(),
         Panel::Breakpoints => app.breakpoints.all().len(),
         Panel::Output => wrapped_rows(&chrome::output_lines(app), width),
-        Panel::Explorer => chrome::explorer_lines(app).len(),
+        Panel::Explorer => chrome::explorer_lines(app, width).len(),
         Panel::Explain => wrapped_rows(&code::explanation_lines(app), width),
         Panel::Learn => wrapped_rows(&learn::learn_lines(app), width.saturating_sub(0)),
         _ => 0,
