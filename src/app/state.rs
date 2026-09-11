@@ -831,7 +831,8 @@ impl App {
             .map_or(line.len(), |(offset, _)| offset);
 
         if let Some(target) = crate::editor::syntax::include_target(&line) {
-            self.follow_include(&target.to_owned());
+            let target = target.to_owned();
+            self.follow_include(&target);
             return;
         }
 

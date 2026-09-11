@@ -103,6 +103,22 @@ impl Panel {
         )
     }
 
+    /// The fewest rows of content the panel is worth drawing with.
+    pub const fn minimum_content(self) -> u16 {
+        match self {
+            Panel::Editor | Panel::Learn | Panel::Scratchpad => 8,
+            Panel::Registers | Panel::Syscalls | Panel::Explorer => 6,
+            Panel::Disassembly => 5,
+            Panel::Flags | Panel::Memory | Panel::Stack | Panel::Explain => 4,
+            Panel::Output | Panel::CallStack | Panel::Breakpoints => 3,
+        }
+    }
+
+    /// The fewest rows the panel needs, its border included.
+    pub const fn minimum_height(self) -> u16 {
+        self.minimum_content() + 2
+    }
+
     /// Whether typing into the panel inserts text.
     pub const fn is_text_input(self) -> bool {
         matches!(self, Panel::Editor | Panel::Scratchpad)
@@ -180,6 +196,19 @@ mod tests {
         for panel in Panel::ALL {
             assert_eq!(panel.next().previous(), panel);
             assert_eq!(panel.previous().next(), panel);
+        }
+    }
+
+    #[test]
+    fn every_panel_asks_for_room_it_could_actually_use() {
+        for panel in Panel::ALL {
+            let content = panel.minimum_content();
+            assert!(
+                content >= 3,
+                "{panel} would show less than it takes to read"
+            );
+            assert!(content <= 8, "{panel} would be dropped on ordinary screens");
+            assert_eq!(panel.minimum_height(), content + 2, "{panel} border");
         }
     }
 
