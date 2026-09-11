@@ -234,6 +234,61 @@ mod tests {
     }
 
     #[test]
+    fn the_status_bar_gives_a_long_message_the_room_it_needs() {
+        let mut app = app();
+        app.status = crate::app::Status::error(
+            "main.asm:12: error: symbol `helper' undefined and cannot be resolved".to_owned(),
+        );
+
+        let rows = render(&app, 80, 30);
+        let status = rows.last().expect("a status bar").clone();
+        assert!(
+            status.contains("cannot be resolved"),
+            "the message must not be truncated to keep a format label:\n{status}"
+        );
+        assert!(status.contains("idle"), "the debugger state always stays");
+
+        app.status = crate::app::Status::info("Ready".to_owned());
+        let rows = render(&app, 80, 30);
+        let status = rows.last().expect("a status bar").clone();
+        assert!(
+            status.contains("hex"),
+            "with room to spare the extras come back:\n{status}"
+        );
+    }
+
+    #[test]
+    fn the_status_bar_names_the_file_being_edited() {
+        let mut app = app();
+        app.workspace.active_mut().set_path("src/util.asm");
+        let rows = render(&app, 120, 30);
+        let status = rows.last().expect("a status bar").clone();
+        assert!(status.contains("util.asm"), "{status}");
+    }
+
+    #[test]
+    fn the_page_bar_keeps_the_open_file_on_a_narrow_terminal() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let mut app = app();
+        for name in ["alpha.asm", "beta.asm", "gamma.asm", "delta.asm"] {
+            let path = dir.path().join(name);
+            std::fs::write(&path, "ret\n").expect("write");
+            app.workspace.open(&path).expect("open");
+        }
+
+        let bar = render(&app, 60, 20).remove(0);
+        assert!(
+            bar.contains("delta.asm"),
+            "the active file must survive a narrow bar:\n{bar}"
+        );
+        assert!(bar.contains('+'), "and the rest must be counted:\n{bar}");
+        assert!(
+            !bar.contains("Reference"),
+            "page names shrink first:\n{bar}"
+        );
+    }
+
+    #[test]
     fn a_wide_terminal_shows_the_main_panels() {
         let mut app = app();
         app.open_page(crate::app::Page::Debug);

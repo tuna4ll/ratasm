@@ -316,12 +316,22 @@ pub fn draw_page_bar(frame: &mut Frame, app: &App, area: Rect) {
     let theme = &app.theme;
     let symbols = theme.symbols();
 
+    let full: usize = Page::ALL
+        .iter()
+        .map(|page| page.title().chars().count() + 4)
+        .sum();
+    let compact = usize::from(area.width) < full + 24;
+
     let mut spans: Vec<Span> = Vec::new();
     for page in Page::ALL {
-        let active = page == app.page;
+        let label = if compact {
+            format!(" {} ", page.number())
+        } else {
+            format!(" {} {} ", page.number(), page.title())
+        };
         spans.push(Span::styled(
-            format!(" {} {} ", page.number(), page.title()),
-            if active {
+            label,
+            if page == app.page {
                 theme.selection()
             } else {
                 theme.dim()
@@ -329,35 +339,80 @@ pub fn draw_page_bar(frame: &mut Frame, app: &App, area: Rect) {
         ));
     }
 
-    let mut documents: Vec<Span> = Vec::new();
-    for (index, document) in app.workspace.documents().iter().enumerate() {
-        let active = index == app.workspace.active_index();
-        let modified = if document.is_modified() {
-            symbols.modified
-        } else {
-            ""
-        };
-        documents.push(Span::styled(
-            format!(" {}{} ", document.display_name(), modified),
-            if active { theme.bright() } else { theme.dim() },
-        ));
-    }
-
     let used: usize = spans.iter().map(|span| span.content.chars().count()).sum();
-    let room = usize::from(area.width).saturating_sub(used);
-    let listed: usize = documents
-        .iter()
-        .map(|span| span.content.chars().count())
-        .sum();
-    if listed + 3 <= room {
+    let room = usize::from(area.width).saturating_sub(used + 5);
+    let labels = document_labels(app);
+
+    if let Some((first, shown)) = visible_documents(&labels, app.workspace.active_index(), room) {
         spans.push(Span::styled(
             format!("  {}  ", symbols.separator),
             theme.dim(),
         ));
-        spans.append(&mut documents);
+        if first > 0 {
+            spans.push(Span::styled(format!("+{first} "), theme.dim()));
+        }
+        for (offset, label) in labels[first..first + shown].iter().enumerate() {
+            let index = first + offset;
+            spans.push(Span::styled(
+                label.clone(),
+                if index == app.workspace.active_index() {
+                    theme.bright()
+                } else {
+                    theme.dim()
+                },
+            ));
+        }
+        let rest = labels.len() - (first + shown);
+        if rest > 0 {
+            spans.push(Span::styled(format!("+{rest}"), theme.dim()));
+        }
     }
 
     frame.render_widget(Paragraph::new(Line::from(spans)), area);
+}
+
+/// One tab label per open document.
+fn document_labels(app: &App) -> Vec<String> {
+    let modified_glyph = app.theme.symbols().modified;
+    app.workspace
+        .documents()
+        .iter()
+        .map(|document| {
+            let modified = if document.is_modified() {
+                modified_glyph
+            } else {
+                ""
+            };
+            format!(" {}{} ", document.display_name(), modified)
+        })
+        .collect()
+}
+
+/// The run of tabs to draw: the first index and how many fit in `room`.
+fn visible_documents(labels: &[String], active: usize, room: usize) -> Option<(usize, usize)> {
+    let width = |index: usize| labels.get(index).map_or(0, |l: &String| l.chars().count());
+    if labels.is_empty() || width(active) > room {
+        return None;
+    }
+
+    let (mut first, mut last) = (active, active);
+    let mut used = width(active);
+
+    loop {
+        let before = first > 0 && used + width(first - 1) + 3 <= room;
+        let after = last + 1 < labels.len() && used + width(last + 1) + 3 <= room;
+        if after {
+            last += 1;
+            used += width(last);
+        } else if before {
+            first -= 1;
+            used += width(first);
+        } else {
+            break;
+        }
+    }
+
+    Some((first, last - first + 1))
 }
 
 /// Draws the tab strip for panels sharing a slot.
@@ -402,8 +457,6 @@ pub fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
 
     let document = app.workspace.active();
     let cursor = document.cursor();
-    let position = format!("{}:{}", cursor.line + 1, cursor.column + 1);
-
     let state = app.debugger.state();
     let state_style = match state {
         DebuggerState::Failed => theme.error(),
@@ -412,32 +465,55 @@ pub fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
         _ => theme.dim(),
     };
 
-    let right = format!(
-        " {} {} {} {} {} {} ",
-        position,
-        symbols.separator,
-        app.focus.title(),
-        symbols.separator,
-        app.register_format.label(),
-        symbols.separator,
+    let file = format!(
+        "{}{}",
+        document.display_name(),
+        if document.is_modified() {
+            symbols.modified
+        } else {
+            ""
+        }
     );
+    let optional = [
+        app.register_format.label().to_owned(),
+        app.focus.title().to_owned(),
+        file,
+        format!("{}:{}", cursor.line + 1, cursor.column + 1),
+    ];
 
-    let used = right.chars().count() + state.label().chars().count() + 4;
-    let message_width = usize::from(area.width).saturating_sub(used);
-    let message = super::truncate(&app.status.text, message_width, symbols.ellipsis);
+    let fixed = state.label().chars().count() + 4;
+    let message = app.status.text.chars().count().max(20);
+    let mut right: Vec<String> = Vec::new();
+    let mut used = fixed;
+
+    for segment in optional.into_iter().rev() {
+        let cost = segment.chars().count() + 3;
+        if used + cost + message > usize::from(area.width) {
+            break;
+        }
+        used += cost;
+        right.insert(0, segment);
+    }
+
+    let tail = if right.is_empty() {
+        " ".to_owned()
+    } else {
+        format!(
+            " {} {} ",
+            right.join(&format!(" {} ", symbols.separator)),
+            symbols.separator
+        )
+    };
+
+    let room = usize::from(area.width).saturating_sub(used);
+    let text = super::truncate(&app.status.text, room, symbols.ellipsis);
+    let padding = room.saturating_sub(text.chars().count());
 
     let spans = vec![
         Span::styled(format!(" {glyph} "), style),
-        Span::styled(message, style),
-        Span::styled(
-            " ".repeat(
-                usize::from(area.width)
-                    .saturating_sub(used)
-                    .saturating_sub(app.status.text.chars().count().min(message_width)),
-            ),
-            theme.base(),
-        ),
-        Span::styled(right, theme.dim()),
+        Span::styled(text, style),
+        Span::styled(" ".repeat(padding), theme.base()),
+        Span::styled(tail, theme.dim()),
         Span::styled(state.label().to_owned(), state_style),
     ];
 
