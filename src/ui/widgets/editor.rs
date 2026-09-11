@@ -1,4 +1,4 @@
-//! The source editor panel: highlighted text, gutter, breakpoints and the
+//! The source editor panel: highlighted text, gutter, breakpoints, selection and the program counter.
 
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};

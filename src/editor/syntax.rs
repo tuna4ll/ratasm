@@ -2,7 +2,7 @@
 
 use crate::instruction::{mnemonics, registers};
 
-/// The lexical class of a token, used to pick a colour and to answer
+/// The lexical class of a token, used to pick a colour and to answer structural questions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TokenKind {
     /// Runs of spaces and tabs.
@@ -111,7 +111,7 @@ pub fn tokenize(line: &str) -> Vec<Token> {
     tokens
 }
 
-/// The lexical pass: splits text into tokens without deciding what identifiers
+/// The lexical pass: splits text into tokens without deciding what identifiers mean.
 fn scan(line: &str) -> Vec<Token> {
     let mut tokens = Vec::new();
     let bytes = line.as_bytes();

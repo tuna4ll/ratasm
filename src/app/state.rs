@@ -903,7 +903,7 @@ impl App {
         self.status = Status::warning(format!("cannot find {target}"));
     }
 
-    /// Looks for `name` in the other open documents, then in the project's
+    /// Looks for `name` in the other open documents, then the project's remaining sources.
     fn definition_in_another_file(&mut self, name: &str) -> bool {
         use crate::editor::symbols;
 

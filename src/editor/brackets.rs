@@ -113,7 +113,7 @@ struct Bracket {
     ch: char,
 }
 
-/// Collects every bracket in the buffer, in document order, skipping any that
+/// Collects every bracket in the buffer, in document order, skipping comments and strings.
 fn collect(buffer: &TextBuffer) -> Vec<Bracket> {
     let mut brackets = Vec::new();
     for (line_index, line) in buffer.lines().iter().enumerate() {

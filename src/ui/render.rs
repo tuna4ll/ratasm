@@ -1,4 +1,4 @@
-//! Drawing one frame. [`draw`] takes an immutable `&App`, so drawing can never
+//! Drawing one frame: [`draw`] takes an immutable `&App`, so drawing can never change what it draws.
 
 use ratatui::widgets::{Block, Borders};
 use ratatui::Frame;

@@ -356,7 +356,7 @@ fn finish_background(app: &mut App, done: Background) {
     }
 }
 
-/// Disassembles the built executable so the panel has something to show
+/// Disassembles the built executable so the panel has something to show before a session starts.
 fn load_static_disassembly(app: &mut App, executable: &Path) {
     let Ok(image) = disassembler::ElfImage::load(executable) else {
         return;
@@ -803,7 +803,7 @@ mod tests {
         assert_eq!(app.status.severity, crate::app::Severity::Warning);
     }
 
-    /// Performs one effect the way the run loop does, then waits for any
+    /// Performs one effect the way the run loop does, then waits for the work it started.
     async fn settle(app: &mut App, session: &mut Option<GdbSession>, effect: Effect) {
         let (finished, mut incoming) = tokio::sync::mpsc::unbounded_channel();
         let mut running = Running::default();

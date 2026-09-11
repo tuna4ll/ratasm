@@ -116,7 +116,7 @@ fn handle_scrollable(app: &mut App, panel: Panel, key: KeyEvent) -> Effect {
     app.apply(&command)
 }
 
-/// Handles one mouse event against the layout a terminal of `width` by
+/// Handles one mouse event against the layout `width` by `height` would produce.
 pub fn handle_mouse(app: &mut App, mouse: MouseEvent, width: u16, height: u16) -> Effect {
     use crate::ui::layout;
 

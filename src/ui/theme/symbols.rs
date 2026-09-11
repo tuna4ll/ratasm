@@ -1,4 +1,4 @@
-//! Glyph sets that convey state without relying on colour, each with an
+//! Glyph sets that convey state without relying on colour, each with an ASCII counterpart.
 
 /// A complete set of status glyphs; build one with [`SymbolSet::for_unicode`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

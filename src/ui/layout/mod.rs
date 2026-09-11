@@ -96,7 +96,7 @@ impl Layout {
     }
 }
 
-/// Computes the layout for a terminal of `area` showing `page`, focused on
+/// Computes the layout for a terminal of `area` showing `page`, focused on `focus`.
 pub fn compute(area: Rect, page: Page, focus: Panel) -> Layout {
     if area.width < MINIMUM_WIDTH || area.height < MINIMUM_HEIGHT {
         return Layout {

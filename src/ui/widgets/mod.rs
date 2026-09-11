@@ -58,7 +58,7 @@ pub fn draw_placeholder(frame: &mut Frame, area: Rect, theme: &Theme, block: Blo
     frame.render_widget(paragraph, target);
 }
 
-/// Draws a panel's frame and returns the area inside it, or `None` if it is
+/// Draws a panel's frame and returns the area inside it, or `None` if it is too small.
 pub fn frame_panel(
     frame: &mut Frame,
     area: Rect,
@@ -93,7 +93,7 @@ pub fn draw_panel(frame: &mut Frame, app: &App, panel: Panel, area: Rect) {
     }
 }
 
-/// Truncates `text` to `width` characters, marking with `ellipsis` that it
+/// Truncates `text` to `width` characters, marking with `ellipsis` that it was cut.
 pub fn truncate(text: &str, width: usize, ellipsis: &str) -> String {
     if width == 0 {
         return String::new();
