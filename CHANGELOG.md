@@ -6,6 +6,43 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-09-11
+
+### Added
+
+- Go to definition and search look across the project. A name declared `extern`
+  was answered with the `extern` line itself, and a label in another file was
+  reported undefined; both now resolve through the other open documents and the
+  project's remaining sources. Find next and find previous carry on into the
+  next open document.
+- The explorer lists the project's files rather than only the open buffers, so
+  a second source is something you can see instead of something you have to
+  remember the name of. Arrows move, `Enter` opens, `R` re-reads the list.
+- `Tab` completes paths in the open and save prompts, and go to definition on
+  an `%include` line opens the file it names.
+- Typing `(`, `[`, `{`, `"`, `'` or `` ` `` inserts its partner and steps over
+  the one already there; `auto_close_pairs = false` turns that off.
+- `Ctrl+Backspace` and `Ctrl+Delete` delete by word, clearing a line's
+  indentation to the margin in one press.
+
+### Fixed
+
+- The toolchain's paths agree with the directory it runs in. Tools are spawned
+  in the project root but their arguments were resolved against the caller, so
+  `ratasm build some/project` could not find an output directory it had just
+  created.
+- The editor draws the selection. Selecting text changed nothing on screen.
+- An unclaimed chord no longer types its letter. Terminals send
+  `Ctrl+Backspace` as `Ctrl+H`, which the editor took for text and inserted.
+- The disassembly view no longer spends 44 columns before the mnemonic; the
+  address and byte columns are sized to the listing in hand.
+- Every drawn panel gets room it can use, and a compact arrangement fills the
+  gap between the wide and medium layouts, where one row short of the wide
+  threshold used to drop a page from seven panels to two.
+- The page bar keeps the open file visible on a narrow terminal, and the status
+  bar gives a long message the room it needs rather than holding a fixed set of
+  fields.
+
 ## [0.1.3] - 2026-09-09
 
 ### Added
@@ -149,7 +186,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   panel-sized gap above the details, and shows the NASM example that was
   already in the database.
 
-[Unreleased]: https://github.com/tuna4ll/ratasm/compare/v0.1.3...HEAD
+[Unreleased]: https://github.com/tuna4ll/ratasm/compare/v0.1.4...HEAD
+[0.1.4]: https://github.com/tuna4ll/ratasm/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/tuna4ll/ratasm/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/tuna4ll/ratasm/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/tuna4ll/ratasm/compare/v0.1.0...v0.1.1
