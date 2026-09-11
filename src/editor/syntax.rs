@@ -1,29 +1,8 @@
 //! A NASM lexer used for highlighting, symbol extraction and completion.
-//!
-//! # Why a hand-written lexer
-//!
-//! A general parser generator buys little here. NASM source is strictly
-//! line-oriented — no construct spans lines except macro bodies, which are
-//! delimited by directives rather than nesting — so a single-line lexer is
-//! sufficient, and it can be re-run on one line after each keystroke without
-//! reparsing the file. It also lets the lexer answer the questions the editor
-//! actually asks, such as "is this identifier in mnemonic position?", which is
-//! what separates a label from an instruction in NASM's grammar.
-//!
-//! # Guarantees
-//!
-//! [`tokenize`] returns tokens that tile the input exactly: they are ordered,
-//! non-overlapping, and their spans concatenate back to the original line.
-//! Rendering can therefore iterate tokens and emit styled spans without
-//! tracking gaps, and any lexer bug shows up immediately as a round-trip test
-//! failure rather than as silently dropped text.
-//!
-//! Offsets are byte offsets so that token text can be sliced directly.
 
 use crate::instruction::{mnemonics, registers};
 
 /// The lexical class of a token, used to pick a colour and to answer
-/// structural questions about a line.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TokenKind {
     /// Runs of spaces and tabs.
@@ -54,9 +33,6 @@ pub enum TokenKind {
 
 impl TokenKind {
     /// Whether tokens of this kind are ignorable when looking for structure.
-    ///
-    /// Comments and whitespace carry no grammar, so the classifier skips them
-    /// when deciding what position an identifier occupies.
     pub fn is_trivia(self) -> bool {
         matches!(self, TokenKind::Whitespace | TokenKind::Comment)
     }
@@ -75,9 +51,6 @@ pub struct Token {
 
 impl Token {
     /// The token's text, taken from the line it was lexed from.
-    ///
-    /// Passing a different line than the one lexed yields nonsense or panics;
-    /// callers always have the original line to hand.
     pub fn text<'a>(&self, line: &'a str) -> &'a str {
         &line[self.start..self.end]
     }
@@ -132,9 +105,6 @@ fn is_identifier_continue(ch: char) -> bool {
 }
 
 /// Splits one line of NASM source into tokens.
-///
-/// The returned tokens tile the line exactly: sorted, non-overlapping, and
-/// covering every byte including whitespace.
 pub fn tokenize(line: &str) -> Vec<Token> {
     let mut tokens = scan(line);
     classify(line, &mut tokens);
@@ -142,7 +112,6 @@ pub fn tokenize(line: &str) -> Vec<Token> {
 }
 
 /// The lexical pass: splits text into tokens without deciding what identifiers
-/// mean.
 fn scan(line: &str) -> Vec<Token> {
     let mut tokens = Vec::new();
     let bytes = line.as_bytes();
@@ -169,8 +138,6 @@ fn scan(line: &str) -> Vec<Token> {
             TokenKind::String
         } else if ch == '%' {
             index += 1;
-            // `%` introduces the preprocessor only when something follows it
-            // that can name a directive; otherwise it is the modulo operator.
             let is_preprocessor = line[index..]
                 .chars()
                 .next()
@@ -224,10 +191,6 @@ fn scan(line: &str) -> Vec<Token> {
 }
 
 /// Consumes a string literal, returning the offset just past its closing quote.
-///
-/// An unterminated literal runs to the end of the line rather than being an
-/// error: the user is very likely mid-typing, and refusing to highlight the
-/// rest of the line would be worse than highlighting it optimistically.
 fn scan_string(line: &str, mut index: usize, quote: char) -> usize {
     let bytes = line.as_bytes();
     while index < bytes.len() {
@@ -235,7 +198,6 @@ fn scan_string(line: &str, mut index: usize, quote: char) -> usize {
             Some(ch) => ch,
             None => break,
         };
-        // Only backquoted strings honour backslash escapes in NASM.
         if quote == '`' && ch == '\\' && index + 1 < bytes.len() {
             index += 1;
             if let Some(escaped) = line[index..].chars().next() {
@@ -257,8 +219,6 @@ fn scan_number(line: &str, mut index: usize) -> usize {
     while index < bytes.len() {
         let ch = bytes[index] as char;
         if ch.is_ascii_alphanumeric() || ch == '_' || ch == '.' {
-            // An exponent sign belongs to the literal; any other sign does not,
-            // so `1+2` stays three tokens while `1e+9` stays one.
             let is_exponent = matches!(ch, 'e' | 'E')
                 && matches!(bytes.get(index + 1), Some(b'+' | b'-'))
                 && bytes.get(index + 2).is_some_and(u8::is_ascii_digit);
@@ -274,10 +234,6 @@ fn scan_number(line: &str, mut index: usize) -> usize {
 }
 
 /// The semantic pass: decides what each identifier means from its position.
-///
-/// NASM's grammar is positional. The same word is a label at the start of a
-/// statement and a symbol reference in an operand, so classification cannot be
-/// a pure dictionary lookup.
 fn classify(line: &str, tokens: &mut [Token]) {
     let mut seen_mnemonic = false;
     let mut is_first_word = true;
@@ -296,10 +252,6 @@ fn classify(line: &str, tokens: &mut [Token]) {
             .map(|next| tokens[next])
             .is_some_and(|next| next.kind == TokenKind::Punctuation && next.text(line) == ":");
 
-        // A label definition is either explicitly marked with a colon, or is
-        // the first word of a line and sits in column zero — NASM's rule for
-        // colonless labels. Requiring column zero is what keeps an indented
-        // `mov` from being read as a label.
         let is_label = if followed_by_colon {
             true
         } else {
@@ -323,7 +275,6 @@ fn classify(line: &str, tokens: &mut [Token]) {
         } else if is_size_keyword(word) {
             TokenKind::SizeKeyword
         } else if is_directive(word) {
-            // `times 4 db 0`: a directive can follow another directive.
             TokenKind::Directive
         } else {
             TokenKind::Identifier
@@ -352,11 +303,24 @@ pub fn label_definition(line: &str) -> Option<String> {
         .map(|token| token.text(line).to_owned())
 }
 
+/// The file named by a `%include` line, if it is one.
+pub fn include_target(line: &str) -> Option<&str> {
+    let rest = line.trim_start().strip_prefix('%')?.trim_start();
+    let rest = rest
+        .strip_prefix("include")
+        .or_else(|| rest.strip_prefix("INCLUDE"))?
+        .trim_start();
+
+    let quote = rest.chars().next()?;
+    if !matches!(quote, '"' | '\'' | '`') {
+        return None;
+    }
+    let rest = &rest[quote.len_utf8()..];
+    let end = rest.find(quote)?;
+    Some(&rest[..end]).filter(|path| !path.is_empty())
+}
+
 /// Returns the identifier surrounding `byte_offset`, if there is one.
-///
-/// Used by "go to definition" and by completion to find the word at the
-/// cursor. An offset at either edge of an identifier counts as inside it, so
-/// the cursor sitting just past a word still finds it.
 pub fn word_at(line: &str, byte_offset: usize) -> Option<(Token, &str)> {
     tokenize(line)
         .into_iter()
@@ -389,7 +353,6 @@ mod tests {
 
     #[test]
     fn tokens_tile_the_line_exactly() {
-        // The invariant rendering depends on: no gaps, no overlaps, no loss.
         for line in [
             "",
             "    ",
@@ -451,8 +414,6 @@ mod tests {
 
     #[test]
     fn an_indented_instruction_is_not_read_as_a_label() {
-        // The reason column zero matters: without it every indented mnemonic
-        // would be misread as a colonless label definition.
         assert_eq!(
             kinds("    mov rax, 1"),
             vec![
@@ -511,7 +472,6 @@ mod tests {
 
     #[test]
     fn backquoted_strings_honour_escapes() {
-        // The escaped backquote must not terminate the literal.
         let line = r"db `a\`b`, 0";
         let tokens = kinds(line);
         assert_eq!(tokens[1], (TokenKind::String, r"`a\`b`"));
@@ -519,7 +479,6 @@ mod tests {
 
     #[test]
     fn single_quoted_strings_do_not_honour_escapes() {
-        // NASM treats a backslash literally inside single quotes.
         let line = r"db 'a\', 0";
         let tokens = kinds(line);
         assert_eq!(tokens[1], (TokenKind::String, r"'a\'"));
@@ -693,6 +652,24 @@ mod tests {
     }
 
     #[test]
+    fn an_include_line_names_its_file() {
+        assert_eq!(
+            include_target("%include \"macros.inc\""),
+            Some("macros.inc")
+        );
+        assert_eq!(include_target("  %include 'a/b.inc' "), Some("a/b.inc"));
+        assert_eq!(include_target("% include `x.inc`"), Some("x.inc"));
+    }
+
+    #[test]
+    fn a_line_that_is_not_an_include_names_nothing() {
+        assert_eq!(include_target("    mov rax, 1"), None);
+        assert_eq!(include_target("%define X 1"), None);
+        assert_eq!(include_target("%include macros.inc"), None);
+        assert_eq!(include_target("%include \"\""), None);
+    }
+
+    #[test]
     fn word_at_finds_the_identifier_under_the_cursor() {
         let line = "    jmp .loop";
         assert_eq!(word_at(line, 4).map(|(_, text)| text), Some("jmp"));
@@ -709,7 +686,6 @@ mod tests {
 
     #[test]
     fn directive_and_size_keyword_tables_are_sorted() {
-        // Both are looked up by binary search.
         let mut sorted = DIRECTIVES.to_vec();
         sorted.sort_unstable();
         assert_eq!(DIRECTIVES, &sorted[..]);

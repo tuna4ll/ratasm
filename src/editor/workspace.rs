@@ -102,6 +102,54 @@ pub fn display_path(path: &Path) -> String {
         .unwrap_or(full)
 }
 
+/// Completes `text` as a filesystem path.
+pub fn complete_path(text: &str) -> (String, Vec<String>) {
+    let (directory, prefix) = match text.rfind('/') {
+        Some(index) => (&text[..=index], &text[index + 1..]),
+        None => ("", text),
+    };
+    let search = if directory.is_empty() {
+        Path::new(".")
+    } else {
+        Path::new(directory)
+    };
+
+    let Ok(entries) = std::fs::read_dir(search) else {
+        return (text.to_owned(), Vec::new());
+    };
+
+    let mut candidates: Vec<String> = entries
+        .flatten()
+        .filter_map(|entry| {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if !name.starts_with(prefix) || (name.starts_with('.') && !prefix.starts_with('.')) {
+                return None;
+            }
+            let directory = entry.path().is_dir();
+            Some(if directory { format!("{name}/") } else { name })
+        })
+        .collect();
+    candidates.sort();
+
+    let Some(first) = candidates.first() else {
+        return (text.to_owned(), candidates);
+    };
+
+    let shared = candidates
+        .iter()
+        .skip(1)
+        .fold(first.clone(), |shared, next| {
+            let keep = shared
+                .chars()
+                .zip(next.chars())
+                .take_while(|(a, b)| a == b)
+                .count();
+            shared.chars().take(keep).collect()
+        });
+
+    (format!("{directory}{shared}"), candidates)
+}
+
 /// Whether an open document's path is the file a tool named.
 pub fn same_file(open: &Path, reported: &Path) -> bool {
     if open == reported {
@@ -375,6 +423,42 @@ mod tests {
         workspace.active_mut().insert("scratch");
 
         assert_eq!(workspace.save_all().expect("save"), (1, 1));
+    }
+
+    #[test]
+    fn completing_a_prefix_extends_it_as_far_as_the_candidates_agree() {
+        let dir = temp_dir();
+        std::fs::write(dir.path().join("alpha.asm"), "").expect("write");
+        std::fs::write(dir.path().join("alps.asm"), "").expect("write");
+        std::fs::write(dir.path().join("beta.asm"), "").expect("write");
+
+        let base = format!("{}/", dir.path().display());
+        let (completed, candidates) = complete_path(&format!("{base}al"));
+        assert_eq!(completed, format!("{base}alp"));
+        assert_eq!(candidates.len(), 2);
+
+        let (completed, candidates) = complete_path(&format!("{base}b"));
+        assert_eq!(completed, format!("{base}beta.asm"));
+        assert_eq!(candidates.len(), 1);
+    }
+
+    #[test]
+    fn completing_a_directory_adds_the_separator() {
+        let dir = temp_dir();
+        std::fs::create_dir(dir.path().join("sources")).expect("mkdir");
+
+        let base = format!("{}/", dir.path().display());
+        let (completed, _) = complete_path(&format!("{base}sou"));
+        assert_eq!(completed, format!("{base}sources/"));
+    }
+
+    #[test]
+    fn completing_something_with_no_match_leaves_it_alone() {
+        let dir = temp_dir();
+        let text = format!("{}/nothing", dir.path().display());
+        let (completed, candidates) = complete_path(&text);
+        assert_eq!(completed, text);
+        assert!(candidates.is_empty());
     }
 
     #[test]

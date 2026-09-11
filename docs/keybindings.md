@@ -72,6 +72,7 @@ assembled, and `rax=` removes it again. <kbd>Tab</kbd> still leaves the panel.
 | <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>S</kbd> | Save every modified buffer |
 | <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>A</kbd> | Add this file to the project's sources |
 | <kbd>Ctrl</kbd>+<kbd>O</kbd> | Open |
+| <kbd>Tab</kbd> | Complete the path, inside an open or save prompt |
 | <kbd>Ctrl</kbd>+<kbd>Q</kbd> | Quit |
 
 ### Navigation and search
@@ -82,6 +83,7 @@ assembled, and `rax=` removes it again. <kbd>Tab</kbd> still leaves the panel.
 | <kbd>Ctrl</kbd>+<kbd>F</kbd> | Search |
 | <kbd>Ctrl</kbd>+<kbd>G</kbd> | Go to line, or to an address |
 | <kbd>Ctrl</kbd>+<kbd>K</kbd> | Syscall finder |
+| <kbd>Ctrl</kbd>+<kbd>D</kbd> | Go to definition, or open the file an `%include` names |
 | <kbd>Tab</kbd> | Next panel on this page (indents inside the editor) |
 | <kbd>Shift</kbd>+<kbd>Tab</kbd> | Previous panel (dedents inside the editor) |
 

@@ -4,7 +4,7 @@ use crossterm::event::{
     KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
 
-use crate::app::mode::Mode;
+use crate::app::mode::{Mode, PromptKind};
 use crate::app::panel::Panel;
 #[cfg(test)]
 use crate::app::state::Severity;
@@ -47,6 +47,34 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Effect {
         Panel::Explorer => handle_explorer(app, key),
         panel => handle_scrollable(app, panel, key),
     }
+}
+
+/// Whether the open prompt is one Tab should complete.
+fn prompt_completes_paths(app: &App) -> bool {
+    match &app.mode {
+        Mode::Prompt(prompt) => prompt.kind().is_some_and(PromptKind::completes_paths),
+        _ => false,
+    }
+}
+
+/// Extends the prompt's text as far as the filesystem agrees.
+fn complete_prompt_path(app: &mut App) {
+    let Mode::Prompt(prompt) = &app.mode else {
+        return;
+    };
+    let (completed, candidates) = crate::editor::workspace::complete_path(prompt.text());
+
+    let unchanged = completed == prompt.text();
+    if let Mode::Prompt(prompt) = &mut app.mode {
+        prompt.set_text(completed);
+    }
+
+    app.status = match candidates.len() {
+        0 => Status::warning("No file matches"),
+        1 => Status::info(candidates[0].clone()),
+        _ if unchanged => Status::info(candidates.join("  ")),
+        count => Status::info(format!("{count} matches")),
+    };
 }
 
 /// Moves the explorer's selection, or opens the file it is on.
@@ -245,6 +273,10 @@ fn handle_overlay(app: &mut App, key: KeyEvent) -> Effect {
             if let Mode::Palette(palette) = &mut app.mode {
                 palette.select_previous();
             }
+            Effect::None
+        }
+        KeyCode::Tab if prompt_completes_paths(app) => {
+            complete_prompt_path(app);
             Effect::None
         }
         KeyCode::Down | KeyCode::Tab => {
@@ -561,6 +593,34 @@ mod tests {
         );
         let area = layout.area_of(panel).expect("the panel is drawn");
         (area.x + 2, area.y + 2)
+    }
+
+    #[test]
+    fn tab_completes_a_path_in_the_open_prompt() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        std::fs::write(dir.path().join("horizon.asm"), "").expect("write");
+
+        let mut app = app();
+        app.apply(&Command::OpenFile);
+        type_text(&mut app, &format!("{}/hor", dir.path().display()));
+        handle_key(&mut app, press(KeyCode::Tab));
+
+        let Mode::Prompt(prompt) = &app.mode else {
+            panic!("the prompt should still be open");
+        };
+        assert!(prompt.text().ends_with("horizon.asm"), "{}", prompt.text());
+    }
+
+    #[test]
+    fn tab_still_moves_the_palette_selection() {
+        let mut app = app();
+        app.apply(&Command::OpenPalette);
+        handle_key(&mut app, press(KeyCode::Tab));
+
+        let Mode::Palette(palette) = &app.mode else {
+            panic!("the palette should be open");
+        };
+        assert_eq!(palette.selected(), 1);
     }
 
     #[test]

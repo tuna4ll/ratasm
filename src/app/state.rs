@@ -824,13 +824,18 @@ impl App {
 
         let document = self.workspace.active();
         let cursor = document.cursor();
-        let line = document.buffer().line_or_empty(cursor.line);
+        let line = document.buffer().line_or_empty(cursor.line).to_owned();
         let byte_offset = line
             .char_indices()
             .nth(cursor.column)
             .map_or(line.len(), |(offset, _)| offset);
 
-        let Some((_, word)) = crate::editor::syntax::word_at(line, byte_offset) else {
+        if let Some(target) = crate::editor::syntax::include_target(&line) {
+            self.follow_include(&target.to_owned());
+            return;
+        }
+
+        let Some((_, word)) = crate::editor::syntax::word_at(&line, byte_offset) else {
             self.status = Status::info("No symbol under the cursor");
             return;
         };
@@ -868,6 +873,33 @@ impl App {
             return;
         }
         self.status = Status::warning(format!("'{word}' is not defined in this project"));
+    }
+
+    /// Opens the file an `%include` names.
+    fn follow_include(&mut self, target: &str) {
+        let mut candidates = Vec::new();
+        if let Some(directory) = self
+            .workspace
+            .active()
+            .path()
+            .and_then(|path| path.parent().map(Path::to_path_buf))
+        {
+            candidates.push(directory.join(target));
+        }
+        for directory in &self.project.config().project.include_directories {
+            candidates.push(self.project.resolve(directory).join(target));
+        }
+        candidates.push(self.project.root().join(target));
+
+        for candidate in candidates {
+            if candidate.is_file() && self.show_file(&candidate) {
+                self.focus_panel(Panel::Editor);
+                self.status =
+                    Status::info(format!("Opened {}", self.workspace.active().display_name()));
+                return;
+            }
+        }
+        self.status = Status::warning(format!("cannot find {target}"));
     }
 
     /// Looks for `name` in the other open documents, then in the project's
@@ -1937,6 +1969,43 @@ mod tests {
         app.project_files.clear();
         app.move_explorer_selection(1);
         assert_eq!(app.open_selected_file(), Effect::None);
+    }
+
+    #[test]
+    fn go_to_definition_on_an_include_opens_the_included_file() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let included = dir.path().join("macros.inc");
+        std::fs::write(&included, "%define WIDTH 8\n").expect("write");
+
+        let mut app = app_with_source("%include \"macros.inc\"\n");
+        app.workspace
+            .active_mut()
+            .set_path(dir.path().join("main.asm"));
+        app.workspace.active_mut().move_cursor(
+            Movement::To(crate::editor::Position::new(0, 2)),
+            SelectionMode::Collapse,
+        );
+
+        app.apply(&Command::GoToDefinition);
+        assert_eq!(app.workspace.active().path(), Some(included.as_path()));
+    }
+
+    #[test]
+    fn an_include_that_is_nowhere_says_which_file_is_missing() {
+        let mut app = app_with_source("%include \"absent.inc\"\n");
+        app.workspace.active_mut().set_path("main.asm");
+        app.workspace.active_mut().move_cursor(
+            Movement::To(crate::editor::Position::new(0, 2)),
+            SelectionMode::Collapse,
+        );
+
+        app.apply(&Command::GoToDefinition);
+        assert_eq!(app.status.severity, Severity::Warning);
+        assert!(
+            app.status.text.contains("absent.inc"),
+            "{}",
+            app.status.text
+        );
     }
 
     #[test]

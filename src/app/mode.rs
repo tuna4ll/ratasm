@@ -1,10 +1,4 @@
 //! What the interface is currently doing: editing, or asking a question.
-//!
-//! Only one thing can be in front of the user at a time — a prompt, the
-//! palette, or the editor itself — so it is one enum rather than a set of
-//! booleans. A `show_palette` flag next to a `prompt` flag would allow the
-//! impossible state where both are open, and something would have to decide
-//! which wins at render time.
 
 use crate::command::Command;
 
@@ -58,6 +52,11 @@ impl PromptKind {
     pub const fn is_confirmation(self) -> bool {
         matches!(self, PromptKind::ConfirmQuit)
     }
+
+    /// Whether Tab should complete the input against the filesystem.
+    pub const fn completes_paths(self) -> bool {
+        matches!(self, PromptKind::OpenFile | PromptKind::SaveAs)
+    }
 }
 
 /// A single-line text input.
@@ -96,6 +95,12 @@ impl Prompt {
     /// The cursor position as a character index.
     pub fn cursor(&self) -> usize {
         self.cursor
+    }
+
+    /// Replaces the text, putting the cursor at its end.
+    pub fn set_text(&mut self, text: impl Into<String>) {
+        self.text = text.into();
+        self.cursor = self.text.chars().count();
     }
 
     /// Inserts a character at the cursor.
@@ -213,10 +218,6 @@ impl Palette {
     }
 
     /// Recomputes the matches for the current query.
-    ///
-    /// The selection resets to the top, because after typing another character
-    /// the previously highlighted row is usually no longer what the user
-    /// meant.
     pub fn refresh(&mut self) {
         let commands = Command::all();
         let texts: Vec<String> = commands.iter().map(Command::search_text).collect();
@@ -327,7 +328,6 @@ mod tests {
 
     #[test]
     fn multibyte_text_is_edited_by_character_not_byte() {
-        // A byte-indexed implementation would split the character and panic.
         let mut prompt = Prompt::new(PromptKind::Search, "ölçüm");
         prompt.backspace();
         assert_eq!(prompt.text(), "ölçü");
