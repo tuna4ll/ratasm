@@ -148,6 +148,11 @@ and typing replaces what is selected. <kbd>Ctrl</kbd>+<kbd>C</kbd>,
 <kbd>Ctrl</kbd>+<kbd>X</kbd> and <kbd>Ctrl</kbd>+<kbd>V</kbd> copy, cut and
 paste; with nothing selected, copy and cut take the whole line.
 
+Most terminals send <kbd>Ctrl</kbd>+<kbd>Backspace</kbd> as <kbd>Ctrl</kbd>+<kbd>H</kbd>,
+because backspace is DEL and BS is what <kbd>Ctrl</kbd>+<kbd>H</kbd> has always
+been. Both spellings delete a word, and so does
+<kbd>Alt</kbd>+<kbd>Backspace</kbd>.
+
 <kbd>Ctrl</kbd>+<kbd>Backspace</kbd> takes the whitespace before the cursor and
 then one run: letters or punctuation, not both, so repeated presses are
 predictable. In a line's indentation it clears to column zero in one press, and

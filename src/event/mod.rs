@@ -258,6 +258,12 @@ fn place_cursor(app: &mut App, area: ratatui::layout::Rect, column: u16, row: u1
         .move_cursor(Movement::To(position), SelectionMode::Collapse);
 }
 
+/// Whether a key is a chord rather than text to insert.
+fn is_chord(key: &KeyEvent) -> bool {
+    key.modifiers
+        .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+}
+
 /// Handles a key while the palette or a prompt is open.
 fn handle_overlay(app: &mut App, key: KeyEvent) -> Effect {
     match key.code {
@@ -293,6 +299,10 @@ fn handle_overlay(app: &mut App, key: KeyEvent) -> Effect {
 
             let mut confirmed = None;
             match key.code {
+                KeyCode::Char('h' | 'H') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    prompt.backspace();
+                }
+                KeyCode::Char(_) if is_chord(&key) => return Effect::None,
                 KeyCode::Char(ch) => {
                     prompt.insert(ch);
                     if let Mode::Prompt(prompt) = &app.mode {
@@ -340,14 +350,19 @@ fn handle_editor(app: &mut App, key: KeyEvent) -> Effect {
         SelectionMode::Collapse
     };
     let word_wise = key.modifiers.contains(KeyModifiers::CONTROL);
+    let held = is_chord(&key);
     let auto_pairs = app.settings.editor.auto_close_pairs;
     let document = app.workspace.active_mut();
 
     match key.code {
+        KeyCode::Char('h' | 'H') if word_wise => document.delete_word_before(),
+        KeyCode::Char(_) if held => return Effect::None,
         KeyCode::Char(ch) if auto_pairs => document.type_char(ch),
         KeyCode::Char(ch) => document.insert_char(ch),
         KeyCode::Enter => document.insert_newline(),
-        KeyCode::Backspace if word_wise => document.delete_word_before(),
+        KeyCode::Backspace if word_wise || key.modifiers.contains(KeyModifiers::ALT) => {
+            document.delete_word_before();
+        }
         KeyCode::Backspace => document.backspace(),
         KeyCode::Delete if word_wise => document.delete_word_after(),
         KeyCode::Delete => document.delete_forward(),
@@ -402,7 +417,7 @@ fn handle_syscalls(app: &mut App, key: KeyEvent) -> Effect {
     let count = app.matching_syscalls().len();
 
     match key.code {
-        KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+        KeyCode::Char(ch) if !is_chord(&key) => {
             app.syscall_query.push(ch);
             app.syscall_selected = 0;
         }
@@ -470,7 +485,10 @@ fn handle_scratchpad(app: &mut App, key: KeyEvent) -> Effect {
     match key.code {
         KeyCode::Tab => return app.apply(&Command::NextPanel),
         KeyCode::BackTab => return app.apply(&Command::PreviousPanel),
-        KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+        KeyCode::Char('h' | 'H') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            app.scratchpad.snippet.pop();
+        }
+        KeyCode::Char(ch) if !is_chord(&key) => {
             app.scratchpad.snippet.push(ch);
         }
         KeyCode::Backspace => {
@@ -544,9 +562,12 @@ fn handle_learn(app: &mut App, key: KeyEvent) -> Effect {
         KeyCode::Backspace if app.learning.is_question() => {
             app.learning.typed.pop();
         }
-        KeyCode::Char(ch)
-            if app.learning.is_question() && !key.modifiers.contains(KeyModifiers::CONTROL) =>
+        KeyCode::Char('h' | 'H')
+            if app.learning.is_question() && key.modifiers.contains(KeyModifiers::CONTROL) =>
         {
+            app.learning.typed.pop();
+        }
+        KeyCode::Char(ch) if app.learning.is_question() && !is_chord(&key) => {
             app.learning.typed.push(ch);
         }
         _ => {}
@@ -629,6 +650,56 @@ mod tests {
 
         handle_key(&mut app, ctrl('v'));
         assert_eq!(app.workspace.active().buffer().to_text(), "mov rax, 1");
+    }
+
+    #[test]
+    fn ctrl_backspace_arriving_as_ctrl_h_still_deletes() {
+        let mut app = app();
+        type_text(&mut app, "mov rax");
+
+        handle_key(&mut app, ctrl('h'));
+        assert_eq!(app.workspace.active().buffer().to_text(), "mov ");
+    }
+
+    #[test]
+    fn an_unbound_chord_never_types_a_letter() {
+        let mut app = app();
+        for ch in ['h', 'j', 'e', 'r', 'b'] {
+            handle_key(&mut app, ctrl(ch));
+            handle_key(
+                &mut app,
+                KeyEvent::new(KeyCode::Char(ch), KeyModifiers::ALT),
+            );
+        }
+        assert_eq!(
+            app.workspace.active().buffer().to_text(),
+            "",
+            "a chord the keymap did not claim is not text"
+        );
+    }
+
+    #[test]
+    fn ctrl_h_backspaces_in_a_prompt_too() {
+        let mut app = app();
+        app.apply(&Command::OpenFile);
+        type_text(&mut app, "src/mainx");
+        handle_key(&mut app, ctrl('h'));
+
+        let Mode::Prompt(prompt) = &app.mode else {
+            panic!("the prompt should be open");
+        };
+        assert_eq!(prompt.text(), "src/main");
+    }
+
+    #[test]
+    fn a_chord_does_not_type_into_the_scratchpad() {
+        let mut app = app();
+        app.focus_panel(Panel::Scratchpad);
+        type_text(&mut app, "shl rax");
+        handle_key(&mut app, ctrl('h'));
+        handle_key(&mut app, ctrl('e'));
+
+        assert_eq!(app.scratchpad.snippet, "shl ra");
     }
 
     #[test]
