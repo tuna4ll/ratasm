@@ -1,18 +1,4 @@
 //! The assemble-and-link pipeline.
-//!
-//! A build is a sequence of [`BuildStep`]s: one assembler invocation per
-//! source file, then one linker invocation. Every step is recorded with the
-//! exact command line and the tool's own output, so the build panel can show
-//! what actually ran rather than a summary the user has to trust.
-//!
-//! # Failure is a result, not an error
-//!
-//! A build that fails because the user's code is wrong returns `Ok` with
-//! `success == false` and the diagnostics attached. `Err` is reserved for
-//! situations where the build could not be *attempted*: a missing assembler,
-//! an unwritable output directory. The distinction matters because a failed
-//! build is the normal case while writing assembly, and it must render as
-//! diagnostics in the editor rather than as an error dialog.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -61,9 +47,6 @@ pub enum BuildError {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct BuildOptions {
     /// Ask the assembler to emit debug information.
-    ///
-    /// Required for source-level debugging; without it GDB can still step by
-    /// instruction but cannot map addresses back to lines.
     pub debug_info: bool,
 }
 
@@ -158,11 +141,6 @@ impl BuildOutcome {
 }
 
 /// Assembles and links a project.
-///
-/// # Errors
-///
-/// Returns [`BuildError`] only when the build could not be attempted; see the
-/// module documentation for why a failed build is not an error.
 pub async fn build(project: &Project, options: BuildOptions) -> Result<BuildOutcome, BuildError> {
     let started = std::time::Instant::now();
     let config = project.config();
@@ -219,8 +197,6 @@ pub async fn build(project: &Project, options: BuildOptions) -> Result<BuildOutc
         });
 
         if failed {
-            // Stop at the first failing source: later errors are usually
-            // cascades, and the user wants the first real problem.
             return Ok(finish(steps, all_diagnostics, None, started.elapsed()));
         }
         objects.push(object);
@@ -282,9 +258,6 @@ fn finish(
 }
 
 /// Constructs the assembler command for one source file.
-///
-/// Public so the build panel and the documentation can show exactly what would
-/// run without executing it.
 pub fn assemble_command(
     project: &Project,
     assembler: &Path,
@@ -299,17 +272,19 @@ pub fn assemble_command(
         spec = spec.arg("-g");
     }
     for directory in &config.project.include_directories {
-        // NASM wants the trailing separator on include paths.
-        let mut path = project.resolve(directory).display().to_string();
+        let mut path = project
+            .for_tool(&project.resolve(directory))
+            .display()
+            .to_string();
         if !path.ends_with('/') {
             path.push('/');
         }
         spec = spec.arg("-i").arg(path);
     }
 
-    spec.arg(source.display().to_string())
+    spec.arg(project.for_tool(source).display().to_string())
         .arg("-o")
-        .arg(object.display().to_string())
+        .arg(project.for_tool(object).display().to_string())
         .working_directory(project.root())
 }
 
@@ -324,28 +299,22 @@ pub fn link_command(
         .args(
             objects
                 .iter()
-                .map(|object| object.display().to_string())
+                .map(|object| project.for_tool(object).display().to_string())
                 .collect::<Vec<_>>(),
         )
         .args(project.config().build.linker_args.clone())
         .arg("-o")
-        .arg(executable.display().to_string())
+        .arg(project.for_tool(executable).display().to_string())
         .working_directory(project.root())
 }
 
 /// Runs a built executable with the project's run settings.
-///
-/// # Errors
-///
-/// Returns [`ProcessError`] when the program cannot be launched. A program
-/// that crashes or exits non-zero returns `Ok`; that is the result the user
-/// asked to see.
 pub async fn run_executable(
     project: &Project,
     executable: &Path,
 ) -> Result<ProcessOutput, ProcessError> {
     let config = project.config();
-    let mut spec = CommandSpec::new(executable)
+    let mut spec = CommandSpec::new(project.absolute_path(executable))
         .args(config.run.args.clone())
         .working_directory(project.run_directory());
 
@@ -391,8 +360,8 @@ mod tests {
         let spec = assemble_command(
             &project,
             Path::new("nasm"),
-            Path::new("source.asm"),
-            Path::new("source.o"),
+            &project.resolve(Path::new("source.asm")),
+            &project.resolve(Path::new("source.o")),
             BuildOptions::release(),
         );
         assert_eq!(spec.display(), "nasm -f elf64 source.asm -o source.o");
@@ -405,8 +374,8 @@ mod tests {
         let spec = link_command(
             &project,
             Path::new("ld"),
-            &[PathBuf::from("source.o")],
-            Path::new("source"),
+            &[project.resolve(Path::new("source.o"))],
+            &project.resolve(Path::new("source")),
         );
         assert_eq!(spec.display(), "ld source.o -o source");
     }
@@ -427,7 +396,6 @@ mod tests {
 
     #[test]
     fn debug_flags_are_not_duplicated() {
-        // Some assembler versions reject a repeated -g.
         let dir = tempfile::tempdir().expect("temp dir");
         let mut project = Project::create(dir.path(), "demo").expect("create");
         project.config_mut().build.assembler_args.push("-g".into());
@@ -440,6 +408,47 @@ mod tests {
             BuildOptions::debug(),
         );
         assert_eq!(spec.args.iter().filter(|arg| *arg == "-g").count(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_project_builds_from_outside_its_own_directory() {
+        if !crate::process::is_available(Path::new("nasm"))
+            || !crate::process::is_available(Path::new("ld"))
+        {
+            eprintln!("skipping: nasm or ld not installed");
+            return;
+        }
+
+        let parent = tempfile::tempdir().expect("temp dir");
+        let root = parent.path().join("project");
+        let project = Project::create(&root, "outside").expect("create");
+
+        let outcome = build(&project, BuildOptions::release())
+            .await
+            .expect("the build runs");
+        assert!(outcome.success, "{}", outcome.raw_output());
+        assert!(outcome.executable.is_some_and(|path| path.is_file()));
+    }
+
+    #[test]
+    fn tool_paths_are_written_relative_to_the_root() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let project = Project::create(dir.path(), "relative").expect("create");
+
+        let spec = assemble_command(
+            &project,
+            Path::new("nasm"),
+            &project.entry_path(),
+            &project.output_directory().join("main.o"),
+            BuildOptions::release(),
+        );
+        let rendered = spec.display();
+
+        assert!(rendered.contains("src/main.asm"), "{rendered}");
+        assert!(
+            !rendered.contains(&dir.path().display().to_string()),
+            "an absolute path here would not survive a move: {rendered}"
+        );
     }
 
     #[test]
@@ -556,7 +565,6 @@ mod tests {
             eprintln!("skipping: nasm or ld not installed");
             return;
         }
-        // Assembles cleanly, but the entry symbol is missing at link time.
         let source = "section .text\nglobal main\nmain:\n    ret\n";
         let (_dir, project) = project_with(source);
 
@@ -618,7 +626,6 @@ mod tests {
             eprintln!("skipping: nasm or ld not installed");
             return;
         }
-        // Dereferencing a null pointer is the canonical segmentation fault.
         let source =
             "section .text\nglobal _start\n_start:\n    xor rax, rax\n    mov rbx, [rax]\n";
         let (_dir, project) = project_with(source);
@@ -640,8 +647,6 @@ mod tests {
             eprintln!("skipping: nasm or ld not installed");
             return;
         }
-        // The property that keeps the editor usable: a program that never
-        // exits must not hang the tool.
         let source = "section .text\nglobal _start\n_start:\n.spin:\n    jmp .spin\n";
         let (_dir, mut project) = project_with(source);
         project.config_mut().run.timeout_ms = 250;
@@ -661,7 +666,6 @@ mod tests {
             eprintln!("skipping: nasm or ld not installed");
             return;
         }
-        // Reads up to 32 bytes from stdin and writes them back to stdout.
         let source = "\
 section .bss
     buffer: resb 32

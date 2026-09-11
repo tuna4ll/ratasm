@@ -232,6 +232,21 @@ impl Project {
         self.resolve(&self.config.project.entry)
     }
 
+    /// Expresses `path` the way a tool running in the project root will read it.
+    pub fn for_tool(&self, path: &Path) -> PathBuf {
+        let root = absolute(&self.root);
+        let target = absolute(path);
+        target
+            .strip_prefix(&root)
+            .map(Path::to_path_buf)
+            .unwrap_or(target)
+    }
+
+    /// The absolute form of `path`, for a program that has to be launched.
+    pub fn absolute_path(&self, path: &Path) -> PathBuf {
+        absolute(path)
+    }
+
     /// Expresses `path` relative to the project root, if it is inside it.
     pub fn relative(&self, path: &Path) -> Option<PathBuf> {
         if path.is_relative() {
@@ -344,6 +359,16 @@ fn write_new(path: &Path, contents: &str) -> Result<(), ProjectError> {
         path: path.to_path_buf(),
         source,
     })
+}
+
+/// Makes `path` absolute against the current directory.
+fn absolute(path: &Path) -> PathBuf {
+    if path.is_absolute() {
+        return path.to_path_buf();
+    }
+    std::env::current_dir()
+        .map(|cwd| cwd.join(path))
+        .unwrap_or_else(|_| path.to_path_buf())
 }
 
 #[cfg(test)]
