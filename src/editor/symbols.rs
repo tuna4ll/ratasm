@@ -1,17 +1,4 @@
 //! Symbol extraction: the labels, sections and constants a file defines.
-//!
-//! Powers the symbol explorer, "go to definition" and label completion. The
-//! extractor reads the token stream from [`super::syntax`] rather than
-//! matching raw text, so a label mentioned inside a comment or a string is
-//! correctly ignored.
-//!
-//! # Local labels
-//!
-//! NASM scopes a label beginning with `.` to the most recent non-local label:
-//! `.loop` under `_start` is really `_start.loop`, and a different `.loop`
-//! under `main` is a distinct symbol. Both spellings are recorded, so jumping
-//! to a definition works whether the user typed the short or the qualified
-//! form, and two local labels with the same short name do not collide.
 
 use super::buffer::TextBuffer;
 use super::position::Position;
@@ -54,6 +41,14 @@ impl SymbolKind {
     pub const fn is_jump_target(self) -> bool {
         matches!(self, SymbolKind::Label | SymbolKind::LocalLabel)
     }
+
+    /// Whether the symbol is defined here rather than merely named here.
+    pub const fn is_definition(self) -> bool {
+        matches!(
+            self,
+            SymbolKind::Label | SymbolKind::LocalLabel | SymbolKind::Constant | SymbolKind::Macro
+        )
+    }
 }
 
 /// A symbol defined somewhere in a buffer.
@@ -62,8 +57,6 @@ pub struct Symbol {
     /// The name as written, for example `.loop`.
     pub name: String,
     /// The fully qualified name, for example `_start.loop`.
-    ///
-    /// Equal to `name` for everything except local labels.
     pub qualified_name: String,
     /// What the symbol is.
     pub kind: SymbolKind,
@@ -108,9 +101,6 @@ pub fn extract(buffer: &TextBuffer) -> Vec<Symbol> {
                     current_label = Some(name.clone());
                 }
 
-                // `name: equ 4` and `name: db 0` define a constant and a data
-                // label respectively; both are more useful to show as such
-                // than as bare labels.
                 let kind = match significant
                     .iter()
                     .find(|token| token.kind == TokenKind::Directive)
@@ -195,9 +185,6 @@ pub fn extract(buffer: &TextBuffer) -> Vec<Symbol> {
 }
 
 /// Finds the definition of `name`, resolving local labels against `from`.
-///
-/// A bare `.loop` is ambiguous on its own; resolving it requires knowing which
-/// top-level label the reference sits under, which `from` supplies.
 pub fn find_definition<'a>(
     symbols: &'a [Symbol],
     buffer: &TextBuffer,
@@ -280,9 +267,6 @@ main:
     }
 
     /// Finds the symbol with this name and kind.
-    ///
-    /// Both are needed because one name legitimately produces two symbols:
-    /// `global _start` declares it and `_start:` defines it.
     fn find(name: &str, kind: SymbolKind) -> Symbol {
         symbols()
             .into_iter()
@@ -316,7 +300,6 @@ main:
 
     #[test]
     fn a_declared_and_defined_symbol_produces_both_entries() {
-        // `global _start` and `_start:` are different facts about one name.
         let entries: Vec<SymbolKind> = symbols()
             .into_iter()
             .filter(|symbol| symbol.name == "_start")
@@ -362,8 +345,6 @@ main:
 
     #[test]
     fn a_local_label_resolves_against_the_enclosing_label() {
-        // The distinction that makes local labels work: the same `.loop`
-        // reference means different things in different functions.
         let buffer = TextBuffer::from_text(PROGRAM);
         let symbols = extract(&buffer);
 

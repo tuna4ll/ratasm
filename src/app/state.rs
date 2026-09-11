@@ -831,18 +831,95 @@ impl App {
         let word = word.to_owned();
 
         let all = symbols::extract(document.buffer());
-        match symbols::find_definition(&all, document.buffer(), &word, cursor) {
-            Some(symbol) => {
-                let position = symbol.position;
-                let name = symbol.name.clone();
+        let local = symbols::find_definition(&all, document.buffer(), &word, cursor)
+            .map(|symbol| (symbol.position, symbol.kind));
+
+        if let Some((position, kind)) = local {
+            if kind.is_definition() {
                 self.workspace
                     .active_mut()
                     .move_cursor(Movement::To(position), SelectionMode::Collapse);
                 self.focus_panel(Panel::Editor);
-                self.status = Status::info(format!("{name} defined on line {}", position.line + 1));
+                self.status = Status::info(format!("{word} defined on line {}", position.line + 1));
+                return;
             }
-            None => self.status = Status::warning(format!("'{word}' is not defined in this file")),
         }
+
+        if self.definition_in_another_file(&word) {
+            return;
+        }
+
+        if let Some((position, kind)) = local {
+            self.workspace
+                .active_mut()
+                .move_cursor(Movement::To(position), SelectionMode::Collapse);
+            self.focus_panel(Panel::Editor);
+            self.status = Status::warning(format!(
+                "only the {} for {word} is here, on line {}",
+                kind.description(),
+                position.line + 1
+            ));
+            return;
+        }
+        self.status = Status::warning(format!("'{word}' is not defined in this project"));
+    }
+
+    /// Looks for `name` in the other open documents, then in the project's
+    fn definition_in_another_file(&mut self, name: &str) -> bool {
+        use crate::editor::symbols;
+
+        if name.starts_with('.') {
+            return false;
+        }
+
+        let active = self.workspace.active_index();
+        for index in 0..self.workspace.len() {
+            if index == active {
+                continue;
+            }
+            let buffer = self.workspace.documents()[index].buffer();
+            let found = symbols::extract(buffer)
+                .into_iter()
+                .find(|symbol| symbol.kind.is_definition() && symbol.matches_name(name));
+            if let Some(symbol) = found {
+                self.workspace.set_active(index);
+                self.jump_to_definition(name, symbol.position);
+                return true;
+            }
+        }
+
+        for path in self.project.source_paths() {
+            if self.index_of_document(&path).is_some() {
+                continue;
+            }
+            let Ok(text) = crate::editor::workspace::read_file(&path) else {
+                continue;
+            };
+            let buffer = crate::editor::TextBuffer::from_text(&text);
+            let found = symbols::extract(&buffer)
+                .into_iter()
+                .find(|symbol| symbol.kind.is_definition() && symbol.matches_name(name));
+            let Some(symbol) = found else { continue };
+
+            if self.show_file(&path) {
+                self.jump_to_definition(name, symbol.position);
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Moves the cursor to a definition found in the active document.
+    fn jump_to_definition(&mut self, name: &str, position: Position) {
+        self.workspace
+            .active_mut()
+            .move_cursor(Movement::To(position), SelectionMode::Collapse);
+        self.focus_panel(Panel::Editor);
+        self.status = Status::info(format!(
+            "{name} defined in {} on line {}",
+            self.workspace.active().display_name(),
+            position.line + 1
+        ));
     }
 
     /// Jumps to the first error of the last build.
@@ -946,21 +1023,65 @@ impl App {
             search::find_previous(document.buffer(), &self.search_query, cursor, options)
         };
 
-        match found {
-            Some(hit) => {
-                let range = hit.range;
-                self.workspace.active_mut().select_range(range);
-                self.focus_panel(Panel::Editor);
-                self.status = Status::info(format!(
-                    "'{}' on line {}",
-                    self.search_query,
-                    range.start.line + 1
-                ));
-            }
-            None => {
-                self.status = Status::warning(format!("'{}' not found", self.search_query));
-            }
+        if let Some(hit) = found {
+            let range = hit.range;
+            self.workspace.active_mut().select_range(range);
+            self.focus_panel(Panel::Editor);
+            self.status = Status::info(format!(
+                "'{}' on line {}",
+                self.search_query,
+                range.start.line + 1
+            ));
+            return;
         }
+
+        if self.find_in_another_document(forward) {
+            return;
+        }
+        self.status = Status::warning(format!("'{}' not found", self.search_query));
+    }
+
+    /// Continues the search in the next open document that has a match.
+    fn find_in_another_document(&mut self, forward: bool) -> bool {
+        use crate::editor::search::{self, SearchOptions};
+
+        let count = self.workspace.len();
+        if count < 2 {
+            return false;
+        }
+        let options = SearchOptions::new();
+        let active = self.workspace.active_index();
+
+        for step in 1..count {
+            let index = if forward {
+                (active + step) % count
+            } else {
+                (active + count - step) % count
+            };
+
+            let buffer = self.workspace.documents()[index].buffer();
+            let matches = search::find_all(buffer, &self.search_query, options);
+            let hit = if forward {
+                matches.first()
+            } else {
+                matches.last()
+            };
+            let Some(hit) = hit.map(|hit| hit.range) else {
+                continue;
+            };
+
+            self.workspace.set_active(index);
+            self.workspace.active_mut().select_range(hit);
+            self.focus_panel(Panel::Editor);
+            self.status = Status::info(format!(
+                "'{}' in {} on line {}",
+                self.search_query,
+                self.workspace.active().display_name(),
+                hit.start.line + 1
+            ));
+            return true;
+        }
+        false
     }
 
     /// Replaces every match of the current search query.
@@ -1691,6 +1812,92 @@ mod tests {
         app.apply(&Command::GoToDefinition);
         assert_eq!(app.workspace.active().cursor().line, 0);
         assert!(app.status.text.contains("_start"));
+    }
+
+    #[test]
+    fn go_to_definition_follows_an_extern_into_another_open_file() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let other = dir.path().join("util.asm");
+        std::fs::write(&other, "section .text\nhelper:\n    ret\n").expect("write");
+
+        let mut app = app_with_source("extern helper\n_start:\n    call helper\n");
+        app.workspace.active_mut().set_path("main.asm");
+        app.workspace.open(&other).expect("open");
+        app.workspace.set_active(0);
+        app.workspace.active_mut().move_cursor(
+            Movement::To(crate::editor::Position::new(2, 10)),
+            SelectionMode::Collapse,
+        );
+
+        app.apply(&Command::GoToDefinition);
+        assert_eq!(app.workspace.active().path(), Some(other.as_path()));
+        assert_eq!(app.workspace.active().cursor().line, 1);
+        assert!(app.status.text.contains("util.asm"), "{}", app.status.text);
+    }
+
+    #[test]
+    fn go_to_definition_opens_a_project_source_that_is_not_open_yet() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let mut project = Project::create(dir.path(), "cross").expect("create");
+        let other = dir.path().join("src/util.asm");
+        std::fs::write(&other, "section .text\nhelper:\n    ret\n").expect("write");
+        project.add_source(&other).expect("add");
+
+        let mut app = App::new(project, Settings::default()).expect("databases load");
+        app.workspace.active_mut().insert("    call helper\n");
+        app.workspace.active_mut().set_path("main.asm");
+        app.workspace.active_mut().move_cursor(
+            Movement::To(crate::editor::Position::new(0, 10)),
+            SelectionMode::Collapse,
+        );
+
+        app.apply(&Command::GoToDefinition);
+        assert_eq!(app.workspace.active().path(), Some(other.as_path()));
+    }
+
+    #[test]
+    fn a_declaration_is_not_mistaken_for_a_definition() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let other = dir.path().join("util.asm");
+        std::fs::write(&other, "global helper\nextern helper\n").expect("write");
+
+        let mut app = app_with_source("    call helper\n");
+        app.workspace.active_mut().set_path("main.asm");
+        app.workspace.open(&other).expect("open");
+        app.workspace.set_active(0);
+        app.workspace.active_mut().move_cursor(
+            Movement::To(crate::editor::Position::new(0, 10)),
+            SelectionMode::Collapse,
+        );
+
+        app.apply(&Command::GoToDefinition);
+        assert_eq!(app.status.severity, Severity::Warning);
+    }
+
+    #[test]
+    fn search_carries_on_into_the_next_open_document() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let other = dir.path().join("util.asm");
+        std::fs::write(&other, "one\ntwo\nneedle here\n").expect("write");
+
+        let mut app = app_with_source("nothing\nto see\n");
+        app.workspace.active_mut().set_path("main.asm");
+        app.workspace.open(&other).expect("open");
+        app.workspace.set_active(0);
+        app.search_query = "needle".to_owned();
+
+        app.apply(&Command::SearchNext);
+        assert_eq!(app.workspace.active().path(), Some(other.as_path()));
+        assert_eq!(app.workspace.active().cursor().line, 2);
+        assert_eq!(app.status.severity, Severity::Info);
+    }
+
+    #[test]
+    fn a_query_in_no_open_document_is_still_reported_missing() {
+        let mut app = app_with_source("nothing\n");
+        app.search_query = "needle".to_owned();
+        app.apply(&Command::SearchNext);
+        assert_eq!(app.status.severity, Severity::Warning);
     }
 
     #[test]
