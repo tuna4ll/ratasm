@@ -1,9 +1,4 @@
 //! Bracket matching across a buffer.
-//!
-//! Matching runs over the token stream rather than raw characters, so a
-//! bracket inside a comment or a string literal is invisible to it. That is
-//! the difference between a matcher that works on real source and one that
-//! desynchronises the first time someone writes `db "]"`.
 
 use super::buffer::TextBuffer;
 use super::position::Position;
@@ -11,6 +6,84 @@ use super::syntax::{self, TokenKind};
 
 /// The bracket pairs the editor matches.
 const PAIRS: [(char, char); 3] = [('[', ']'), ('(', ')'), ('{', '}')];
+
+/// The quote characters NASM delimits strings with.
+const QUOTES: [char; 3] = ['"', '\'', '`'];
+
+/// What typing a character should do, given what surrounds the cursor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Typing {
+    /// Insert the character on its own.
+    Insert,
+    /// Insert the character and its partner, leaving the cursor between them.
+    Close(char),
+    /// Step over the partner already sitting there rather than doubling it.
+    StepOver,
+    /// Put the pair around the selection instead of replacing it.
+    Wrap(char),
+}
+
+/// Whether a closing character may follow an auto-inserted opener.
+fn closes_before(next: Option<char>) -> bool {
+    match next {
+        None => true,
+        Some(ch) => ch.is_whitespace() || matches!(ch, ')' | ']' | '}' | ',' | ';' | ':'),
+    }
+}
+
+/// Whether `ch` continues an identifier, for deciding about a quote.
+fn word_character(ch: char) -> bool {
+    ch.is_alphanumeric() || matches!(ch, '_' | '.' | '$' | '?' | '@')
+}
+
+/// Decides what typing `ch` at the cursor should do.
+pub fn typing(ch: char, previous: Option<char>, next: Option<char>, has_selection: bool) -> Typing {
+    if let Some(close) = closing_for(ch) {
+        if has_selection {
+            return Typing::Wrap(close);
+        }
+        return if closes_before(next) {
+            Typing::Close(close)
+        } else {
+            Typing::Insert
+        };
+    }
+
+    if opening_for(ch).is_some() {
+        return if next == Some(ch) {
+            Typing::StepOver
+        } else {
+            Typing::Insert
+        };
+    }
+
+    if QUOTES.contains(&ch) {
+        if has_selection {
+            return Typing::Wrap(ch);
+        }
+        if next == Some(ch) {
+            return Typing::StepOver;
+        }
+        if previous.is_some_and(word_character) {
+            return Typing::Insert;
+        }
+        return if closes_before(next) {
+            Typing::Close(ch)
+        } else {
+            Typing::Insert
+        };
+    }
+
+    Typing::Insert
+}
+
+/// Whether backspace between these two characters should delete both.
+pub fn deletes_pair(previous: Option<char>, next: Option<char>) -> bool {
+    let (Some(previous), Some(next)) = (previous, next) else {
+        return false;
+    };
+    closing_for(previous) == Some(next) || (QUOTES.contains(&previous) && previous == next)
+}
 
 /// The closing bracket for an opening one.
 fn closing_for(ch: char) -> Option<char> {
@@ -41,7 +114,6 @@ struct Bracket {
 }
 
 /// Collects every bracket in the buffer, in document order, skipping any that
-/// appear inside comments or string literals.
 fn collect(buffer: &TextBuffer) -> Vec<Bracket> {
     let mut brackets = Vec::new();
     for (line_index, line) in buffer.lines().iter().enumerate() {
@@ -56,8 +128,6 @@ fn collect(buffer: &TextBuffer) -> Vec<Bracket> {
             if !is_bracket(ch) {
                 continue;
             }
-            // Punctuation tokens are one character, so the byte offset maps to
-            // a character column by counting the characters before it.
             let column = line[..token.start].chars().count();
             brackets.push(Bracket {
                 position: Position::new(line_index, column),
@@ -69,10 +139,6 @@ fn collect(buffer: &TextBuffer) -> Vec<Bracket> {
 }
 
 /// Finds the bracket matching the one at or just before `position`.
-///
-/// Checking the character before the cursor as well as the one under it is
-/// what makes matching feel right when the cursor sits just past a closing
-/// bracket, which is where it lands after typing one.
 pub fn matching_bracket(buffer: &TextBuffer, position: Position) -> Option<Position> {
     let brackets = collect(buffer);
     let before = position
@@ -133,9 +199,6 @@ fn scan_backward(brackets: &[Bracket], from: usize, open: char, close: char) -> 
 }
 
 /// Reports every unbalanced bracket in the buffer.
-///
-/// Used to warn about a missing `]` before the assembler does, which turns a
-/// confusing NASM parse error into an obvious highlight.
 pub fn unbalanced(buffer: &TextBuffer) -> Vec<Position> {
     let brackets = collect(buffer);
     let mut stack: Vec<Bracket> = Vec::new();
@@ -163,6 +226,55 @@ pub fn unbalanced(buffer: &TextBuffer) -> Vec<Position> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn an_opening_bracket_completes_itself_where_it_can() {
+        assert_eq!(typing('(', None, None, false), Typing::Close(')'));
+        assert_eq!(typing('[', Some('v'), Some(' '), false), Typing::Close(']'));
+        assert_eq!(typing('{', None, Some(')'), false), Typing::Close('}'));
+    }
+
+    #[test]
+    fn an_opening_bracket_before_a_word_is_left_alone() {
+        assert_eq!(typing('(', None, Some('f'), false), Typing::Insert);
+        assert_eq!(typing('[', None, Some('1'), false), Typing::Insert);
+    }
+
+    #[test]
+    fn a_closing_bracket_steps_over_the_one_already_there() {
+        assert_eq!(typing(')', None, Some(')'), false), Typing::StepOver);
+        assert_eq!(typing(']', None, Some(']'), false), Typing::StepOver);
+        assert_eq!(typing(')', None, Some('x'), false), Typing::Insert);
+        assert_eq!(typing('}', None, None, false), Typing::Insert);
+    }
+
+    #[test]
+    fn a_quote_closes_itself_and_steps_over_its_partner() {
+        assert_eq!(typing('"', None, None, false), Typing::Close('"'));
+        assert_eq!(typing('"', Some(' '), Some('"'), false), Typing::StepOver);
+        assert_eq!(typing('`', Some(','), Some(' '), false), Typing::Close('`'));
+    }
+
+    #[test]
+    fn an_apostrophe_after_a_word_is_prose_not_a_literal() {
+        assert_eq!(typing('\'', Some('n'), None, false), Typing::Insert);
+        assert_eq!(typing('\'', Some(' '), None, false), Typing::Close('\''));
+    }
+
+    #[test]
+    fn typing_a_pair_over_a_selection_wraps_it() {
+        assert_eq!(typing('(', None, Some('x'), true), Typing::Wrap(')'));
+        assert_eq!(typing('"', Some('n'), Some('x'), true), Typing::Wrap('"'));
+    }
+
+    #[test]
+    fn backspace_takes_an_empty_pair_as_one() {
+        assert!(deletes_pair(Some('('), Some(')')));
+        assert!(deletes_pair(Some('"'), Some('"')));
+        assert!(!deletes_pair(Some('('), Some(']')));
+        assert!(!deletes_pair(Some('a'), Some('b')));
+        assert!(!deletes_pair(None, Some(')')));
+    }
+
     fn buffer(text: &str) -> TextBuffer {
         TextBuffer::from_text(text)
     }
@@ -178,7 +290,6 @@ mod tests {
 
     #[test]
     fn matches_when_the_cursor_sits_just_past_a_bracket() {
-        // Where the cursor lands after typing the closing bracket.
         let buffer = buffer("    mov rax, [rsp]");
         assert_eq!(
             matching_bracket(&buffer, Position::new(0, 18)),
@@ -202,7 +313,6 @@ mod tests {
 
     #[test]
     fn brackets_inside_strings_are_ignored() {
-        // The case a character-scanning matcher gets wrong.
         let buffer = buffer("    db \"[not a bracket\", 0\n    mov rax, [rsp]");
         assert_eq!(
             matching_bracket(&buffer, Position::new(1, 13)),

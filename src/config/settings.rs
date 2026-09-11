@@ -1,13 +1,4 @@
 //! User settings, loaded from a configuration file.
-//!
-//! Settings are global to the user; project settings live in `.ratasm.toml`
-//! next to the source. The split matters: which theme you like belongs to you,
-//! which assembler a project needs belongs to the project, and a repository
-//! should not be able to change your key bindings.
-//!
-//! Every field has a default, so a missing or partial file is not an error.
-//! Unknown fields *are* an error, because a silently ignored setting is worse
-//! than a message pointing at the typo.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -28,6 +19,8 @@ pub struct EditorSettings {
     pub highlight_current_line: bool,
     /// Whether to show a marker on the matching bracket.
     pub match_brackets: bool,
+    /// Whether typing an opening bracket or quote inserts its partner.
+    pub auto_close_pairs: bool,
 }
 
 impl Default for EditorSettings {
@@ -37,6 +30,7 @@ impl Default for EditorSettings {
             line_numbers: true,
             highlight_current_line: true,
             match_brackets: true,
+            auto_close_pairs: true,
         }
     }
 }
@@ -54,10 +48,6 @@ pub struct DebuggerSettings {
     /// How many stack slots to show around the stack pointer.
     pub stack_depth: usize,
     /// Record execution so it can be stepped backwards.
-    ///
-    /// Recording makes every instruction cost more. That is invisible for the
-    /// small programs ratasm targets, and would not be for a large one, so it
-    /// can be turned off.
     pub record: bool,
 }
 
@@ -80,10 +70,6 @@ pub struct AppearanceSettings {
     /// The colour theme.
     pub theme: ThemeKind,
     /// Force Unicode glyphs on or off.
-    ///
-    /// `None` detects from the locale, which is right almost always; the
-    /// override exists for terminals that claim UTF-8 but render the box
-    /// characters badly.
     pub unicode: Option<bool>,
 }
 
@@ -137,11 +123,6 @@ impl Settings {
     pub const FILE_NAME: &'static str = "config.toml";
 
     /// Parses settings from TOML text.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`SettingsError::Parse`] when the text is malformed or names an
-    /// unknown field.
     pub fn from_toml(path: &Path, text: &str) -> Result<Self, SettingsError> {
         toml::from_str(text).map_err(|error| SettingsError::Parse {
             path: path.to_path_buf(),
@@ -150,15 +131,6 @@ impl Settings {
     }
 
     /// Loads settings from `path`, or the defaults when it does not exist.
-    ///
-    /// A missing file is normal — most users never write one — so it is not an
-    /// error. A file that exists but cannot be parsed *is*, because silently
-    /// ignoring it would leave the user's settings mysteriously inactive.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`SettingsError`] when the file exists but cannot be read or
-    /// parsed.
     pub fn load(path: &Path) -> Result<Self, SettingsError> {
         if !path.exists() {
             return Ok(Self::default());
@@ -171,10 +143,6 @@ impl Settings {
     }
 
     /// Loads settings from the default location.
-    ///
-    /// # Errors
-    ///
-    /// As [`Settings::load`].
     pub fn load_default() -> Result<Self, SettingsError> {
         match default_path() {
             Some(path) => Self::load(&path),
@@ -183,10 +151,6 @@ impl Settings {
     }
 
     /// Writes settings to `path`, creating parent directories.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`SettingsError::Write`] when the file cannot be written.
     pub fn save(&self, path: &Path) -> Result<(), SettingsError> {
         let text = toml::to_string_pretty(self).map_err(|error| SettingsError::Parse {
             path: path.to_path_buf(),
@@ -212,8 +176,6 @@ impl Settings {
 
     /// The debugger command timeout.
     pub fn debugger_timeout(&self) -> std::time::Duration {
-        // A zero timeout would hang the interface waiting for a reply that
-        // never comes, so it is treated as "use the default".
         let millis = if self.debugger.timeout_ms == 0 {
             DebuggerSettings::default().timeout_ms
         } else {
@@ -241,9 +203,6 @@ impl Settings {
     }
 
     /// Builds the keymap these settings describe.
-    ///
-    /// Returns the map together with any problems in the user's overrides, so
-    /// the caller can show them rather than silently dropping bindings.
     pub fn keymap(&self) -> (super::Keymap, Vec<super::KeymapError>) {
         let mut keymap = super::Keymap::defaults();
         let errors = keymap.apply_overrides(&self.keys);
@@ -252,9 +211,6 @@ impl Settings {
 }
 
 /// The default settings file location.
-///
-/// Follows the XDG specification: `$XDG_CONFIG_HOME/ratasm/config.toml`,
-/// falling back to `~/.config/ratasm/config.toml`.
 pub fn default_path() -> Option<PathBuf> {
     let base = std::env::var_os("XDG_CONFIG_HOME")
         .map(PathBuf::from)
@@ -324,7 +280,6 @@ stack_depth = 32
 
     #[test]
     fn a_misspelled_field_is_rejected_rather_than_ignored() {
-        // Silently ignoring this leaves the user wondering why nothing changed.
         let error = parse("[editor]\nindent_with = 8\n").expect_err("must fail");
         assert!(matches!(error, SettingsError::Parse { .. }));
     }
@@ -348,8 +303,6 @@ stack_depth = 32
 
     #[test]
     fn a_present_but_broken_file_is_an_error() {
-        // The opposite of a missing file: the user wrote something and needs
-        // to know it did not take effect.
         let dir = tempfile::tempdir().expect("temp dir");
         let path = dir.path().join("config.toml");
         std::fs::write(&path, "[editor]\nnonsense = 1\n").expect("write");
@@ -375,7 +328,6 @@ stack_depth = 32
 
     #[test]
     fn out_of_range_values_are_clamped_rather_than_rejected() {
-        // A silly number should not stop the editor starting.
         let settings = parse(
             "[editor]\nindent_width = 0\n\n[debugger]\nmemory_window = 1\nstack_depth = 9999\n",
         )
@@ -388,7 +340,6 @@ stack_depth = 32
 
     #[test]
     fn a_zero_debugger_timeout_falls_back_to_the_default() {
-        // Zero would mean waiting forever for a reply that never comes.
         let settings = parse("[debugger]\ntimeout_ms = 0\n").expect("parses");
         assert_eq!(
             settings.debugger_timeout(),
@@ -422,7 +373,6 @@ stack_depth = 32
 
     #[test]
     fn the_default_path_follows_the_xdg_specification() {
-        // Recorded so a change to the location is a deliberate decision.
         let path = default_path().expect("a path");
         let text = path.display().to_string();
         assert!(text.ends_with("ratasm/config.toml"), "{text}");

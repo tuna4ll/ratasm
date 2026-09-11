@@ -140,6 +140,20 @@ terminal normally would; most terminals reserve that for exactly this.
 | <kbd>Home</kbd> | First non-blank character, then column zero |
 | <kbd>Ctrl</kbd>+<kbd>←</kbd> / <kbd>→</kbd> | Word left / right |
 
+Selection works the way it does anywhere else: <kbd>Shift</kbd> with any
+movement key extends it, <kbd>Ctrl</kbd>+<kbd>A</kbd> takes the whole buffer,
+and typing replaces what is selected. <kbd>Ctrl</kbd>+<kbd>C</kbd>,
+<kbd>Ctrl</kbd>+<kbd>X</kbd> and <kbd>Ctrl</kbd>+<kbd>V</kbd> copy, cut and
+paste; with nothing selected, copy and cut take the whole line.
+
+Typing `(`, `[`, `{`, `"`, `'` or `` ` `` inserts its partner and leaves the
+cursor between them, unless the next character is part of a word. Typing the
+closing character steps over the one already there rather than doubling it, and
+backspace between an empty pair removes both. With text selected, typing an
+opening character wraps it instead of replacing it. An apostrophe after a word
+is left alone, so `don't` in a comment stays as written.
+`auto_close_pairs = false` turns all of that off.
+
 Inside the editor, <kbd>Tab</kbd> indents rather than changing panel — an
 editor that cannot insert an indent is not much of an editor. To leave the
 editor by keyboard use <kbd>Alt</kbd> plus a digit, which focuses a panel

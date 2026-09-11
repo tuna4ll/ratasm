@@ -112,6 +112,7 @@ indent_width = 4
 line_numbers = true
 highlight_current_line = true
 match_brackets = true
+auto_close_pairs = true
 
 [debugger]
 gdb = "gdb"
@@ -139,6 +140,7 @@ record = true
 | `line_numbers` | `true` | Show line numbers beside the source. |
 | `highlight_current_line` | `true` | Tint the line the cursor is on. |
 | `match_brackets` | `true` | Mark the bracket matching the one at the cursor. |
+| `auto_close_pairs` | `true` | Typing `(`, `[`, `{`, `"`, `'` or `` ` `` inserts its partner. |
 
 ### `[debugger]`
 

@@ -340,9 +340,11 @@ fn handle_editor(app: &mut App, key: KeyEvent) -> Effect {
         SelectionMode::Collapse
     };
     let word_wise = key.modifiers.contains(KeyModifiers::CONTROL);
+    let auto_pairs = app.settings.editor.auto_close_pairs;
     let document = app.workspace.active_mut();
 
     match key.code {
+        KeyCode::Char(ch) if auto_pairs => document.type_char(ch),
         KeyCode::Char(ch) => document.insert_char(ch),
         KeyCode::Enter => document.insert_newline(),
         KeyCode::Backspace => document.backspace(),
@@ -593,6 +595,52 @@ mod tests {
         );
         let area = layout.area_of(panel).expect("the panel is drawn");
         (area.x + 2, area.y + 2)
+    }
+
+    #[test]
+    fn selecting_with_shift_then_typing_replaces_the_selection() {
+        let mut app = app();
+        type_text(&mut app, "mov rax, 1");
+        for _ in 0..4 {
+            handle_key(&mut app, shift(KeyCode::Left));
+        }
+        assert_eq!(app.workspace.active().selected_text(), "x, 1");
+
+        handle_key(&mut app, press(KeyCode::Char('9')));
+        assert_eq!(app.workspace.active().buffer().to_text(), "mov ra9");
+    }
+
+    #[test]
+    fn select_all_then_cut_and_paste_round_trips() {
+        let mut app = app();
+        type_text(&mut app, "mov rax, 1");
+
+        handle_key(&mut app, ctrl('a'));
+        assert_eq!(app.workspace.active().selected_text(), "mov rax, 1");
+
+        handle_key(&mut app, ctrl('x'));
+        assert_eq!(app.workspace.active().buffer().to_text(), "");
+
+        handle_key(&mut app, ctrl('v'));
+        assert_eq!(app.workspace.active().buffer().to_text(), "mov rax, 1");
+    }
+
+    #[test]
+    fn typing_a_bracket_in_the_editor_completes_the_pair() {
+        let mut app = app();
+        type_text(&mut app, "lea rsi, [rel message");
+        assert_eq!(
+            app.workspace.active().buffer().to_text(),
+            "lea rsi, [rel message]"
+        );
+    }
+
+    #[test]
+    fn pairing_can_be_turned_off() {
+        let mut app = app();
+        app.settings.editor.auto_close_pairs = false;
+        type_text(&mut app, "[");
+        assert_eq!(app.workspace.active().buffer().to_text(), "[");
     }
 
     #[test]

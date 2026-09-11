@@ -1,13 +1,4 @@
 //! An open file: text, cursor, selection, history and viewport.
-//!
-//! A [`Document`] is the unit the user thinks of as "a tab". It owns a
-//! [`TextBuffer`] and a [`History`] and adds everything positional — where the
-//! cursor is, what is selected, how far the view has scrolled.
-//!
-//! Nothing here draws. The viewport is tracked as plain numbers and
-//! [`Document::scroll_into_view`] is called by the renderer with the height it
-//! happens to have; the document never learns what a terminal is. That is what
-//! makes every behaviour below testable without a screen.
 
 use std::path::{Path, PathBuf};
 
@@ -63,10 +54,6 @@ pub struct Document {
     cursor: Position,
     anchor: Option<Position>,
     /// Column the cursor "wants" during vertical movement.
-    ///
-    /// Moving down through a short line and back up must return to the
-    /// original column; without a remembered target the cursor would be
-    /// permanently pulled left by the shortest line it crossed.
     desired_column: Option<usize>,
     scroll_line: usize,
     scroll_column: usize,
@@ -154,10 +141,6 @@ impl Document {
     }
 
     /// The current selection, or `None` when nothing is selected.
-    ///
-    /// An anchor equal to the cursor is reported as no selection, so a click
-    /// that sets an anchor without dragging does not produce an empty
-    /// highlight.
     pub fn selection(&self) -> Option<Range> {
         let anchor = self.anchor?;
         if anchor == self.cursor {
@@ -202,7 +185,6 @@ impl Document {
 
     /// Moves the cursor, optionally extending the selection.
     pub fn move_cursor(&mut self, movement: Movement, mode: SelectionMode) {
-        // Moving ends a typing burst, so the next edit starts a new undo step.
         self.history.seal();
 
         match mode {
@@ -243,7 +225,6 @@ impl Document {
             Movement::PageDown(rows) => self.vertical(Some(cursor.line + rows)),
             Movement::LineStart => {
                 let indent = self.indentation_end(cursor.line);
-                // Smart home: jump to the text, then to the true start.
                 if cursor.column > indent {
                     Position::new(cursor.line, indent)
                 } else {
@@ -283,7 +264,6 @@ impl Document {
 
     fn word_boundary_before(&self, from: Position) -> Position {
         let mut position = from;
-        // Step back over any run of separators, then over the word itself.
         loop {
             let Some(previous) = self.buffer.position_before(position) else {
                 return Position::ORIGIN;
@@ -385,10 +365,70 @@ impl Document {
         self.insert(ch.encode_utf8(&mut buffer));
     }
 
+    /// The character immediately before the cursor, if any.
+    pub fn char_before_cursor(&self) -> Option<char> {
+        let line = self.buffer.line_or_empty(self.cursor.line);
+        self.cursor
+            .column
+            .checked_sub(1)
+            .and_then(|column| line.chars().nth(column))
+    }
+
+    /// The character immediately after the cursor, if any.
+    pub fn char_after_cursor(&self) -> Option<char> {
+        self.buffer
+            .line_or_empty(self.cursor.line)
+            .chars()
+            .nth(self.cursor.column)
+    }
+
+    /// Types `ch`, completing brackets and quotes as an editor is expected to.
+    pub fn type_char(&mut self, ch: char) {
+        use super::brackets::{self, Typing};
+
+        let action = brackets::typing(
+            ch,
+            self.char_before_cursor(),
+            self.char_after_cursor(),
+            self.has_selection(),
+        );
+
+        match action {
+            Typing::Insert => self.insert_char(ch),
+            Typing::StepOver => {
+                self.move_cursor(Movement::Right, SelectionMode::Collapse);
+            }
+            Typing::Close(close) => {
+                self.insert(&format!("{ch}{close}"));
+                self.move_cursor(Movement::Left, SelectionMode::Collapse);
+            }
+            Typing::Wrap(close) => {
+                let selected = self.selected_text();
+                self.insert(&format!("{ch}{selected}{close}"));
+                let end = self.cursor;
+                if let Some(before_close) = self.buffer.position_before(end) {
+                    self.select_range(Range::new(
+                        self.position_back(before_close, selected.chars().count()),
+                        before_close,
+                    ));
+                }
+            }
+        }
+    }
+
+    /// Steps `count` characters back from `position`.
+    fn position_back(&self, position: Position, count: usize) -> Position {
+        let mut position = position;
+        for _ in 0..count {
+            match self.buffer.position_before(position) {
+                Some(previous) => position = previous,
+                None => break,
+            }
+        }
+        position
+    }
+
     /// Inserts a newline, carrying the current line's indentation with it.
-    ///
-    /// A line ending in `:` is a label, so the new line is indented one extra
-    /// level — the layout assembly source almost always wants.
     pub fn insert_newline(&mut self) {
         let line = self.cursor.line;
         let text = self.buffer.line_or_empty(line);
@@ -401,7 +441,6 @@ impl Document {
         let mut inserted = String::with_capacity(indent.len() + 1);
         inserted.push('\n');
         if opens_block {
-            // Indent relative to the label rather than the label's own indent.
             inserted.push_str(&indent);
             inserted.push_str(&" ".repeat(self.indent_width));
         } else {
@@ -416,6 +455,17 @@ impl Document {
         if self.delete_selection() {
             return;
         }
+
+        if super::brackets::deletes_pair(self.char_before_cursor(), self.char_after_cursor()) {
+            if let (Some(previous), Some(next)) = (
+                self.buffer.position_before(self.cursor),
+                self.buffer.position_after(self.cursor),
+            ) {
+                self.apply(Range::new(previous, next), "");
+                return;
+            }
+        }
+
         if let Some(previous) = self.buffer.position_before(self.cursor) {
             self.apply(Range::new(previous, self.cursor), "");
         }
@@ -460,9 +510,6 @@ impl Document {
     }
 
     /// Rewrites each line touched by the selection, or the cursor's line.
-    ///
-    /// Lines are rewritten from the bottom up so that earlier edits do not
-    /// invalidate the positions of later ones.
     fn for_each_selected_line<F>(&mut self, mut rewrite: F)
     where
         F: FnMut(usize, &str) -> Option<String>,
@@ -503,8 +550,6 @@ impl Document {
         }
 
         if changed {
-            // Keep the cursor and selection on their original lines; columns
-            // are clamped because the lines may have grown or shrunk.
             self.cursor = self.buffer.clamp(cursor);
             self.anchor = anchor.map(|position| self.buffer.clamp(position));
             self.history.seal();
@@ -518,8 +563,6 @@ impl Document {
     }
 
     /// Undoes the most recent change.
-    ///
-    /// Returns `true` when something was undone.
     pub fn undo(&mut self) -> bool {
         match self.history.undo(&mut self.buffer) {
             Some(restored) => {
@@ -533,8 +576,6 @@ impl Document {
     }
 
     /// Redoes the most recently undone change.
-    ///
-    /// Returns `true` when something was redone.
     pub fn redo(&mut self) -> bool {
         match self.history.redo(&mut self.buffer) {
             Some(restored) => {
@@ -558,9 +599,6 @@ impl Document {
     }
 
     /// Moves the cursor to a one-based line number, as typed by a user.
-    ///
-    /// Line 0 and lines past the end clamp to the nearest real line rather
-    /// than being rejected, so "go to line 9999" lands at the end.
     pub fn go_to_line(&mut self, line_number: usize) {
         let line = line_number.saturating_sub(1);
         self.move_cursor(
@@ -570,10 +608,6 @@ impl Document {
     }
 
     /// Scrolls the viewport so the cursor is visible in a window of `height`
-    /// rows and `width` columns.
-    ///
-    /// Called by the renderer, which is the only part of the system that knows
-    /// how large the window is.
     pub fn scroll_into_view(&mut self, height: usize, width: usize) {
         if height > 0 {
             if self.cursor.line < self.scroll_line {
@@ -607,6 +641,93 @@ impl Default for Document {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Types each character of `text` through the auto-pairing path.
+    fn type_text(document: &mut Document, text: &str) {
+        for ch in text.chars() {
+            document.type_char(ch);
+        }
+    }
+
+    #[test]
+    fn typing_a_bracket_leaves_the_cursor_inside_the_pair() {
+        let mut document = Document::new();
+        type_text(&mut document, "    lea rsi, [");
+
+        assert_eq!(document.buffer().to_text(), "    lea rsi, []");
+        assert_eq!(document.cursor().column, 14, "the cursor sits inside");
+
+        type_text(&mut document, "rel message");
+        assert_eq!(document.buffer().to_text(), "    lea rsi, [rel message]");
+    }
+
+    #[test]
+    fn typing_the_closing_bracket_walks_over_it() {
+        let mut document = Document::new();
+        type_text(&mut document, "(rax)");
+        assert_eq!(document.buffer().to_text(), "(rax)", "not (rax))");
+        assert_eq!(document.cursor().column, 5);
+    }
+
+    #[test]
+    fn a_quoted_string_closes_and_steps_over() {
+        let mut document = Document::new();
+        type_text(&mut document, "db \"hi\", 10");
+        assert_eq!(document.buffer().to_text(), "db \"hi\", 10");
+    }
+
+    #[test]
+    fn an_apostrophe_in_a_comment_stays_single() {
+        let mut document = Document::new();
+        type_text(&mut document, "; don't");
+        assert_eq!(document.buffer().to_text(), "; don't");
+    }
+
+    #[test]
+    fn backspace_removes_an_empty_pair_whole() {
+        let mut document = Document::new();
+        type_text(&mut document, "mov rax, [");
+        assert_eq!(document.buffer().to_text(), "mov rax, []");
+
+        document.backspace();
+        assert_eq!(document.buffer().to_text(), "mov rax, ");
+    }
+
+    #[test]
+    fn backspace_leaves_a_pair_that_holds_something() {
+        let mut document = Document::new();
+        type_text(&mut document, "[rax");
+        document.backspace();
+        assert_eq!(document.buffer().to_text(), "[ra]");
+    }
+
+    #[test]
+    fn typing_a_bracket_over_a_selection_wraps_it() {
+        let mut document = Document::new();
+        document.insert("rel message");
+        document.select_all();
+        document.type_char('[');
+
+        assert_eq!(document.buffer().to_text(), "[rel message]");
+        assert_eq!(
+            document.selected_text(),
+            "rel message",
+            "the text stays selected so wrapping twice nests"
+        );
+
+        document.type_char('(');
+        assert_eq!(document.buffer().to_text(), "[(rel message)]");
+    }
+
+    #[test]
+    fn an_opening_bracket_before_a_word_does_not_complete() {
+        let mut document = Document::new();
+        document.insert("rax");
+        document.move_cursor(Movement::LineStart, SelectionMode::Collapse);
+        document.type_char('[');
+
+        assert_eq!(document.buffer().to_text(), "[rax", "no stray bracket");
+    }
 
     fn document(text: &str) -> Document {
         Document::from_text(text)
@@ -690,8 +811,6 @@ mod tests {
 
     #[test]
     fn vertical_movement_remembers_the_desired_column() {
-        // The behaviour a naive implementation gets wrong: passing through a
-        // short line must not permanently shorten the cursor's column.
         let mut document = document("mov rax, 1\nret\nmov rbx, 2");
         at(&mut document, 0, 9);
         document.move_cursor(Movement::Down, SelectionMode::Collapse);
@@ -979,7 +1098,6 @@ mod tests {
 
     #[test]
     fn editing_never_leaves_the_cursor_outside_the_buffer() {
-        // A blunt check that no operation can strand the cursor.
         let mut document = document("mov rax, 1\nret\n");
         type Operation = Box<dyn Fn(&mut Document)>;
         let operations: Vec<Operation> = vec![
