@@ -72,9 +72,11 @@ that some assembler versions reject.
 | `args` | `[]` | Arguments passed to your program. |
 | `timeout_ms` | `5000` | Milliseconds before the program is killed. |
 | `working_directory` | *(the project root)* | Where the program runs. |
-| `stdin` | *(none)* | Text supplied on standard input. |
+| `stdin` | *(none)* | Text preloaded on standard input before interactive input. |
 
 `timeout_ms = 0` disables the limit, for a program that is meant to keep going.
+Run output appears in the interactive Output terminal; `stdin` is useful for a
+repeatable initial answer, and typing can continue after it.
 
 ## Two rules the loader enforces
 

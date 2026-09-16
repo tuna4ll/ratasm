@@ -66,6 +66,10 @@ stub. <kbd>F6</kbd> assembles it, <kbd>F5</kbd> runs it, <kbd>F9</kbd> sets a
 breakpoint on the current line, and <kbd>F7</kbd> steps one instruction while
 you watch the registers move.
 
+Running opens a real terminal in the Output panel. Programs can prompt, read
+input, move the cursor and use ANSI colour; the same terminal is attached when
+the program runs under GDB. <kbd>Ctrl</kbd>+<kbd>F5</kbd> stops it.
+
 `ratasm file.asm` opens single files, several at once if you name several.
 
 ## Pages
@@ -169,9 +173,6 @@ and never through a shell.
 - Copying reaches the system clipboard through OSC 52 where the terminal allows
   it, but pasting only sees what ratasm copied: reading the clipboard back is
   not something a terminal reliably permits.
-- A program's input and output are captured rather than interactive. `stdin` in
-  `.ratasm.toml` supplies fixed input; <kbd>Ctrl</kbd>+<kbd>F5</kbd> stops a
-  program that will not stop itself.
 
 ## Contributing
 
@@ -187,9 +188,8 @@ notes: [docs/architecture.md](docs/architecture.md).
 
 ## Roadmap
 
-Watchpoints and conditional breakpoints, a pseudo-terminal so interactive
-programs can be debugged, AT&T syntax throughout, GAS source support, more
-lessons, and AArch64 and RISC-V back ends.
+Watchpoints and conditional breakpoints, AT&T syntax throughout, GAS source
+support, more lessons, and AArch64 and RISC-V back ends.
 
 ## Licence
 

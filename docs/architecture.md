@@ -89,11 +89,16 @@ See [debugger.md](debugger.md) for the protocol details.
 
 ## Processes
 
-Every external tool goes through `process::run`. Arguments are passed as a
-vector to `execve`, never interpolated into a shell string, so a path with a
-space or a semicolon is just a path. Both pipes are drained concurrently,
-because waiting for exit while a pipe buffer fills is the classic hang. Every
-run is bounded by a timeout, and the child is always reaped.
+Build tools go through `process::run`. Arguments are passed as a vector to
+`execve`, never interpolated into a shell string, so a path with a space or a
+semicolon is just a path. Both pipes are drained concurrently, because waiting
+for exit while a pipe buffer fills is the classic hang.
+
+Programs use `process::pty`: a new session owns a pseudo-terminal, output is
+streamed into a VT parser, input and resize events travel back to the child, and
+stopping kills the whole process group. GDB keeps its MI pipes separate and
+assigns the same kind of PTY to the inferior. Both paths are bounded and reap
+the processes they own.
 
 ## Assets as data
 

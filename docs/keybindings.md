@@ -12,8 +12,8 @@ page bar across the top names them, with the number that opens it:
 | <kbd>Alt</kbd>+<kbd>3</kbd> | Learn | Lessons and questions, the scratchpad, the explanation |
 | <kbd>Alt</kbd>+<kbd>4</kbd> | Reference | System calls and instruction semantics |
 
-<kbd>Tab</kbd> moves between the panels of the *current page*, so it stays a
-navigation key rather than a search through fourteen panels. Starting a debug
+<kbd>Tab</kbd> moves between the panels of the *current page*, except while a
+live terminal has focus, where it is sent to the program. Starting a debug
 session opens the Debug page, and so does stopping at a breakpoint — being
 stopped is the one moment the machine state is unambiguously what you want.
 
@@ -47,6 +47,21 @@ The <kbd>Shift</kbd> keys undo a step. They need GDB's process recording, which
 ratasm turns on when a session starts (`debugger.record` in `.ratasm.toml`
 switches it off). Stepping back past the start of the recording is refused
 rather than guessed at.
+
+### The interactive Output terminal
+
+<kbd>F5</kbd> builds and runs the program in the Output panel. While that panel
+has focus, ordinary keys, control characters such as <kbd>Ctrl</kbd>+<kbd>C</kbd>,
+arrow and function keys, Unicode text and pasted text go to the program. ANSI
+colour, cursor movement, alternate-screen programs and terminal resizing are
+interpreted as they would be in a standalone terminal.
+
+Application navigation remains available: <kbd>Alt</kbd>+<kbd>1</kbd> through
+<kbd>4</kbd> leaves the terminal for another page,
+<kbd>Ctrl</kbd>+<kbd>P</kbd> opens the command palette, and
+<kbd>Ctrl</kbd>+<kbd>F5</kbd> stops the program. The same terminal is connected
+to a program running under GDB, and the interface remains responsive while the
+inferior waits for input.
 
 ### Learning and experimenting
 
@@ -100,8 +115,10 @@ than fits.
 | <kbd>PgUp</kbd> / <kbd>PgDn</kbd> | Scroll a screenful |
 | <kbd>Home</kbd> / <kbd>End</kbd> | First row / last screenful |
 
-The output panel keeps showing its newest line as a build writes to it. Scroll
-up and it stays where you put it; <kbd>End</kbd> makes it follow again.
+Completed output keeps showing its newest line. Scroll up and it stays where
+you put it; <kbd>End</kbd> makes it follow again. A live terminal instead uses
+the navigation keys itself, then becomes an ordinary scrollable log when the
+program exits.
 
 ### The explorer
 

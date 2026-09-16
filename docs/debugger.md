@@ -34,6 +34,15 @@ That token is the only reliable way to match an answer to its question:
 asynchronous events arrive interleaved with replies, so matching on order breaks
 the first time the program hits a breakpoint while a command is in flight.
 
+## The inferior terminal
+
+GDB's own protocol stays on pipes, but the program being debugged is assigned a
+separate pseudo-terminal with `-inferior-tty-set`. Its bytes go through the same
+VT screen used by a normal run, so prompts, input, colour and cursor movement do
+not get mixed into MI records. Waiting for the next debugger stop happens on a
+background task; the UI can therefore keep drawing output and forwarding keys
+while the inferior blocks in `read`.
+
 ## Values are parsed, not split
 
 MI values form a small recursive grammar of strings, tuples and lists. They are
