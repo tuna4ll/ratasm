@@ -23,6 +23,15 @@ env:
   # without a lockfile change to review.
 
 jobs:
+  dependencies:
+    name: Dependency policy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check advisories, licences and sources
+        uses: EmbarkStudios/cargo-deny-action@v2.1.1
+
   check:
     name: Format and lint
     runs-on: ubuntu-latest

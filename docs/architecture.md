@@ -136,7 +136,7 @@ if a stated answer disagrees with the machine.
 
 ## Testing
 
-Around 970 tests, all runnable without a terminal. The parsers are exercised
+More than 1,000 tests, all runnable without a terminal. The parsers are exercised
 from fixtures captured from real GDB and NASM output. Tests needing `gdb`,
 `nasm` or `ld` skip themselves when those are absent, so the suite passes on a
 bare machine while still covering the real thing when it is available.
