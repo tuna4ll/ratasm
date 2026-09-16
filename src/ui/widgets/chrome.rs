@@ -548,7 +548,21 @@ pub fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
     };
 
     let room = usize::from(area.width).saturating_sub(used);
-    let text = super::truncate(&app.status.text, room, symbols.ellipsis);
+    let text = if app.status.text.chars().count() > room {
+        let hint = format!("{} F3", symbols.ellipsis);
+        if hint.chars().count() <= room {
+            let keep = room - hint.chars().count();
+            format!(
+                "{}{}",
+                app.status.text.chars().take(keep).collect::<String>(),
+                hint
+            )
+        } else {
+            super::truncate(&app.status.text, room, symbols.ellipsis)
+        }
+    } else {
+        app.status.text.clone()
+    };
     let padding = room.saturating_sub(text.chars().count());
 
     let spans = vec![

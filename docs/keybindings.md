@@ -54,6 +54,7 @@ rather than guessed at.
 | --- | --- |
 | <kbd>F1</kbd> | Learning panel: lessons and questions |
 | <kbd>F2</kbd> | Scratchpad: try one instruction |
+| <kbd>F3</kbd> | Show the complete status message in Output |
 
 In the learning panel, <kbd>←</kbd> and <kbd>→</kbd> move through the material,
 <kbd>?</kbd> jumps to the questions, and on a question you type a value and
@@ -271,6 +272,7 @@ code, so a command missing here is a build failure rather than a surprise.
 | `app.syscalls` | Find a system call |
 | `app.scratchpad` | Open scratchpad |
 | `app.keybindings` | Show keyboard shortcuts |
+| `app.status-details` | Show status details |
 | `navigate.page.code` | Code page |
 | `navigate.page.debug` | Debug page |
 | `navigate.page.learn` | Learn page |

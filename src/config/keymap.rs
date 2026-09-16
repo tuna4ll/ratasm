@@ -297,6 +297,7 @@ impl Keymap {
             Command::ToggleLearningMode,
         );
         bind(KeyBinding::plain(KeyCode::F(2)), Command::OpenScratchpad);
+        bind(KeyBinding::plain(KeyCode::F(3)), Command::ShowStatusDetails);
         bind(KeyBinding::plain(KeyCode::Tab), Command::NextPanel);
         bind(KeyBinding::plain(KeyCode::BackTab), Command::PreviousPanel);
         bind(KeyBinding::ctrl(KeyCode::PageDown), Command::NextDocument);

@@ -105,6 +105,7 @@ nothing.
 | <kbd>Shift</kbd>+<kbd>F7</kbd> | Step one instruction backwards |
 | <kbd>F9</kbd> | Toggle breakpoint |
 | <kbd>F1</kbd> / <kbd>F2</kbd> | Learning panel / scratchpad |
+| <kbd>F3</kbd> | Show the complete status message in Output |
 | <kbd>Ctrl</kbd>+<kbd>P</kbd> | Command palette |
 | <kbd>Ctrl</kbd>+<kbd>S</kbd> / <kbd>Ctrl</kbd>+<kbd>O</kbd> | Save / open |
 | <kbd>Ctrl</kbd>+<kbd>F</kbd> / <kbd>Ctrl</kbd>+<kbd>G</kbd> | Search / go to line or address |

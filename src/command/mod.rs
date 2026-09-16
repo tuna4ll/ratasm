@@ -200,6 +200,8 @@ pub enum Command {
     OpenScratchpad,
     /// Show the keyboard shortcuts.
     ShowKeybindings,
+    /// Copy the complete status message to the output panel.
+    ShowStatusDetails,
 }
 
 impl Command {
@@ -265,6 +267,7 @@ impl Command {
             Command::OpenSyscallFinder,
             Command::OpenScratchpad,
             Command::ShowKeybindings,
+            Command::ShowStatusDetails,
         ];
         commands.extend(Page::ALL.map(Command::GoToPage));
         commands.extend(Panel::ALL.map(Command::FocusPanel));
@@ -344,6 +347,7 @@ impl Command {
             Command::OpenSyscallFinder => "app.syscalls".into(),
             Command::OpenScratchpad => "app.scratchpad".into(),
             Command::ShowKeybindings => "app.keybindings".into(),
+            Command::ShowStatusDetails => "app.status-details".into(),
         }
     }
 
@@ -420,6 +424,7 @@ impl Command {
             Command::OpenSyscallFinder => "Find a system call".into(),
             Command::OpenScratchpad => "Open scratchpad".into(),
             Command::ShowKeybindings => "Show keyboard shortcuts".into(),
+            Command::ShowStatusDetails => "Show status details".into(),
         }
     }
 
@@ -459,6 +464,9 @@ impl Command {
             Command::OpenSyscallFinder => "Search Linux system calls by name or number".into(),
             Command::OpenScratchpad => "Try an instruction without making a project".into(),
             Command::ToggleLearningMode => "Show explanations and exercises alongside".into(),
+            Command::ShowStatusDetails => {
+                "Show the complete status message in the output panel".into()
+            }
             other => other.title(),
         }
     }
@@ -533,7 +541,8 @@ impl Command {
             | Command::OpenPalette
             | Command::OpenSyscallFinder
             | Command::OpenScratchpad
-            | Command::ShowKeybindings => Category::Application,
+            | Command::ShowKeybindings
+            | Command::ShowStatusDetails => Category::Application,
         }
     }
 

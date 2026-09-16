@@ -575,6 +575,10 @@ mod tests {
             Some(100),
             "the status bar stays exactly one row wide"
         );
+        assert!(
+            rows.last().is_some_and(|row| row.contains("F3")),
+            "a truncated message must say how to reveal the rest"
+        );
     }
 
     #[test]

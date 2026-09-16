@@ -613,6 +613,12 @@ impl App {
                 }
                 Effect::None
             }
+            Command::ShowStatusDetails => {
+                let message = self.status.text.clone();
+                self.output.push(message);
+                self.focus_panel(Panel::Output);
+                Effect::None
+            }
         }
     }
 
@@ -2194,6 +2200,19 @@ mod tests {
         assert_eq!(app.focus, Panel::Output);
         assert!(app.output.iter().any(|line| line.contains("ctrl+s")));
         assert!(app.output.iter().any(|line| line.contains("F5")));
+    }
+
+    #[test]
+    fn status_details_put_the_complete_message_in_output() {
+        let mut app = app();
+        let message = "a diagnostic too long for the status bar";
+        app.status = Status::error(message);
+
+        app.apply(&Command::ShowStatusDetails);
+
+        assert_eq!(app.focus, Panel::Output);
+        assert_eq!(app.output.last().map(String::as_str), Some(message));
+        assert_eq!(app.status.text, message, "the command remains repeatable");
     }
 
     #[test]
