@@ -133,6 +133,11 @@ pub fn environment_cd(path: &Path) -> Command {
     Command::new("-environment-cd").arg(path.display().to_string())
 }
 
+/// Connects the inferior's standard streams to a pseudo-terminal.
+pub fn inferior_tty_set(path: &Path) -> Command {
+    Command::new("-inferior-tty-set").arg(path.display().to_string())
+}
+
 /// Starts the program, stopping at its entry point.
 ///
 /// `--start` is used rather than plain run so the debugger always gets an
@@ -424,6 +429,14 @@ mod tests {
             r#"3-file-exec-and-symbols "/tmp/evil\" -exec-run \"/x""#
         );
         assert_eq!(rendered.matches("-exec-run").count(), 1);
+    }
+
+    #[test]
+    fn an_inferior_terminal_path_is_a_single_mi_argument() {
+        assert_eq!(
+            inferior_tty_set(Path::new("/dev/pts/12")).render(4),
+            "4-inferior-tty-set /dev/pts/12"
+        );
     }
 
     #[test]

@@ -33,6 +33,11 @@ const TICK: Duration = Duration::from_millis(250);
 enum Background {
     /// The scratchpad snippet finished, or could not be run.
     Scratchpad(Result<crate::scratchpad::Outcome, String>),
+    /// A resumed inferior stopped again, or the wait failed.
+    DebugStopped {
+        session: Box<GdbSession>,
+        result: Result<Record, String>,
+    },
 }
 
 /// Work in flight, so a second request can be refused and the first cancelled.
@@ -42,6 +47,8 @@ struct Running {
     handle: Option<tokio::task::JoinHandle<()>>,
     /// Commands for an interactive child, when the task owns a PTY.
     control: Option<tokio::sync::mpsc::UnboundedSender<PtyControl>>,
+    /// Interrupt request for a GDB wait task.
+    interrupt: Option<tokio::sync::mpsc::UnboundedSender<()>>,
 }
 
 impl Running {
@@ -60,10 +67,18 @@ impl Running {
         match self.handle.take() {
             Some(task) if !task.is_finished() => {
                 task.abort();
+                self.interrupt = None;
                 true
             }
             _ => false,
         }
+    }
+
+    /// Asks a terminal transport to flush and close itself.
+    fn request_stop(&self) -> bool {
+        self.control
+            .as_ref()
+            .is_some_and(|control| control.send(PtyControl::Stop).is_ok())
     }
 
     /// Sends bytes to the interactive child.
@@ -79,6 +94,39 @@ impl Running {
             let _ = control.send(PtyControl::Resize(size));
         }
     }
+
+    /// Stops and forgets a transport that has no child process of its own.
+    fn abort(&mut self) {
+        if let Some(control) = self.control.take() {
+            let _ = control.send(PtyControl::Stop);
+        }
+        if let Some(task) = self.handle.take() {
+            task.abort();
+        }
+        self.interrupt = None;
+    }
+}
+
+/// The ordinary background task and the debugger inferior's terminal transport.
+#[derive(Default)]
+struct Runtimes {
+    background: Running,
+    debugger: Running,
+}
+
+impl Runtimes {
+    fn terminal(&self) -> &Running {
+        if self.background.control.is_some() {
+            &self.background
+        } else {
+            &self.debugger
+        }
+    }
+
+    fn resize(&self, size: PtySize) {
+        self.background.resize(size);
+        self.debugger.resize(size);
+    }
 }
 
 /// Runs the interface until the user quits.
@@ -87,11 +135,11 @@ pub async fn run(mut app: App, terminal: &mut Tui) -> Result<()> {
     let mut session: Option<GdbSession> = None;
     let (finished_tx, mut finished_rx) = tokio::sync::mpsc::unbounded_channel::<Background>();
     let (pty_tx, mut pty_rx) = tokio::sync::mpsc::unbounded_channel::<PtyEvent>();
-    let mut running = Running::default();
+    let mut runtimes = Runtimes::default();
 
     loop {
         let size = terminal.size().context("cannot read the terminal size")?;
-        sync_terminal_size(&mut app, &running, size.width, size.height);
+        sync_terminal_size(&mut app, &runtimes, size.width, size.height);
         render::sync_scroll(&mut app, size.width, size.height);
         terminal
             .draw(|frame| render::draw(frame, &app))
@@ -103,9 +151,9 @@ pub async fn run(mut app: App, terminal: &mut Tui) -> Result<()> {
 
         let effect = tokio::select! {
             event = events.next() => match event {
-                Some(Ok(Event::Key(key))) => handle_key_event(&mut app, &running, key),
+                Some(Ok(Event::Key(key))) => handle_key_event(&mut app, &runtimes, key),
                 Some(Ok(Event::Paste(text))) => {
-                    handle_terminal_paste(&app, &running, text);
+                    handle_terminal_paste(&app, &runtimes, text);
                     Effect::None
                 }
                 Some(Ok(Event::Mouse(mouse))) => {
@@ -116,12 +164,13 @@ pub async fn run(mut app: App, terminal: &mut Tui) -> Result<()> {
                 Some(Err(_)) | None => break,
             },
             Some(done) = finished_rx.recv() => {
-                running.handle = None;
-                finish_background(&mut app, done);
+                runtimes.background.handle = None;
+                runtimes.background.interrupt = None;
+                finish_background(&mut app, &mut session, done).await;
                 Effect::None
             },
             Some(event) = pty_rx.recv() => {
-                finish_pty_event(&mut app, &mut running, event);
+                finish_pty_event(&mut app, &mut runtimes, event);
                 Effect::None
             },
             () = tokio::time::sleep(TICK) => Effect::None,
@@ -132,15 +181,19 @@ pub async fn run(mut app: App, terminal: &mut Tui) -> Result<()> {
             &mut session,
             &finished_tx,
             &pty_tx,
-            &mut running,
+            &mut runtimes,
             (size.width, size.height),
             effect,
         )
         .await;
         drain_debugger_events(&mut app, &mut session).await;
+        if session.is_none() && runtimes.debugger.is_busy() {
+            let _ = runtimes.debugger.request_stop();
+        }
     }
 
-    running.cancel();
+    runtimes.background.abort();
+    runtimes.debugger.abort();
 
     if let Some(session) = session {
         session.shutdown().await;
@@ -149,7 +202,7 @@ pub async fn run(mut app: App, terminal: &mut Tui) -> Result<()> {
 }
 
 /// Applies one key event.
-fn handle_key_event(app: &mut App, running: &Running, key: KeyEvent) -> Effect {
+fn handle_key_event(app: &mut App, runtimes: &Runtimes, key: KeyEvent) -> Effect {
     if app.terminal.is_some() && app.focus == super::Panel::Output && !app.mode.is_overlay() {
         if let Some(command) = app.keymap.command_for_event(key).cloned() {
             if terminal_reserved_command(&command) {
@@ -161,7 +214,7 @@ fn handle_key_event(app: &mut App, running: &Running, key: KeyEvent) -> Effect {
             .as_ref()
             .is_some_and(|terminal| terminal.screen().application_cursor());
         if let Some(bytes) = terminal_key_bytes(key, application_cursor) {
-            let _ = running.input(bytes);
+            let _ = runtimes.terminal().input(bytes);
         }
         return Effect::None;
     }
@@ -175,6 +228,10 @@ fn terminal_reserved_command(command: &Command) -> bool {
         Command::Stop
             | Command::Quit
             | Command::OpenPalette
+            | Command::Run
+            | Command::DebugContinue
+            | Command::DebugInterrupt
+            | Command::DebugStop
             | Command::GoToPage(_)
             | Command::NextPage
             | Command::PreviousPage
@@ -254,7 +311,7 @@ fn function_key(number: u8) -> Option<&'static [u8]> {
     })
 }
 
-fn handle_terminal_paste(app: &App, running: &Running, text: String) {
+fn handle_terminal_paste(app: &App, runtimes: &Runtimes, text: String) {
     if app.terminal.is_none() || app.focus != super::Panel::Output || app.mode.is_overlay() {
         return;
     }
@@ -267,11 +324,11 @@ fn handle_terminal_paste(app: &App, running: &Running, text: String) {
     } else {
         text.into_bytes()
     };
-    let _ = running.input(bytes);
+    let _ = runtimes.terminal().input(bytes);
 }
 
 /// Keeps both the parser and the kernel PTY aligned with the visible Output panel.
-fn sync_terminal_size(app: &mut App, running: &Running, width: u16, height: u16) {
+fn sync_terminal_size(app: &mut App, runtimes: &Runtimes, width: u16, height: u16) {
     let Some(size) = output_terminal_size(app, width, height) else {
         return;
     };
@@ -283,7 +340,7 @@ fn sync_terminal_size(app: &mut App, running: &Running, width: u16, height: u16)
         if let Some(terminal) = &mut app.terminal {
             terminal.resize(size);
         }
-        running.resize(size);
+        runtimes.resize(size);
     }
 }
 
@@ -306,7 +363,7 @@ async fn perform(
     session: &mut Option<GdbSession>,
     finished: &tokio::sync::mpsc::UnboundedSender<Background>,
     pty_events: &tokio::sync::mpsc::UnboundedSender<PtyEvent>,
-    running: &mut Running,
+    runtimes: &mut Runtimes,
     viewport: (u16, u16),
     effect: Effect,
 ) {
@@ -318,15 +375,28 @@ async fn perform(
         }
 
         Effect::Run => {
-            if running.is_busy() {
+            if runtimes.background.is_busy() || runtimes.debugger.is_busy() {
                 app.status = Status::warning("Something is already running");
             } else if build(app, false).await {
-                start_program(app, pty_events, running, viewport.0, viewport.1);
+                start_program(
+                    app,
+                    pty_events,
+                    &mut runtimes.background,
+                    viewport.0,
+                    viewport.1,
+                );
             }
         }
 
         Effect::StopProgram => {
-            if running.cancel() {
+            if app.debugger.state() == crate::debugger::DebuggerState::Running
+                && session.is_none()
+                && runtimes.background.cancel()
+            {
+                stop_session(app, session).await;
+                let _ = runtimes.debugger.request_stop();
+                app.status = Status::warning("Debug session stopped");
+            } else if runtimes.background.cancel() {
                 app.status = Status::warning("Stopped");
             } else {
                 app.status = Status::info("Nothing is running");
@@ -379,11 +449,30 @@ async fn perform(
             Err(error) => app.status = Status::error(error.to_string()),
         },
 
-        Effect::DebugStart => start_session(app, session).await,
-        Effect::DebugStop => stop_session(app, session).await,
+        Effect::DebugStart => {
+            let size =
+                output_terminal_size(app, viewport.0, viewport.1).unwrap_or(PtySize::new(80, 24));
+            start_session(app, session, &mut runtimes.debugger, pty_events, size).await;
+        }
+        Effect::DebugStop => {
+            if session.is_none() && app.debugger.state() == crate::debugger::DebuggerState::Running
+            {
+                runtimes.background.abort();
+            }
+            stop_session(app, session).await;
+            let _ = runtimes.debugger.request_stop();
+        }
 
         Effect::DebugContinue => {
-            resume(app, session, &mi::exec_continue(), "continuing").await;
+            resume(
+                app,
+                session,
+                finished,
+                &mut runtimes.background,
+                &mi::exec_continue(),
+                "continuing",
+            )
+            .await;
         }
         Effect::Step(kind) => {
             let command = match kind {
@@ -395,20 +484,24 @@ async fn perform(
                 StepKind::BackOver => mi::exec_next_instruction_reverse(),
                 StepKind::ReverseContinue => mi::exec_continue_reverse(),
             };
-            resume(app, session, &command, "stepping").await;
+            resume(
+                app,
+                session,
+                finished,
+                &mut runtimes.background,
+                &command,
+                "stepping",
+            )
+            .await;
         }
 
         Effect::DebugInterrupt => {
-            let Some(active) = session.as_mut() else {
-                return;
-            };
-            match active.execute(&mi::exec_interrupt()).await {
-                Ok(_) => {
-                    if let Ok(record) = active.wait_for_stop(STOP_TIMEOUT).await {
-                        handle_stop(app, session, &record).await;
-                    }
+            if let Some(interrupt) = &runtimes.background.interrupt {
+                if interrupt.send(()).is_ok() {
+                    app.status = Status::info("Interrupting…");
                 }
-                Err(error) => app.status = Status::error(error.to_string()),
+            } else {
+                app.status = Status::warning("The program is not running");
             }
         }
 
@@ -417,10 +510,10 @@ async fn perform(
         Effect::ReadMemory(address) => read_memory(app, session, address).await,
 
         Effect::RunScratchpad => {
-            if running.is_busy() {
+            if runtimes.background.is_busy() || runtimes.debugger.is_busy() {
                 app.status = Status::warning("Something is already running");
             } else {
-                start_snippet(app, finished, running);
+                start_snippet(app, finished, &mut runtimes.background);
             }
         }
 
@@ -539,7 +632,7 @@ fn start_snippet(
 }
 
 /// Folds the result of a background task back into the application.
-fn finish_background(app: &mut App, done: Background) {
+async fn finish_background(app: &mut App, session: &mut Option<GdbSession>, done: Background) {
     match done {
         Background::Scratchpad(Ok(outcome)) => {
             app.status = if outcome.is_empty() {
@@ -553,10 +646,27 @@ fn finish_background(app: &mut App, done: Background) {
             app.status = Status::error(error.clone());
             app.scratchpad_result = Some(Err(error));
         }
+        Background::DebugStopped {
+            session: active,
+            result,
+        } => {
+            // The task that owned this sender has completed.
+            *session = Some(*active);
+            match result {
+                Ok(record) => handle_stop(app, session, &record).await,
+                Err(error) => {
+                    app.status = Status::error(error);
+                    let _ = app.debugger.apply(Transition::SessionFailed);
+                    if let Some(active) = session.take() {
+                        active.shutdown().await;
+                    }
+                }
+            }
+        }
     }
 }
 
-fn finish_pty_event(app: &mut App, running: &mut Running, event: PtyEvent) {
+fn finish_pty_event(app: &mut App, runtimes: &mut Runtimes, event: PtyEvent) {
     match event {
         PtyEvent::Output(bytes) => {
             if let Some(terminal) = &mut app.terminal {
@@ -564,8 +674,8 @@ fn finish_pty_event(app: &mut App, running: &mut Running, event: PtyEvent) {
             }
         }
         PtyEvent::Finished(result) => {
-            running.handle = None;
-            running.control = None;
+            runtimes.background.handle = None;
+            runtimes.background.control = None;
             match result {
                 Ok(output) => app.finish_run(output),
                 Err(error) => {
@@ -573,6 +683,11 @@ fn finish_pty_event(app: &mut App, running: &mut Running, event: PtyEvent) {
                     app.status = Status::error(error.to_string());
                 }
             }
+        }
+        PtyEvent::Closed => {
+            runtimes.debugger.handle = None;
+            runtimes.debugger.control = None;
+            app.finish_terminal();
         }
     }
 }
@@ -594,7 +709,13 @@ fn load_static_disassembly(app: &mut App, executable: &Path) {
 }
 
 /// Starts a debug session.
-async fn start_session(app: &mut App, session: &mut Option<GdbSession>) {
+async fn start_session(
+    app: &mut App,
+    session: &mut Option<GdbSession>,
+    terminal_runtime: &mut Running,
+    terminal_events: &tokio::sync::mpsc::UnboundedSender<PtyEvent>,
+    terminal_size: PtySize,
+) {
     if !build(app, true).await {
         return;
     }
@@ -624,6 +745,27 @@ async fn start_session(app: &mut App, session: &mut Option<GdbSession>) {
     };
     active.set_timeout(app.settings.debugger_timeout());
 
+    terminal_runtime.abort();
+    let (tty_path, endpoint) = match crate::process::pty::PtyPair::open(terminal_size)
+        .and_then(crate::process::pty::PtyPair::into_endpoint)
+    {
+        Ok(terminal) => terminal,
+        Err(error) => {
+            let _ = app
+                .debugger
+                .fail(Transition::LaunchFailed, error.to_string());
+            app.status = Status::error(error.to_string());
+            active.shutdown().await;
+            return;
+        }
+    };
+    let (control_tx, control_rx) = tokio::sync::mpsc::unbounded_channel();
+    let events = terminal_events.clone();
+    terminal_runtime.control = Some(control_tx);
+    terminal_runtime.handle = Some(tokio::spawn(endpoint.run(control_rx, events)));
+    app.terminal = Some(super::terminal::TerminalScreen::new(terminal_size));
+    app.output.clear();
+
     let setup = async {
         active
             .execute(&mi::file_exec_and_symbols(&executable))
@@ -631,6 +773,7 @@ async fn start_session(app: &mut App, session: &mut Option<GdbSession>) {
         active
             .execute(&mi::environment_cd(&app.project.run_directory()))
             .await?;
+        active.execute(&mi::inferior_tty_set(&tty_path)).await?;
         active
             .execute(&mi::set_disassembly_flavor(
                 app.disassembly_syntax == disassembler::Syntax::Intel,
@@ -743,27 +886,48 @@ async fn stop_session(app: &mut App, session: &mut Option<GdbSession>) {
 async fn resume(
     app: &mut App,
     session: &mut Option<GdbSession>,
+    finished: &tokio::sync::mpsc::UnboundedSender<Background>,
+    running: &mut Running,
     command: &crate::debugger::mi::Command,
     what: &str,
 ) {
-    let Some(active) = session.as_mut() else {
+    let Some(mut active) = session.take() else {
         app.status = Status::warning("No debug session");
         return;
     };
 
     if let Err(error) = active.execute(command).await {
         app.status = Status::error(error.to_string());
+        *session = Some(active);
         return;
     }
     let _ = app.debugger.apply(Transition::Resumed);
+    app.status = Status::info(format!("{what}…"));
 
-    match active.wait_for_stop(STOP_TIMEOUT).await {
-        Ok(record) => handle_stop(app, session, &record).await,
-        Err(error) => {
-            app.status = Status::error(format!("{what}: {error}"));
-            let _ = app.debugger.apply(Transition::SessionFailed);
-        }
-    }
+    let finished = finished.clone();
+    let what = what.to_owned();
+    let (interrupt_tx, mut interrupt_rx) = tokio::sync::mpsc::unbounded_channel();
+    running.interrupt = Some(interrupt_tx);
+    running.handle = Some(tokio::spawn(async move {
+        let stopped = tokio::select! {
+            result = active.wait_for_stop(STOP_TIMEOUT) => result,
+            request = interrupt_rx.recv() => {
+                if request.is_none() {
+                    Err(crate::debugger::SessionError::Terminated)
+                } else {
+                    match active.execute(&mi::exec_interrupt()).await {
+                        Ok(_) => active.wait_for_stop(STOP_TIMEOUT).await,
+                        Err(error) => Err(error),
+                    }
+                }
+            }
+        };
+        let result = stopped.map_err(|error| format!("{what}: {error}"));
+        let _ = finished.send(Background::DebugStopped {
+            session: Box::new(active),
+            result,
+        });
+    }));
 }
 
 /// Records a stop and refreshes everything that depends on it.
@@ -1056,28 +1220,39 @@ mod tests {
     async fn settle(app: &mut App, session: &mut Option<GdbSession>, effect: Effect) {
         let (finished, mut incoming) = tokio::sync::mpsc::unbounded_channel();
         let (pty_events, mut pty_incoming) = tokio::sync::mpsc::unbounded_channel();
-        let mut running = Running::default();
+        let mut runtimes = Runtimes::default();
         perform(
             app,
             session,
             &finished,
             &pty_events,
-            &mut running,
+            &mut runtimes,
             (160, 48),
             effect,
         )
         .await;
-        while running.handle.is_some() {
+        while runtimes.background.handle.is_some() {
             tokio::select! {
                 Some(done) = incoming.recv() => {
-                    running.handle = None;
-                    finish_background(app, done);
+                    runtimes.background.handle = None;
+                    runtimes.background.interrupt = None;
+                    finish_background(app, session, done).await;
                 }
                 Some(event) = pty_incoming.recv() => {
-                    finish_pty_event(app, &mut running, event);
+                    finish_pty_event(app, &mut runtimes, event);
                 }
             }
         }
+    }
+
+    async fn start_test_session(
+        app: &mut App,
+        session: &mut Option<GdbSession>,
+    ) -> (Running, tokio::sync::mpsc::UnboundedReceiver<PtyEvent>) {
+        let mut runtime = Running::default();
+        let (events, incoming) = tokio::sync::mpsc::unbounded_channel();
+        start_session(app, session, &mut runtime, &events, PtySize::new(80, 24)).await;
+        (runtime, incoming)
     }
 
     #[tokio::test]
@@ -1234,7 +1409,7 @@ mod tests {
 
         let (finished, _incoming) = tokio::sync::mpsc::unbounded_channel();
         let (pty_events, mut pty_incoming) = tokio::sync::mpsc::unbounded_channel();
-        let mut running = Running::default();
+        let mut runtimes = Runtimes::default();
         let mut session = None;
 
         perform(
@@ -1242,32 +1417,35 @@ mod tests {
             &mut session,
             &finished,
             &pty_events,
-            &mut running,
+            &mut runtimes,
             (160, 48),
             Effect::Run,
         )
         .await;
-        assert!(running.is_busy(), "the program should still be looping");
+        assert!(
+            runtimes.background.is_busy(),
+            "the program should still be looping"
+        );
 
         perform(
             &mut app,
             &mut session,
             &finished,
             &pty_events,
-            &mut running,
+            &mut runtimes,
             (160, 48),
             Effect::StopProgram,
         )
         .await;
         assert_eq!(app.status.severity, crate::app::Severity::Warning);
-        while running.handle.is_some() {
+        while runtimes.background.handle.is_some() {
             let event = tokio::time::timeout(Duration::from_secs(2), pty_incoming.recv())
                 .await
                 .expect("the stopped process should finish")
                 .expect("PTY event channel");
-            finish_pty_event(&mut app, &mut running, event);
+            finish_pty_event(&mut app, &mut runtimes, event);
         }
-        assert!(!running.is_busy());
+        assert!(!runtimes.background.is_busy());
     }
 
     #[tokio::test]
@@ -1329,7 +1507,8 @@ mod tests {
         open_project_entry(&mut app);
 
         let mut session = None;
-        start_session(&mut app, &mut session).await;
+        let (_terminal_runtime, _terminal_events) =
+            start_test_session(&mut app, &mut session).await;
         assert!(session.is_some(), "session: {}", app.status.text);
 
         settle(&mut app, &mut session, Effect::Step(StepKind::Instruction)).await;
@@ -1368,7 +1547,8 @@ mod tests {
         .expect("write");
 
         let mut session = None;
-        start_session(&mut app, &mut session).await;
+        let (_terminal_runtime, _terminal_events) =
+            start_test_session(&mut app, &mut session).await;
         assert!(session.is_some(), "session: {}", app.status.text);
 
         settle(&mut app, &mut session, Effect::Step(StepKind::Instruction)).await;
@@ -1426,7 +1606,8 @@ mod tests {
         .expect("write");
 
         let mut session = None;
-        start_session(&mut app, &mut session).await;
+        let (_terminal_runtime, _terminal_events) =
+            start_test_session(&mut app, &mut session).await;
         assert!(session.is_some(), "session: {}", app.status.text);
 
         settle(&mut app, &mut session, Effect::Step(StepKind::Instruction)).await;
@@ -1463,7 +1644,8 @@ mod tests {
         app.breakpoints.add_symbol("helper");
 
         let mut session = None;
-        start_session(&mut app, &mut session).await;
+        let (_terminal_runtime, _terminal_events) =
+            start_test_session(&mut app, &mut session).await;
         assert!(session.is_some(), "session: {}", app.status.text);
 
         settle(&mut app, &mut session, Effect::DebugContinue).await;
@@ -1503,7 +1685,8 @@ mod tests {
         .expect("write");
 
         let mut session = None;
-        start_session(&mut app, &mut session).await;
+        let (_terminal_runtime, _terminal_events) =
+            start_test_session(&mut app, &mut session).await;
 
         assert!(
             session.is_some(),
@@ -1529,5 +1712,73 @@ mod tests {
         settle(&mut app, &mut session, Effect::DebugStop).await;
         assert!(session.is_none(), "the session should be gone");
         assert!(app.registers.is_empty(), "state should have been cleared");
+    }
+
+    #[tokio::test]
+    async fn a_debugged_program_can_read_from_its_terminal() {
+        for tool in ["nasm", "ld", "gdb"] {
+            if !crate::process::is_available(Path::new(tool)) {
+                eprintln!("skipping: {tool} not installed");
+                return;
+            }
+        }
+
+        let dir = tempfile::tempdir().expect("temp dir");
+        let mut app = app_for(dir.path());
+        app.settings.debugger.record = false;
+        std::fs::write(
+            app.project.entry_path(),
+            "section .data\n    label db 'Got: '\n    label_len equ $-label\n\
+             section .bss\n    input resb 16\n\
+             section .text\n    global _start\n_start:\n\
+             mov eax, 0\n    mov edi, 0\n    mov rsi, input\n    mov edx, 16\n    syscall\n\
+             mov r12, rax\n    mov eax, 1\n    mov edi, 1\n    mov rsi, label\n\
+             mov edx, label_len\n    syscall\n    mov eax, 1\n    mov rsi, input\n\
+             mov rdx, r12\n    syscall\n    mov eax, 60\n    xor edi, edi\n    syscall\n",
+        )
+        .expect("write");
+
+        let mut session = None;
+        let (mut terminal_runtime, mut terminal_events) =
+            start_test_session(&mut app, &mut session).await;
+        assert!(session.is_some(), "session: {}", app.status.text);
+        let input = terminal_runtime
+            .control
+            .as_ref()
+            .expect("terminal input")
+            .clone();
+        let send_input = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            input
+                .send(PtyControl::Input(b"Ada\r".to_vec()))
+                .expect("inferior terminal");
+        });
+
+        settle(&mut app, &mut session, Effect::DebugContinue).await;
+        send_input.await.expect("input task");
+        assert!(
+            session.is_none(),
+            "the program should have exited: {} ({})",
+            app.status.text,
+            app.debugger.state()
+        );
+        assert!(terminal_runtime.request_stop());
+
+        let mut output = Vec::new();
+        loop {
+            let event = tokio::time::timeout(Duration::from_secs(2), terminal_events.recv())
+                .await
+                .expect("terminal should close")
+                .expect("terminal event");
+            match event {
+                PtyEvent::Output(bytes) => output.extend(bytes),
+                PtyEvent::Closed => break,
+                PtyEvent::Finished(_) => panic!("debug endpoints do not own the inferior"),
+            }
+        }
+        terminal_runtime.abort();
+
+        let output = String::from_utf8_lossy(&output);
+        assert!(output.contains("Got: Ada"), "{output:?}");
     }
 }

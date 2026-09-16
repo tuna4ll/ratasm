@@ -63,6 +63,8 @@ pub enum PtyEvent {
     Output(Vec<u8>),
     /// The terminal has closed and the complete outcome is available.
     Finished(Result<ProcessOutput, ProcessError>),
+    /// A debugger-owned terminal transport has flushed and closed.
+    Closed,
 }
 
 /// One open pseudo-terminal before its slave has been assigned.
@@ -90,6 +92,34 @@ impl PtyPair {
             operation: "find the pseudo-terminal slave",
             source: io::Error::from_raw_os_error(error as i32),
         })
+    }
+
+    /// Turns the pair into an endpoint for a debugger-managed inferior.
+    pub fn into_endpoint(self) -> Result<(std::path::PathBuf, PtyEndpoint), ProcessError> {
+        let path = self.slave_path()?;
+        let reader = self
+            .master
+            .try_clone()
+            .map_err(|source| ProcessError::Pty {
+                operation: "duplicate the pseudo-terminal master",
+                source,
+            })?;
+        let resizer = self
+            .master
+            .try_clone()
+            .map_err(|source| ProcessError::Pty {
+                operation: "duplicate the pseudo-terminal master",
+                source,
+            })?;
+        Ok((
+            path,
+            PtyEndpoint {
+                reader: tokio::fs::File::from_std(reader),
+                writer: tokio::fs::File::from_std(self.master),
+                resizer,
+                slave: self.slave,
+            },
+        ))
     }
 
     /// Spawns `spec` with all three standard streams connected to the slave.
@@ -170,6 +200,73 @@ impl PtyPair {
     }
 }
 
+/// The ratasm side of a PTY whose slave is opened by another process, such as GDB.
+pub struct PtyEndpoint {
+    reader: tokio::fs::File,
+    writer: tokio::fs::File,
+    resizer: File,
+    // Keeping one slave descriptor open avoids a transient EIO before GDB
+    // launches its inferior. It is dropped with the endpoint.
+    slave: OwnedFd,
+}
+
+impl PtyEndpoint {
+    /// Streams terminal bytes until the endpoint is stopped or disconnected.
+    pub async fn run(
+        self,
+        mut controls: mpsc::UnboundedReceiver<PtyControl>,
+        events: mpsc::UnboundedSender<PtyEvent>,
+    ) {
+        let Self {
+            mut reader,
+            mut writer,
+            resizer,
+            slave,
+        } = self;
+        let _keep_slave_open = slave;
+        let mut buffer = vec![0; 8192];
+
+        loop {
+            tokio::select! {
+                result = reader.read(&mut buffer) => match result {
+                    Ok(0) | Err(_) => break,
+                    Ok(read) => {
+                        let _ = events.send(PtyEvent::Output(buffer[..read].to_vec()));
+                    }
+                },
+                control = controls.recv() => match control {
+                    Some(PtyControl::Input(bytes)) => {
+                        if writer.write_all(&bytes).await.is_err() {
+                            break;
+                        }
+                        let _ = writer.flush().await;
+                    }
+                    Some(PtyControl::Resize(size)) => {
+                        if resize(&resizer, size).is_err() {
+                            break;
+                        }
+                    }
+                    Some(PtyControl::Stop) | None => break,
+                }
+            }
+        }
+
+        // Output may become readable at the same instant as the stop request.
+        // Give it a brief chance to reach the UI before declaring the endpoint closed.
+        loop {
+            let read =
+                tokio::time::timeout(Duration::from_millis(10), reader.read(&mut buffer)).await;
+            match read {
+                Ok(Ok(count)) if count > 0 => {
+                    let _ = events.send(PtyEvent::Output(buffer[..count].to_vec()));
+                }
+                _ => break,
+            }
+        }
+        let _ = events.send(PtyEvent::Closed);
+    }
+}
+
 struct PtyChild {
     child: Child,
     reader: tokio::fs::File,
@@ -218,6 +315,7 @@ impl PtyChild {
         tokio::pin!(limit);
 
         let mut forced = None;
+        let mut controls_open = true;
         let status = loop {
             tokio::select! {
                 status = self.child.wait() => break status,
@@ -226,7 +324,7 @@ impl PtyChild {
                     kill_process_group(&mut self.child);
                     break self.child.wait().await;
                 }
-                control = controls.recv() => match control {
+                control = controls.recv(), if controls_open => match control {
                     Some(PtyControl::Input(bytes)) => {
                         let _ = self.writer.write_all(&bytes).await;
                         let _ = self.writer.flush().await;
@@ -239,7 +337,7 @@ impl PtyChild {
                         kill_process_group(&mut self.child);
                         break self.child.wait().await;
                     }
-                    None => {}
+                    None => controls_open = false,
                 }
             }
         }
@@ -344,6 +442,7 @@ mod tests {
                     assert!(output.stdout.contains("Hello Ada"), "{}", output.stdout);
                     break;
                 }
+                PtyEvent::Closed => panic!("a child run is not an endpoint"),
             }
         }
     }
@@ -365,11 +464,15 @@ mod tests {
         ));
 
         while let Some(event) = event_rx.recv().await {
-            if let PtyEvent::Finished(result) = event {
-                let output = result.expect("PTY run");
-                assert!(output.is_success(), "{:?}", output.outcome);
-                assert!(output.stdout.contains("19 73"), "{}", output.stdout);
-                break;
+            match event {
+                PtyEvent::Finished(result) => {
+                    let output = result.expect("PTY run");
+                    assert!(output.is_success(), "{:?}", output.outcome);
+                    assert!(output.stdout.contains("19 73"), "{}", output.stdout);
+                    break;
+                }
+                PtyEvent::Output(_) => {}
+                PtyEvent::Closed => panic!("a child run is not an endpoint"),
             }
         }
     }

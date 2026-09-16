@@ -838,11 +838,7 @@ impl App {
 
     /// Records a finished program run.
     pub fn finish_run(&mut self, output: ProcessOutput) {
-        self.output = self
-            .terminal
-            .take()
-            .map(TerminalScreen::into_lines)
-            .unwrap_or_default();
+        self.finish_terminal();
         if self.output.is_empty() && !output.stdout.is_empty() {
             self.output.extend(output.stdout.lines().map(str::to_owned));
         }
@@ -865,6 +861,14 @@ impl App {
         };
         self.focus_panel(Panel::Output);
         self.last_run = Some(output);
+    }
+
+    /// Freezes a live terminal into the ordinary scrollable Output log.
+    pub fn finish_terminal(&mut self) {
+        if let Some(terminal) = self.terminal.take() {
+            self.output = terminal.into_lines();
+            self.scroll.reset(Panel::Output);
+        }
     }
 
     /// Moves the cursor to the definition of the symbol under it.
