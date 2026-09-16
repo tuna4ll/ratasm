@@ -34,6 +34,7 @@ object = { version = "0.36", default-features = false, features = [
     "elf",
     "std",
 ] }
+nix = { version = "0.31", features = ["fs", "ioctl", "process", "signal", "term"] }
 ratatui = "0.29"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
@@ -44,6 +45,7 @@ tokio = { version = "1.40", features = [
     "macros",
     "process",
     "io-util",
+    "fs",
     "sync",
     "time",
     "signal",
@@ -52,6 +54,7 @@ toml = "0.8"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 unicode-width = "0.2"
+vt100 = "0.15.2"
 
 [dev-dependencies]
 tokio = { version = "1.40", features = ["rt", "macros", "time", "process"] }

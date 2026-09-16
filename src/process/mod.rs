@@ -19,6 +19,8 @@
 //! **No lock-up.** A timeout bounds every run, so a program that never exits
 //! cannot take the editor down with it.
 
+pub mod pty;
+
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::{Duration, Instant};
@@ -29,6 +31,15 @@ use tokio::process::Command;
 /// Errors from launching or supervising a process.
 #[derive(Debug, thiserror::Error)]
 pub enum ProcessError {
+    /// A pseudo-terminal could not be opened or configured.
+    #[error("cannot {operation}: {source}")]
+    Pty {
+        /// The operation that failed.
+        operation: &'static str,
+        /// The underlying operating-system error.
+        #[source]
+        source: std::io::Error,
+    },
     /// The program could not be found or executed.
     #[error("cannot run '{program}': {source}")]
     Spawn {
@@ -68,6 +79,8 @@ pub enum Outcome {
     Signalled(i32),
     /// Killed because it exceeded its timeout.
     TimedOut,
+    /// Stopped at the user's request.
+    Stopped,
 }
 
 impl Outcome {
@@ -88,6 +101,7 @@ impl Outcome {
     pub fn signal_name(self) -> Option<&'static str> {
         match self {
             Outcome::Signalled(signal) => Some(signal_name(signal)),
+            Outcome::Stopped => None,
             _ => None,
         }
     }
@@ -101,6 +115,7 @@ impl Outcome {
                 format!("killed by signal {signal} ({})", signal_name(signal))
             }
             Outcome::TimedOut => "timed out".to_owned(),
+            Outcome::Stopped => "stopped".to_owned(),
         }
     }
 }
