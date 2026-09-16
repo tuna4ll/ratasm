@@ -27,7 +27,7 @@ impl TerminalScreen {
         if self.size == size {
             return;
         }
-        self.parser.set_size(size.rows, size.columns);
+        self.parser.screen_mut().set_size(size.rows, size.columns);
         self.size = size;
     }
 
@@ -43,18 +43,18 @@ impl TerminalScreen {
 
     /// Converts the visible screen and its scrollback to plain log lines.
     pub fn into_lines(mut self) -> Vec<String> {
-        self.parser.set_scrollback(usize::MAX);
+        self.parser.screen_mut().set_scrollback(usize::MAX);
         let history = self.parser.screen().scrollback();
         let mut lines = Vec::with_capacity(history + usize::from(self.size.rows));
 
         for offset in (1..=history).rev() {
-            self.parser.set_scrollback(offset);
+            self.parser.screen_mut().set_scrollback(offset);
             if let Some(line) = self.parser.screen().rows(0, self.size.columns).next() {
                 lines.push(line);
             }
         }
 
-        self.parser.set_scrollback(0);
+        self.parser.screen_mut().set_scrollback(0);
         lines.extend(self.parser.screen().rows(0, self.size.columns));
         while lines.last().is_some_and(|line| line.is_empty()) {
             lines.pop();

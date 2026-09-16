@@ -74,7 +74,7 @@ fn terminal_lines<'a>(
                 .filter(|cell| !cell.is_wide_continuation())
                 .map(|cell| {
                     let text = if cell.has_contents() {
-                        cell.contents()
+                        cell.contents().to_owned()
                     } else {
                         " ".to_owned()
                     };

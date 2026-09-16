@@ -6,6 +6,32 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-09-16
+
+### Added
+
+- Programs now run in an interactive pseudo-terminal in the Output panel, with
+  keyboard and paste input, Unicode, ANSI colours, cursor movement, resizing,
+  scrollback and process-group stopping.
+- Debugged programs use the same terminal through GDB's inferior TTY. Debugger
+  waits run in the background, so the interface remains responsive while an
+  inferior waits for input.
+- <kbd>F3</kbd> copies a truncated status message in full to Output.
+- CI checks dependency advisories, licences, sources and duplicate versions
+  with `cargo-deny`.
+
+### Changed
+
+- Ratatui, Crossterm and VT100 were updated together. This removes the
+  unmaintained `paste` dependency and unifies text measurement on
+  `unicode-width 0.2`.
+- Subdued theme colours now meet WCAG's 4.5:1 normal-text contrast threshold.
+
+### Fixed
+
+- Closing a modified buffer now asks whether to save, discard or cancel instead
+  of silently losing the edits.
+
 ## [0.1.4] - 2026-09-11
 
 ### Added
@@ -186,7 +212,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   panel-sized gap above the details, and shows the NASM example that was
   already in the database.
 
-[Unreleased]: https://github.com/tuna4ll/ratasm/compare/v0.1.4...HEAD
+[Unreleased]: https://github.com/tuna4ll/ratasm/compare/v0.1.5...HEAD
+[0.1.5]: https://github.com/tuna4ll/ratasm/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/tuna4ll/ratasm/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/tuna4ll/ratasm/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/tuna4ll/ratasm/compare/v0.1.1...v0.1.2
