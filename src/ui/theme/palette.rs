@@ -78,7 +78,7 @@ impl Palette {
         Self {
             background: Color::Rgb(0x16, 0x18, 0x1d),
             foreground: Color::Rgb(0xc9, 0xcc, 0xd4),
-            dim: Color::Rgb(0x63, 0x6b, 0x7a),
+            dim: Color::Rgb(0x7b, 0x84, 0x95),
             bright: Color::Rgb(0xe8, 0xea, 0xf0),
             border: Color::Rgb(0x33, 0x38, 0x42),
             border_focused: Color::Rgb(0x6d, 0x9d, 0xd8),
@@ -94,7 +94,7 @@ impl Palette {
             current: Color::Rgb(0x77, 0xb5, 0x7f),
             address: Color::Rgb(0x7d, 0x8a, 0x9c),
             bytes: Color::Rgb(0x8a, 0x7f, 0xa8),
-            syntax_comment: Color::Rgb(0x5f, 0x69, 0x78),
+            syntax_comment: Color::Rgb(0x77, 0x82, 0x92),
             syntax_string: Color::Rgb(0x9d, 0xb8, 0x7f),
             syntax_number: Color::Rgb(0xc9, 0x9d, 0x6b),
             syntax_label: Color::Rgb(0xe0, 0xc0, 0x7a),
@@ -112,7 +112,7 @@ impl Palette {
         Self {
             background: Color::Rgb(0xfa, 0xfa, 0xf7),
             foreground: Color::Rgb(0x2b, 0x2f, 0x38),
-            dim: Color::Rgb(0x7c, 0x83, 0x8f),
+            dim: Color::Rgb(0x68, 0x70, 0x7d),
             bright: Color::Rgb(0x11, 0x14, 0x1a),
             border: Color::Rgb(0xd0, 0xd4, 0xdb),
             border_focused: Color::Rgb(0x1f, 0x63, 0xa8),
@@ -128,7 +128,7 @@ impl Palette {
             current: Color::Rgb(0x1f, 0x6b, 0x35),
             address: Color::Rgb(0x5c, 0x66, 0x75),
             bytes: Color::Rgb(0x5f, 0x4b, 0x8a),
-            syntax_comment: Color::Rgb(0x77, 0x7f, 0x8c),
+            syntax_comment: Color::Rgb(0x65, 0x6e, 0x7b),
             syntax_string: Color::Rgb(0x2f, 0x6b, 0x33),
             syntax_number: Color::Rgb(0x9a, 0x53, 0x1f),
             syntax_label: Color::Rgb(0x8a, 0x60, 0x00),
@@ -191,7 +191,7 @@ impl Palette {
         Self {
             background: Color::Rgb(0x16, 0x18, 0x1d),
             foreground: Color::Rgb(0xc9, 0xcc, 0xd4),
-            dim: Color::Rgb(0x67, 0x6f, 0x7d),
+            dim: Color::Rgb(0x7b, 0x84, 0x92),
             bright: Color::Rgb(0xf0, 0xf2, 0xf6),
             border: Color::Rgb(0x35, 0x3a, 0x44),
             border_focused: Color::Rgb(0x64, 0xa8, 0xe8),
@@ -207,7 +207,7 @@ impl Palette {
             current: Color::Rgb(0x64, 0xa8, 0xe8),
             address: Color::Rgb(0x8d, 0x96, 0xa4),
             bytes: Color::Rgb(0xa8, 0x9b, 0xc8),
-            syntax_comment: Color::Rgb(0x67, 0x6f, 0x7d),
+            syntax_comment: Color::Rgb(0x7b, 0x84, 0x92),
             syntax_string: Color::Rgb(0x9d, 0xc4, 0xe8),
             syntax_number: Color::Rgb(0xe8, 0xc4, 0x4f),
             syntax_label: Color::Rgb(0xe8, 0xa8, 0x5f),
@@ -242,6 +242,27 @@ mod tests {
             p.success,
             p.accent,
         ]
+    }
+
+    fn relative_luminance(color: Color) -> f64 {
+        let Color::Rgb(red, green, blue) = color else {
+            panic!("contrast tests require an RGB colour, found {color:?}");
+        };
+        let linear = |channel: u8| {
+            let value = f64::from(channel) / 255.0;
+            if value <= 0.04045 {
+                value / 12.92
+            } else {
+                ((value + 0.055) / 1.055).powf(2.4)
+            }
+        };
+        0.2126 * linear(red) + 0.7152 * linear(green) + 0.0722 * linear(blue)
+    }
+
+    fn contrast_ratio(foreground: Color, background: Color) -> f64 {
+        let foreground = relative_luminance(foreground);
+        let background = relative_luminance(background);
+        (foreground.max(background) + 0.05) / (foreground.min(background) + 0.05)
     }
 
     #[test]
@@ -283,6 +304,20 @@ mod tests {
             Palette::colorblind(),
         ] {
             assert_ne!(p.border, p.border_focused);
+        }
+    }
+
+    #[test]
+    fn subdued_text_meets_normal_text_contrast() {
+        for palette in [Palette::dark(), Palette::light(), Palette::colorblind()] {
+            for foreground in [palette.dim, palette.syntax_comment] {
+                let ratio = contrast_ratio(foreground, palette.background);
+                assert!(
+                    ratio >= 4.5,
+                    "{foreground:?} on {:?} has only {ratio:.2}:1 contrast",
+                    palette.background
+                );
+            }
         }
     }
 }
