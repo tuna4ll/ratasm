@@ -6,6 +6,7 @@ pub mod panel;
 pub mod run;
 pub mod scroll;
 pub mod state;
+pub mod terminal;
 
 pub use mode::{Mode, Prompt, PromptKind};
 pub use page::Page;

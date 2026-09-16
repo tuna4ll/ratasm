@@ -313,6 +313,11 @@ pub async fn run_executable(
     project: &Project,
     executable: &Path,
 ) -> Result<ProcessOutput, ProcessError> {
+    process::run(&run_command(project, executable)).await
+}
+
+/// Constructs the command used to run a built executable.
+pub fn run_command(project: &Project, executable: &Path) -> CommandSpec {
     let config = project.config();
     let mut spec = CommandSpec::new(project.absolute_path(executable))
         .args(config.run.args.clone())
@@ -324,8 +329,7 @@ pub async fn run_executable(
     if let Some(stdin) = &config.run.stdin {
         spec = spec.stdin(stdin.clone());
     }
-
-    process::run(&spec).await
+    spec
 }
 
 /// Renders a path relative to the project root when possible.

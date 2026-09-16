@@ -4,16 +4,18 @@ use std::path::Path;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use crossterm::event::{Event, EventStream, KeyEvent};
+use crossterm::event::{Event, EventStream, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use futures_util::StreamExt as _;
 
 use crate::assembler::{self, BuildOptions};
+use crate::command::Command;
 use crate::debugger::mi::{command as mi, Record};
 use crate::debugger::registers::parse_register_values;
 use crate::debugger::session::GdbSession;
 use crate::debugger::state::Transition;
 use crate::disassembler;
 use crate::editor::workspace;
+use crate::process::pty::{PtyControl, PtyEvent, PtySize};
 use crate::ui::clipboard;
 use crate::ui::render;
 use crate::ui::Tui;
@@ -29,8 +31,6 @@ const TICK: Duration = Duration::from_millis(250);
 
 /// The result of work that ran off the event loop.
 enum Background {
-    /// The program finished, or could not be started.
-    Ran(Result<crate::process::ProcessOutput, String>),
     /// The scratchpad snippet finished, or could not be run.
     Scratchpad(Result<crate::scratchpad::Outcome, String>),
 }
@@ -40,6 +40,8 @@ enum Background {
 struct Running {
     /// The task, kept so stopping can abort it.
     handle: Option<tokio::task::JoinHandle<()>>,
+    /// Commands for an interactive child, when the task owns a PTY.
+    control: Option<tokio::sync::mpsc::UnboundedSender<PtyControl>>,
 }
 
 impl Running {
@@ -50,12 +52,31 @@ impl Running {
 
     /// Aborts the task, if any.
     fn cancel(&mut self) -> bool {
+        if let Some(control) = &self.control {
+            if control.send(PtyControl::Stop).is_ok() {
+                return true;
+            }
+        }
         match self.handle.take() {
             Some(task) if !task.is_finished() => {
                 task.abort();
                 true
             }
             _ => false,
+        }
+    }
+
+    /// Sends bytes to the interactive child.
+    fn input(&self, bytes: Vec<u8>) -> bool {
+        self.control
+            .as_ref()
+            .is_some_and(|control| control.send(PtyControl::Input(bytes)).is_ok())
+    }
+
+    /// Resizes the interactive child's PTY.
+    fn resize(&self, size: PtySize) {
+        if let Some(control) = &self.control {
+            let _ = control.send(PtyControl::Resize(size));
         }
     }
 }
@@ -65,10 +86,12 @@ pub async fn run(mut app: App, terminal: &mut Tui) -> Result<()> {
     let mut events = EventStream::new();
     let mut session: Option<GdbSession> = None;
     let (finished_tx, mut finished_rx) = tokio::sync::mpsc::unbounded_channel::<Background>();
+    let (pty_tx, mut pty_rx) = tokio::sync::mpsc::unbounded_channel::<PtyEvent>();
     let mut running = Running::default();
 
     loop {
         let size = terminal.size().context("cannot read the terminal size")?;
+        sync_terminal_size(&mut app, &running, size.width, size.height);
         render::sync_scroll(&mut app, size.width, size.height);
         terminal
             .draw(|frame| render::draw(frame, &app))
@@ -80,7 +103,11 @@ pub async fn run(mut app: App, terminal: &mut Tui) -> Result<()> {
 
         let effect = tokio::select! {
             event = events.next() => match event {
-                Some(Ok(Event::Key(key))) => handle_key_event(&mut app, key),
+                Some(Ok(Event::Key(key))) => handle_key_event(&mut app, &running, key),
+                Some(Ok(Event::Paste(text))) => {
+                    handle_terminal_paste(&app, &running, text);
+                    Effect::None
+                }
                 Some(Ok(Event::Mouse(mouse))) => {
                     crate::event::handle_mouse(&mut app, mouse, size.width, size.height)
                 }
@@ -93,10 +120,23 @@ pub async fn run(mut app: App, terminal: &mut Tui) -> Result<()> {
                 finish_background(&mut app, done);
                 Effect::None
             },
+            Some(event) = pty_rx.recv() => {
+                finish_pty_event(&mut app, &mut running, event);
+                Effect::None
+            },
             () = tokio::time::sleep(TICK) => Effect::None,
         };
 
-        perform(&mut app, &mut session, &finished_tx, &mut running, effect).await;
+        perform(
+            &mut app,
+            &mut session,
+            &finished_tx,
+            &pty_tx,
+            &mut running,
+            (size.width, size.height),
+            effect,
+        )
+        .await;
         drain_debugger_events(&mut app, &mut session).await;
     }
 
@@ -109,8 +149,155 @@ pub async fn run(mut app: App, terminal: &mut Tui) -> Result<()> {
 }
 
 /// Applies one key event.
-fn handle_key_event(app: &mut App, key: KeyEvent) -> Effect {
+fn handle_key_event(app: &mut App, running: &Running, key: KeyEvent) -> Effect {
+    if app.terminal.is_some() && app.focus == super::Panel::Output && !app.mode.is_overlay() {
+        if let Some(command) = app.keymap.command_for_event(key).cloned() {
+            if terminal_reserved_command(&command) {
+                return app.apply(&command);
+            }
+        }
+        let application_cursor = app
+            .terminal
+            .as_ref()
+            .is_some_and(|terminal| terminal.screen().application_cursor());
+        if let Some(bytes) = terminal_key_bytes(key, application_cursor) {
+            let _ = running.input(bytes);
+        }
+        return Effect::None;
+    }
     crate::event::handle_key(app, key)
+}
+
+/// Commands that remain reachable while the Output panel sends ordinary keys to the child.
+fn terminal_reserved_command(command: &Command) -> bool {
+    matches!(
+        command,
+        Command::Stop
+            | Command::Quit
+            | Command::OpenPalette
+            | Command::GoToPage(_)
+            | Command::NextPage
+            | Command::PreviousPage
+            | Command::NextPanel
+            | Command::PreviousPanel
+            | Command::FocusPanel(_)
+    )
+}
+
+/// Encodes a crossterm key as the byte sequence expected by a VT terminal.
+fn terminal_key_bytes(key: KeyEvent, application_cursor: bool) -> Option<Vec<u8>> {
+    if key.kind == KeyEventKind::Release {
+        return None;
+    }
+
+    let sequence = match key.code {
+        KeyCode::Char(character) if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            let upper = character.to_ascii_uppercase();
+            let byte = match upper {
+                '@' | ' ' => 0,
+                'A'..='_' => (upper as u8) & 0x1f,
+                '?' => 0x7f,
+                _ => return None,
+            };
+            vec![byte]
+        }
+        KeyCode::Char(character) => {
+            let mut bytes = Vec::new();
+            if key.modifiers.contains(KeyModifiers::ALT) {
+                bytes.push(0x1b);
+            }
+            let mut encoded = [0; 4];
+            bytes.extend_from_slice(character.encode_utf8(&mut encoded).as_bytes());
+            bytes
+        }
+        KeyCode::Enter => b"\r".to_vec(),
+        KeyCode::Backspace => vec![0x7f],
+        KeyCode::Tab => b"\t".to_vec(),
+        KeyCode::BackTab => b"\x1b[Z".to_vec(),
+        KeyCode::Esc => vec![0x1b],
+        KeyCode::Up if application_cursor => b"\x1bOA".to_vec(),
+        KeyCode::Down if application_cursor => b"\x1bOB".to_vec(),
+        KeyCode::Right if application_cursor => b"\x1bOC".to_vec(),
+        KeyCode::Left if application_cursor => b"\x1bOD".to_vec(),
+        KeyCode::Up => b"\x1b[A".to_vec(),
+        KeyCode::Down => b"\x1b[B".to_vec(),
+        KeyCode::Right => b"\x1b[C".to_vec(),
+        KeyCode::Left => b"\x1b[D".to_vec(),
+        KeyCode::Home => b"\x1b[H".to_vec(),
+        KeyCode::End => b"\x1b[F".to_vec(),
+        KeyCode::Insert => b"\x1b[2~".to_vec(),
+        KeyCode::Delete => b"\x1b[3~".to_vec(),
+        KeyCode::PageUp => b"\x1b[5~".to_vec(),
+        KeyCode::PageDown => b"\x1b[6~".to_vec(),
+        KeyCode::F(number) => function_key(number)?.to_vec(),
+        KeyCode::Null => vec![0],
+        _ => return None,
+    };
+    Some(sequence)
+}
+
+fn function_key(number: u8) -> Option<&'static [u8]> {
+    Some(match number {
+        1 => b"\x1bOP",
+        2 => b"\x1bOQ",
+        3 => b"\x1bOR",
+        4 => b"\x1bOS",
+        5 => b"\x1b[15~",
+        6 => b"\x1b[17~",
+        7 => b"\x1b[18~",
+        8 => b"\x1b[19~",
+        9 => b"\x1b[20~",
+        10 => b"\x1b[21~",
+        11 => b"\x1b[23~",
+        12 => b"\x1b[24~",
+        _ => return None,
+    })
+}
+
+fn handle_terminal_paste(app: &App, running: &Running, text: String) {
+    if app.terminal.is_none() || app.focus != super::Panel::Output || app.mode.is_overlay() {
+        return;
+    }
+    let bracketed = app
+        .terminal
+        .as_ref()
+        .is_some_and(|terminal| terminal.screen().bracketed_paste());
+    let bytes = if bracketed {
+        format!("\x1b[200~{text}\x1b[201~").into_bytes()
+    } else {
+        text.into_bytes()
+    };
+    let _ = running.input(bytes);
+}
+
+/// Keeps both the parser and the kernel PTY aligned with the visible Output panel.
+fn sync_terminal_size(app: &mut App, running: &Running, width: u16, height: u16) {
+    let Some(size) = output_terminal_size(app, width, height) else {
+        return;
+    };
+    let changed = app
+        .terminal
+        .as_ref()
+        .is_some_and(|terminal| terminal.size() != size);
+    if changed {
+        if let Some(terminal) = &mut app.terminal {
+            terminal.resize(size);
+        }
+        running.resize(size);
+    }
+}
+
+fn output_terminal_size(app: &App, width: u16, height: u16) -> Option<PtySize> {
+    let layout = crate::ui::layout::compute(
+        ratatui::layout::Rect::new(0, 0, width, height),
+        app.page,
+        app.focus,
+    );
+    let area = layout.area_of(super::Panel::Output)?;
+    Some(PtySize::new(
+        area.width.saturating_sub(2),
+        area.height.saturating_sub(2),
+    ))
 }
 
 /// Performs an effect, folding the result back into the application.
@@ -118,7 +305,9 @@ async fn perform(
     app: &mut App,
     session: &mut Option<GdbSession>,
     finished: &tokio::sync::mpsc::UnboundedSender<Background>,
+    pty_events: &tokio::sync::mpsc::UnboundedSender<PtyEvent>,
     running: &mut Running,
+    viewport: (u16, u16),
     effect: Effect,
 ) {
     match effect {
@@ -132,7 +321,7 @@ async fn perform(
             if running.is_busy() {
                 app.status = Status::warning("Something is already running");
             } else if build(app, false).await {
-                start_program(app, finished, running);
+                start_program(app, pty_events, running, viewport.0, viewport.1);
             }
         }
 
@@ -303,8 +492,10 @@ async fn build(app: &mut App, debug: bool) -> bool {
 /// Starts the built program on its own task.
 fn start_program(
     app: &mut App,
-    finished: &tokio::sync::mpsc::UnboundedSender<Background>,
+    events: &tokio::sync::mpsc::UnboundedSender<PtyEvent>,
     running: &mut Running,
+    width: u16,
+    height: u16,
 ) {
     let Some(executable) = app
         .build
@@ -314,14 +505,17 @@ fn start_program(
         return;
     };
 
-    app.status = Status::info("Running…");
-    let project = app.project.clone();
-    let finished = finished.clone();
+    app.focus_panel(super::Panel::Output);
+    let size = output_terminal_size(app, width, height).unwrap_or(PtySize::new(80, 24));
+    app.terminal = Some(super::terminal::TerminalScreen::new(size));
+    app.output.clear();
+    app.status = Status::info("Running… Type in Output; Ctrl+F5 stops");
+    let spec = assembler::run_command(&app.project, &executable);
+    let (control_tx, control_rx) = tokio::sync::mpsc::unbounded_channel();
+    let events = events.clone();
+    running.control = Some(control_tx);
     running.handle = Some(tokio::spawn(async move {
-        let result = assembler::run_executable(&project, &executable)
-            .await
-            .map_err(|error| error.to_string());
-        let _ = finished.send(Background::Ran(result));
+        crate::process::pty::run_interactive(spec, size, control_rx, events).await;
     }));
 }
 
@@ -347,8 +541,6 @@ fn start_snippet(
 /// Folds the result of a background task back into the application.
 fn finish_background(app: &mut App, done: Background) {
     match done {
-        Background::Ran(Ok(output)) => app.finish_run(output),
-        Background::Ran(Err(error)) => app.status = Status::error(error),
         Background::Scratchpad(Ok(outcome)) => {
             app.status = if outcome.is_empty() {
                 Status::info("The snippet changed nothing")
@@ -360,6 +552,27 @@ fn finish_background(app: &mut App, done: Background) {
         Background::Scratchpad(Err(error)) => {
             app.status = Status::error(error.clone());
             app.scratchpad_result = Some(Err(error));
+        }
+    }
+}
+
+fn finish_pty_event(app: &mut App, running: &mut Running, event: PtyEvent) {
+    match event {
+        PtyEvent::Output(bytes) => {
+            if let Some(terminal) = &mut app.terminal {
+                terminal.process(&bytes);
+            }
+        }
+        PtyEvent::Finished(result) => {
+            running.handle = None;
+            running.control = None;
+            match result {
+                Ok(output) => app.finish_run(output),
+                Err(error) => {
+                    app.terminal = None;
+                    app.status = Status::error(error.to_string());
+                }
+            }
         }
     }
 }
@@ -811,14 +1024,58 @@ mod tests {
         assert_eq!(app.status.severity, crate::app::Severity::Warning);
     }
 
+    #[test]
+    fn terminal_keys_use_vt_sequences_and_control_bytes() {
+        let key = |code, modifiers| KeyEvent::new(code, modifiers);
+        assert_eq!(
+            terminal_key_bytes(key(KeyCode::Char('c'), KeyModifiers::CONTROL), false),
+            Some(vec![3])
+        );
+        assert_eq!(
+            terminal_key_bytes(key(KeyCode::Up, KeyModifiers::NONE), false),
+            Some(b"\x1b[A".to_vec())
+        );
+        assert_eq!(
+            terminal_key_bytes(key(KeyCode::Up, KeyModifiers::NONE), true),
+            Some(b"\x1bOA".to_vec())
+        );
+        assert_eq!(
+            terminal_key_bytes(key(KeyCode::Char('ş'), KeyModifiers::ALT), false),
+            Some("\x1bş".as_bytes().to_vec())
+        );
+    }
+
+    #[test]
+    fn release_events_are_not_sent_to_the_child() {
+        let mut key = KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE);
+        key.kind = KeyEventKind::Release;
+        assert_eq!(terminal_key_bytes(key, false), None);
+    }
+
     /// Performs one effect the way the run loop does, then waits for the work it started.
     async fn settle(app: &mut App, session: &mut Option<GdbSession>, effect: Effect) {
         let (finished, mut incoming) = tokio::sync::mpsc::unbounded_channel();
+        let (pty_events, mut pty_incoming) = tokio::sync::mpsc::unbounded_channel();
         let mut running = Running::default();
-        perform(app, session, &finished, &mut running, effect).await;
-        if running.handle.is_some() {
-            if let Some(done) = incoming.recv().await {
-                finish_background(app, done);
+        perform(
+            app,
+            session,
+            &finished,
+            &pty_events,
+            &mut running,
+            (160, 48),
+            effect,
+        )
+        .await;
+        while running.handle.is_some() {
+            tokio::select! {
+                Some(done) = incoming.recv() => {
+                    running.handle = None;
+                    finish_background(app, done);
+                }
+                Some(event) = pty_incoming.recv() => {
+                    finish_pty_event(app, &mut running, event);
+                }
             }
         }
     }
@@ -976,21 +1233,40 @@ mod tests {
         .expect("write the source");
 
         let (finished, _incoming) = tokio::sync::mpsc::unbounded_channel();
+        let (pty_events, mut pty_incoming) = tokio::sync::mpsc::unbounded_channel();
         let mut running = Running::default();
         let mut session = None;
 
-        perform(&mut app, &mut session, &finished, &mut running, Effect::Run).await;
+        perform(
+            &mut app,
+            &mut session,
+            &finished,
+            &pty_events,
+            &mut running,
+            (160, 48),
+            Effect::Run,
+        )
+        .await;
         assert!(running.is_busy(), "the program should still be looping");
 
         perform(
             &mut app,
             &mut session,
             &finished,
+            &pty_events,
             &mut running,
+            (160, 48),
             Effect::StopProgram,
         )
         .await;
         assert_eq!(app.status.severity, crate::app::Severity::Warning);
+        while running.handle.is_some() {
+            let event = tokio::time::timeout(Duration::from_secs(2), pty_incoming.recv())
+                .await
+                .expect("the stopped process should finish")
+                .expect("PTY event channel");
+            finish_pty_event(&mut app, &mut running, event);
+        }
         assert!(!running.is_busy());
     }
 

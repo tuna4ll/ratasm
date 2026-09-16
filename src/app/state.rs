@@ -21,6 +21,7 @@ use super::mode::{Mode, Palette, Prompt, PromptKind};
 use super::page::Page;
 use super::panel::Panel;
 use super::scroll::ScrollState;
+use super::terminal::TerminalScreen;
 
 /// Work the run loop must perform on the application's behalf.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -207,6 +208,8 @@ pub struct App {
     pub last_run: Option<ProcessOutput>,
     /// Lines shown in the output panel.
     pub output: Vec<String>,
+    /// A live VT screen while an interactive program owns the Output panel.
+    pub terminal: Option<TerminalScreen>,
     /// Diagnostics from the last build.
     pub diagnostics: Vec<Diagnostic>,
 
@@ -279,6 +282,7 @@ impl App {
             build: None,
             last_run: None,
             output: Vec::new(),
+            terminal: None,
             diagnostics: Vec::new(),
 
             register_format: Format::default(),
@@ -834,8 +838,12 @@ impl App {
 
     /// Records a finished program run.
     pub fn finish_run(&mut self, output: ProcessOutput) {
-        self.output.clear();
-        if !output.stdout.is_empty() {
+        self.output = self
+            .terminal
+            .take()
+            .map(TerminalScreen::into_lines)
+            .unwrap_or_default();
+        if self.output.is_empty() && !output.stdout.is_empty() {
             self.output.extend(output.stdout.lines().map(str::to_owned));
         }
         if !output.stderr.is_empty() {
@@ -848,10 +856,12 @@ impl App {
             output.duration.as_millis()
         ));
 
-        self.status = if output.is_success() {
-            Status::success(format!("Program {}", output.outcome.description()))
-        } else {
-            Status::error(format!("Program {}", output.outcome.description()))
+        self.status = match output.outcome {
+            crate::process::Outcome::Exited(0) => {
+                Status::success(format!("Program {}", output.outcome.description()))
+            }
+            crate::process::Outcome::Stopped => Status::warning("Program stopped"),
+            _ => Status::error(format!("Program {}", output.outcome.description())),
         };
         self.focus_panel(Panel::Output);
         self.last_run = Some(output);

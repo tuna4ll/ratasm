@@ -1,6 +1,7 @@
 //! The surrounding furniture: output, references, tabs, status bar, overlays.
 
 use ratatui::layout::{Constraint, Direction, Layout as RatatuiLayout, Rect};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 use ratatui::Frame;
@@ -15,6 +16,22 @@ use crate::debugger::state::DebuggerState;
 /// Draws the build and program output.
 pub fn draw_output(frame: &mut Frame, app: &App, area: Rect, focused: bool) {
     let block = output_block(app, focused);
+
+    if let Some(terminal) = &app.terminal {
+        let inner = block.inner(area);
+        frame.render_widget(block, area);
+        if inner.width == 0 || inner.height == 0 {
+            return;
+        }
+        frame.render_widget(Paragraph::new(terminal_lines(terminal, &app.theme)), inner);
+        if focused && !terminal.screen().hide_cursor() {
+            let (row, column) = terminal.screen().cursor_position();
+            if row < inner.height && column < inner.width {
+                frame.set_cursor_position((inner.x + column, inner.y + row));
+            }
+        }
+        return;
+    }
 
     if app.output.is_empty() {
         super::draw_placeholder(
@@ -41,6 +58,63 @@ pub fn draw_output(frame: &mut Frame, app: &App, area: Rect, focused: bool) {
         lines,
         Some(Wrap { trim: false }),
     );
+}
+
+/// Converts the VT cells to styled ratatui lines without interpreting output as build errors.
+fn terminal_lines<'a>(
+    terminal: &crate::app::terminal::TerminalScreen,
+    theme: &crate::ui::Theme,
+) -> Vec<Line<'a>> {
+    let screen = terminal.screen();
+    let size = terminal.size();
+    (0..size.rows)
+        .map(|row| {
+            let spans = (0..size.columns)
+                .filter_map(|column| screen.cell(row, column))
+                .filter(|cell| !cell.is_wide_continuation())
+                .map(|cell| {
+                    let text = if cell.has_contents() {
+                        cell.contents()
+                    } else {
+                        " ".to_owned()
+                    };
+                    Span::styled(text, terminal_style(cell, theme))
+                })
+                .collect::<Vec<_>>();
+            Line::from(spans)
+        })
+        .collect()
+}
+
+fn terminal_style(cell: &vt100::Cell, theme: &crate::ui::Theme) -> Style {
+    let mut style = theme.base();
+    if cell.fgcolor() != vt100::Color::Default {
+        style = style.fg(terminal_color(cell.fgcolor()));
+    }
+    if cell.bgcolor() != vt100::Color::Default {
+        style = style.bg(terminal_color(cell.bgcolor()));
+    }
+    if cell.bold() {
+        style = style.add_modifier(Modifier::BOLD);
+    }
+    if cell.italic() {
+        style = style.add_modifier(Modifier::ITALIC);
+    }
+    if cell.underline() {
+        style = style.add_modifier(Modifier::UNDERLINED);
+    }
+    if cell.inverse() {
+        style = style.add_modifier(Modifier::REVERSED);
+    }
+    style
+}
+
+fn terminal_color(color: vt100::Color) -> Color {
+    match color {
+        vt100::Color::Default => Color::Reset,
+        vt100::Color::Idx(index) => Color::Indexed(index),
+        vt100::Color::Rgb(red, green, blue) => Color::Rgb(red, green, blue),
+    }
 }
 
 /// The output panel's frame, carrying the last build's error count.

@@ -7,5 +7,7 @@
 pub mod build;
 pub mod diagnostics;
 
-pub use build::{build, run_executable, BuildError, BuildOptions, BuildOutcome, BuildStep};
+pub use build::{
+    build, run_command, run_executable, BuildError, BuildOptions, BuildOutcome, BuildStep,
+};
 pub use diagnostics::{Diagnostic, Producer, Severity};
