@@ -9,6 +9,8 @@ pub enum PromptKind {
     OpenFile,
     /// A name to save under.
     SaveAs,
+    /// A name to save under before closing the buffer.
+    SaveAsAndClose,
     /// A line number.
     GoToLine,
     /// An address expression.
@@ -19,6 +21,8 @@ pub enum PromptKind {
     Replace,
     /// Confirmation before discarding unsaved changes.
     ConfirmQuit,
+    /// Choice of saving, discarding, or cancelling before closing a buffer.
+    ConfirmClose,
 }
 
 impl PromptKind {
@@ -27,11 +31,15 @@ impl PromptKind {
         match self {
             PromptKind::OpenFile => "Open file",
             PromptKind::SaveAs => "Save as",
+            PromptKind::SaveAsAndClose => "Save and close as",
             PromptKind::GoToLine => "Go to line",
             PromptKind::GoToAddress => "Go to address",
             PromptKind::Search => "Find",
             PromptKind::Replace => "Replace with",
             PromptKind::ConfirmQuit => "Unsaved changes. Quit anyway? (y/n)",
+            PromptKind::ConfirmClose => {
+                "Unsaved changes. Save and close, discard, or cancel? (s/d/c)"
+            }
         }
     }
 
@@ -40,22 +48,27 @@ impl PromptKind {
         match self {
             PromptKind::OpenFile => "path to an .asm file",
             PromptKind::SaveAs => "path to write to",
+            PromptKind::SaveAsAndClose => "path to write to",
             PromptKind::GoToLine => "line number",
             PromptKind::GoToAddress => "0x4000b0, rsp-0x20, rbp+8",
             PromptKind::Search => "text to find",
             PromptKind::Replace => "replacement text",
             PromptKind::ConfirmQuit => "y or n",
+            PromptKind::ConfirmClose => "s, d, or c",
         }
     }
 
     /// Whether the prompt takes a single keypress rather than a line of text.
     pub const fn is_confirmation(self) -> bool {
-        matches!(self, PromptKind::ConfirmQuit)
+        matches!(self, PromptKind::ConfirmQuit | PromptKind::ConfirmClose)
     }
 
     /// Whether Tab should complete the input against the filesystem.
     pub const fn completes_paths(self) -> bool {
-        matches!(self, PromptKind::OpenFile | PromptKind::SaveAs)
+        matches!(
+            self,
+            PromptKind::OpenFile | PromptKind::SaveAs | PromptKind::SaveAsAndClose
+        )
     }
 }
 
@@ -356,11 +369,13 @@ mod tests {
         for kind in [
             PromptKind::OpenFile,
             PromptKind::SaveAs,
+            PromptKind::SaveAsAndClose,
             PromptKind::GoToLine,
             PromptKind::GoToAddress,
             PromptKind::Search,
             PromptKind::Replace,
             PromptKind::ConfirmQuit,
+            PromptKind::ConfirmClose,
         ] {
             assert!(!kind.label().is_empty());
             assert!(!kind.hint().is_empty());
@@ -368,8 +383,9 @@ mod tests {
     }
 
     #[test]
-    fn only_the_quit_prompt_is_a_confirmation() {
+    fn destructive_prompts_are_confirmations() {
         assert!(PromptKind::ConfirmQuit.is_confirmation());
+        assert!(PromptKind::ConfirmClose.is_confirmation());
         assert!(!PromptKind::Search.is_confirmation());
     }
 

@@ -152,6 +152,14 @@ async fn perform(
             Err(error) => app.status = Status::error(error.to_string()),
         },
 
+        Effect::SaveAndClose(path) => match app.workspace.save_active_as(&path) {
+            Ok(_) => {
+                app.close_active_document();
+                app.refresh_project_files();
+            }
+            Err(error) => app.status = Status::error(error.to_string()),
+        },
+
         Effect::SaveProject => match app.project.save() {
             Ok(path) => {
                 app.status = Status::success(format!(

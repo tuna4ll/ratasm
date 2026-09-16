@@ -54,6 +54,8 @@ pub enum Effect {
     ReadMemory(u64),
     /// Write the active buffer to disk.
     SaveFile(PathBuf),
+    /// Write the active buffer to disk, then close it if the write succeeds.
+    SaveAndClose(PathBuf),
     /// Write every modified buffer to disk.
     SaveAll,
     /// Write the project file back after its sources changed.
@@ -371,13 +373,12 @@ impl App {
             Command::SaveAll => Effect::SaveAll,
             Command::AddToProject => self.add_active_to_project(),
             Command::CloseFile => {
-                let index = self.workspace.active_index();
-                match self.workspace.close(index) {
-                    Ok(true) => self.status = Status::warning("Closed with unsaved changes"),
-                    Ok(false) => self.status = Status::info("Closed"),
-                    Err(error) => self.status = Status::error(error.to_string()),
+                if self.workspace.active().is_modified() {
+                    self.open_prompt(PromptKind::ConfirmClose)
+                } else {
+                    self.close_active_document();
+                    Effect::None
                 }
-                Effect::None
             }
             Command::Quit => {
                 if self.workspace.has_unsaved_changes() {
@@ -619,7 +620,7 @@ impl App {
     fn open_prompt(&mut self, kind: PromptKind) -> Effect {
         let prefill = match kind {
             PromptKind::Search => self.search_query.clone(),
-            PromptKind::SaveAs => self
+            PromptKind::SaveAs | PromptKind::SaveAsAndClose => self
                 .workspace
                 .active()
                 .path()
@@ -685,6 +686,21 @@ impl App {
                 self.status = Status::info("Quit cancelled");
                 Effect::None
             }
+            PromptKind::ConfirmClose => {
+                self.cancel_overlay();
+                if text.eq_ignore_ascii_case("s") || text.eq_ignore_ascii_case("save") {
+                    return match self.workspace.active().path() {
+                        Some(path) => Effect::SaveAndClose(path.to_path_buf()),
+                        None => self.open_prompt(PromptKind::SaveAsAndClose),
+                    };
+                }
+                if text.eq_ignore_ascii_case("d") || text.eq_ignore_ascii_case("discard") {
+                    self.close_active_document();
+                } else {
+                    self.status = Status::info("Close cancelled");
+                }
+                Effect::None
+            }
             PromptKind::GoToLine => match text.parse::<usize>() {
                 Ok(line) => {
                     self.cancel_overlay();
@@ -738,6 +754,23 @@ impl App {
                 self.cancel_overlay();
                 Effect::SaveFile(PathBuf::from(text))
             }
+            PromptKind::SaveAsAndClose => {
+                if text.is_empty() {
+                    self.status = Status::error("Enter a file name");
+                    return Effect::None;
+                }
+                self.cancel_overlay();
+                Effect::SaveAndClose(PathBuf::from(text))
+            }
+        }
+    }
+
+    /// Closes the active document after callers have handled unsaved changes.
+    pub fn close_active_document(&mut self) {
+        let index = self.workspace.active_index();
+        match self.workspace.close(index) {
+            Ok(_) => self.status = Status::info("Closed"),
+            Err(error) => self.status = Status::error(error.to_string()),
         }
     }
 
@@ -1624,6 +1657,42 @@ mod tests {
         }
         assert_eq!(app.accept_prompt(), Effect::Quit);
         assert!(app.should_quit);
+    }
+
+    #[test]
+    fn closing_a_modified_buffer_asks_before_discarding_it() {
+        let mut app = app_with_source("mov rax, 1\n");
+
+        assert_eq!(app.apply(&Command::CloseFile), Effect::None);
+        assert!(matches!(
+            app.mode,
+            Mode::Prompt(ref prompt) if prompt.kind() == Some(PromptKind::ConfirmClose)
+        ));
+        assert_eq!(app.workspace.active().buffer().to_text(), "mov rax, 1\n");
+
+        if let Mode::Prompt(prompt) = &mut app.mode {
+            prompt.insert('d');
+        }
+        assert_eq!(app.accept_prompt(), Effect::None);
+        assert!(app.workspace.active().buffer().is_empty());
+    }
+
+    #[test]
+    fn closing_a_modified_buffer_can_save_first() {
+        let mut app = app_with_source("ret\n");
+        let path = app.project.root().join("saved.asm");
+        app.workspace.active_mut().set_path(&path);
+        app.apply(&Command::CloseFile);
+
+        if let Mode::Prompt(prompt) = &mut app.mode {
+            prompt.insert('s');
+        }
+        assert_eq!(app.accept_prompt(), Effect::SaveAndClose(path));
+        assert_eq!(
+            app.workspace.active().buffer().to_text(),
+            "ret\n",
+            "the buffer stays open until the save effect succeeds"
+        );
     }
 
     #[test]
