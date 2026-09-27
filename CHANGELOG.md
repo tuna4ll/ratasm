@@ -6,6 +6,40 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-27
+
+### Changed
+
+- The Editor panel runs your own editor inside it: `$VISUAL`, then `$EDITOR`,
+  then `vi`, started on the entry file when ratasm opens. Every key goes to it
+  except the function keys and <kbd>Alt</kbd>+<kbd>1</kbd>..<kbd>4</kbd>, so
+  building, running and debugging stay one key away. Editors that take `+LINE`
+  open at the cursor line.
+- When the editor exits, or during a debug session, the panel is a plain
+  listing of the source with its breakpoints and the stopped line. It has no
+  cursor; it scrolls, and <kbd>Enter</kbd> or <kbd>Ctrl</kbd>+<kbd>E</kbd>
+  opens the editor again. Files are read back from disk after editing and
+  before every build.
+- <kbd>F9</kbd> asks for the line to toggle a breakpoint on, and
+  <kbd>Ctrl</kbd>+<kbd>G</kbd> shows an address in the memory panel.
+- The embedded terminals answer cursor-position, status and device-attribute
+  queries, so editors and programs that ask no longer time out and quit. An
+  editor that exits with an error leaves its last screen in Output.
+- <kbd>Ctrl</kbd>+<kbd>N</kbd> asks for a file name and creates it in the
+  editor. Closing a file no longer asks about unsaved changes, because ratasm
+  never holds any; quitting while the editor runs asks for a second Quit.
+
+### Removed
+
+- ratasm's own text editor: typing, the cursor and selection, undo and redo,
+  copy, cut and paste, indent and dedent, bracket pairing and matching,
+  search and replace, go to line, go to definition, and the save commands,
+  with their bindings (`file.save`, `file.save-all`, `file.save-as`,
+  `edit.*`, `search.*`, `navigate.go-to-line`, `navigate.go-to-definition`).
+- The `editor.indent_width`, `editor.auto_close_pairs`,
+  `editor.highlight_current_line` and `editor.match_brackets` settings. A
+  configuration file that still sets them is rejected, so delete those lines.
+
 ## [0.1.5] - 2026-09-16
 
 ### Added
@@ -212,7 +246,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   panel-sized gap above the details, and shows the NASM example that was
   already in the database.
 
-[Unreleased]: https://github.com/tuna4ll/ratasm/compare/v0.1.5...HEAD
+[Unreleased]: https://github.com/tuna4ll/ratasm/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/tuna4ll/ratasm/compare/v0.1.5...v0.2.0
 [0.1.5]: https://github.com/tuna4ll/ratasm/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/tuna4ll/ratasm/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/tuna4ll/ratasm/compare/v0.1.2...v0.1.3
