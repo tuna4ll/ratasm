@@ -1,11 +1,10 @@
-//! The set of open documents and the file operations on them.
+//! The set of open documents and reading them from disk.
 
-use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use super::document::Document;
 
-/// Errors from opening and saving files.
+/// Errors from opening files.
 #[derive(Debug, thiserror::Error)]
 pub enum FileError {
     /// The file could not be read.
@@ -17,24 +16,12 @@ pub enum FileError {
         #[source]
         source: std::io::Error,
     },
-    /// The file could not be written.
-    #[error("cannot write {path}: {source}")]
-    Write {
-        /// The file that could not be written.
-        path: PathBuf,
-        /// The underlying I/O error.
-        #[source]
-        source: std::io::Error,
-    },
     /// The file is not valid UTF-8.
     #[error("{path} is not valid UTF-8 text")]
     NotUtf8 {
         /// The offending file.
         path: PathBuf,
     },
-    /// A save was requested for a document that has no path yet.
-    #[error("this buffer has no file name; use 'save as'")]
-    NoPath,
     /// The requested document index does not exist.
     #[error("no document at index {index}")]
     NoSuchDocument {
@@ -52,43 +39,6 @@ pub fn read_file(path: &Path) -> Result<String, FileError> {
     String::from_utf8(bytes).map_err(|_| FileError::NotUtf8 {
         path: path.to_path_buf(),
     })
-}
-
-/// Writes `contents` to `path` atomically.
-pub fn write_file_atomically(path: &Path, contents: &str) -> Result<(), FileError> {
-    let directory = path
-        .parent()
-        .filter(|parent| !parent.as_os_str().is_empty());
-    let directory = match directory {
-        Some(directory) => directory.to_path_buf(),
-        None => PathBuf::from("."),
-    };
-
-    std::fs::create_dir_all(&directory).map_err(|source| FileError::Write {
-        path: path.to_path_buf(),
-        source,
-    })?;
-
-    let mut temporary =
-        tempfile::NamedTempFile::new_in(&directory).map_err(|source| FileError::Write {
-            path: path.to_path_buf(),
-            source,
-        })?;
-
-    temporary
-        .write_all(contents.as_bytes())
-        .and_then(|()| temporary.flush())
-        .map_err(|source| FileError::Write {
-            path: path.to_path_buf(),
-            source,
-        })?;
-
-    temporary.persist(path).map_err(|error| FileError::Write {
-        path: path.to_path_buf(),
-        source: error.error,
-    })?;
-
-    Ok(())
 }
 
 /// Renders a path for a message, preferring the file name when it is long.
@@ -264,7 +214,6 @@ impl Workspace {
 
         let index = if self.documents.len() == 1
             && self.documents[0].path().is_none()
-            && !self.documents[0].is_modified()
             && self.documents[0].buffer().is_empty()
         {
             self.documents[0] = document;
@@ -279,13 +228,6 @@ impl Workspace {
         Ok(index)
     }
 
-    /// Adds an empty untitled document and activates it.
-    pub fn new_document(&mut self) -> usize {
-        self.documents.push(Document::new());
-        self.active = self.documents.len() - 1;
-        self.active
-    }
-
     /// Adds a document with the given contents and activates it.
     pub fn add_document(&mut self, document: Document) -> usize {
         self.documents.push(document);
@@ -293,74 +235,35 @@ impl Workspace {
         self.active
     }
 
-    /// Saves the active document to its existing path.
-    pub fn save_active(&mut self) -> Result<PathBuf, FileError> {
-        let path = self
-            .active()
-            .path()
-            .map(Path::to_path_buf)
-            .ok_or(FileError::NoPath)?;
-        self.save_active_as(&path)
-    }
-
-    /// Saves the active document to `path` and associates it with that path.
-    pub fn save_active_as(&mut self, path: &Path) -> Result<PathBuf, FileError> {
-        let contents = self.active().buffer().to_text();
-        write_file_atomically(path, &contents)?;
-
-        let document = self.active_mut();
-        document.set_path(path);
-        document.mark_saved();
-        self.remember(path);
-        Ok(path.to_path_buf())
-    }
-
-    /// Saves every modified document that has a path.
-    pub fn save_all(&mut self) -> Result<(usize, usize), FileError> {
-        let mut written = 0;
-        let mut skipped = 0;
-
-        for index in 0..self.documents.len() {
-            if !self.documents[index].is_modified() {
-                continue;
-            }
-            let Some(path) = self.documents[index].path().map(Path::to_path_buf) else {
-                skipped += 1;
+    /// Re-reads every open file from disk, returning how many had changed.
+    ///
+    /// Documents whose text is unchanged keep their cursor and selection.
+    pub fn reload(&mut self) -> Result<usize, FileError> {
+        let mut changed = 0;
+        for document in &mut self.documents {
+            let Some(path) = document.path().map(Path::to_path_buf) else {
                 continue;
             };
-            write_file_atomically(&path, &self.documents[index].buffer().to_text())?;
-            self.documents[index].mark_saved();
-            written += 1;
+            let contents = read_file(&path)?;
+            if contents != document.buffer().to_text() {
+                document.reload(&contents);
+                changed += 1;
+            }
         }
-
-        Ok((written, skipped))
+        Ok(changed)
     }
 
-    /// Closes the document at `index`, returning whether it had unsaved changes.
-    pub fn close(&mut self, index: usize) -> Result<bool, FileError> {
+    /// Closes the document at `index`.
+    pub fn close(&mut self, index: usize) -> Result<(), FileError> {
         if index >= self.documents.len() {
             return Err(FileError::NoSuchDocument { index });
         }
-        let was_modified = self.documents[index].is_modified();
         self.documents.remove(index);
         if self.documents.is_empty() {
             self.documents.push(Document::new());
         }
         self.active = self.active.min(self.documents.len() - 1);
-        Ok(was_modified)
-    }
-
-    /// Whether any open document has unsaved changes.
-    pub fn has_unsaved_changes(&self) -> bool {
-        self.documents.iter().any(Document::is_modified)
-    }
-
-    /// The documents with unsaved changes, for a quit confirmation prompt.
-    pub fn modified_documents(&self) -> Vec<&Document> {
-        self.documents
-            .iter()
-            .filter(|document| document.is_modified())
-            .collect()
+        Ok(())
     }
 
     /// Finds the index of an open document by path.
@@ -383,46 +286,6 @@ mod tests {
 
     fn temp_dir() -> tempfile::TempDir {
         tempfile::tempdir().expect("temp dir")
-    }
-
-    #[test]
-    fn saving_everything_writes_each_modified_file() {
-        let dir = temp_dir();
-        let first = dir.path().join("main.asm");
-        let second = dir.path().join("util.asm");
-        std::fs::write(&first, "old\n").expect("write");
-        std::fs::write(&second, "old\n").expect("write");
-
-        let mut workspace = Workspace::new();
-        workspace.open(&first).expect("open");
-        workspace.active_mut().insert("new ");
-        workspace.open(&second).expect("open");
-        workspace.active_mut().insert("new ");
-
-        assert_eq!(workspace.save_all().expect("save"), (2, 0));
-        assert!(std::fs::read_to_string(&first)
-            .expect("read")
-            .starts_with("new"));
-        assert!(std::fs::read_to_string(&second)
-            .expect("read")
-            .starts_with("new"));
-        assert!(!workspace.has_unsaved_changes());
-        assert_eq!(workspace.save_all().expect("save"), (0, 0));
-    }
-
-    #[test]
-    fn saving_everything_counts_buffers_with_no_file_name() {
-        let dir = temp_dir();
-        let path = dir.path().join("main.asm");
-        std::fs::write(&path, "old\n").expect("write");
-
-        let mut workspace = Workspace::new();
-        workspace.open(&path).expect("open");
-        workspace.active_mut().insert("x");
-        workspace.new_document();
-        workspace.active_mut().insert("scratch");
-
-        assert_eq!(workspace.save_all().expect("save"), (1, 1));
     }
 
     #[test]
@@ -489,7 +352,6 @@ mod tests {
         let workspace = Workspace::new();
         assert_eq!(workspace.len(), 1);
         assert_eq!(workspace.active().display_name(), "[untitled]");
-        assert!(!workspace.has_unsaved_changes());
     }
 
     #[test]
@@ -505,7 +367,6 @@ mod tests {
             "section .text\nglobal _start\n"
         );
         assert_eq!(workspace.active().display_name(), "main.asm");
-        assert!(!workspace.active().is_modified());
     }
 
     #[test]
@@ -520,18 +381,6 @@ mod tests {
     }
 
     #[test]
-    fn opening_keeps_a_modified_untitled_buffer() {
-        let dir = temp_dir();
-        let path = dir.path().join("main.asm");
-        std::fs::write(&path, "ret\n").expect("write");
-
-        let mut workspace = Workspace::new();
-        workspace.active_mut().insert_char('x');
-        workspace.open(&path).expect("open");
-        assert_eq!(workspace.len(), 2, "unsaved work must not be discarded");
-    }
-
-    #[test]
     fn opening_the_same_file_twice_activates_the_existing_buffer() {
         let dir = temp_dir();
         let path = dir.path().join("main.asm");
@@ -539,7 +388,7 @@ mod tests {
 
         let mut workspace = Workspace::new();
         let first = workspace.open(&path).expect("open");
-        workspace.new_document();
+        workspace.add_document(Document::new());
         let second = workspace.open(&path).expect("reopen");
         assert_eq!(first, second);
         assert_eq!(workspace.len(), 2);
@@ -568,98 +417,10 @@ mod tests {
     }
 
     #[test]
-    fn saving_writes_the_buffer_and_clears_the_modified_flag() {
-        let dir = temp_dir();
-        let path = dir.path().join("out.asm");
-
-        let mut workspace = Workspace::new();
-        workspace.active_mut().insert("mov rax, 1\n");
-        assert!(workspace.has_unsaved_changes());
-
-        workspace.save_active_as(&path).expect("save");
-        assert_eq!(
-            std::fs::read_to_string(&path).expect("read"),
-            "mov rax, 1\n"
-        );
-        assert!(!workspace.has_unsaved_changes());
-        assert_eq!(workspace.active().display_name(), "out.asm");
-    }
-
-    #[test]
-    fn saving_without_a_path_is_an_error_rather_than_a_guess() {
-        let mut workspace = Workspace::new();
-        workspace.active_mut().insert_char('x');
-        assert!(matches!(workspace.save_active(), Err(FileError::NoPath)));
-    }
-
-    #[test]
-    fn saving_an_opened_file_reuses_its_path() {
-        let dir = temp_dir();
-        let path = dir.path().join("main.asm");
-        std::fs::write(&path, "ret\n").expect("write");
-
-        let mut workspace = Workspace::new();
-        workspace.open(&path).expect("open");
-        workspace.active_mut().insert("nop\n");
-        let saved = workspace.save_active().expect("save");
-        assert_eq!(saved, path);
-        assert_eq!(std::fs::read_to_string(&path).expect("read"), "nop\nret\n");
-    }
-
-    #[test]
-    fn a_failed_save_leaves_the_original_file_intact() {
-        let dir = temp_dir();
-        let path = dir.path().join("subdir").join("main.asm");
-        std::fs::create_dir_all(path.parent().expect("parent")).expect("mkdir");
-        std::fs::write(&path, "original\n").expect("write");
-
-        let blocked = dir.path().join("main.asm").join("impossible.asm");
-        std::fs::write(dir.path().join("main.asm"), "blocker").expect("write");
-
-        let result = write_file_atomically(&blocked, "new contents");
-        assert!(result.is_err(), "expected the write to fail");
-        assert_eq!(
-            std::fs::read_to_string(&path).expect("read"),
-            "original\n",
-            "the untouched file must be unchanged"
-        );
-    }
-
-    #[test]
-    fn saving_creates_missing_parent_directories() {
-        let dir = temp_dir();
-        let path = dir.path().join("a/b/c/main.asm");
-        write_file_atomically(&path, "ret\n").expect("save");
-        assert_eq!(std::fs::read_to_string(&path).expect("read"), "ret\n");
-    }
-
-    #[test]
-    fn saving_over_an_existing_file_replaces_it_completely() {
-        let dir = temp_dir();
-        let path = dir.path().join("main.asm");
-        std::fs::write(&path, "a much longer original file\n").expect("write");
-        write_file_atomically(&path, "short\n").expect("save");
-        assert_eq!(std::fs::read_to_string(&path).expect("read"), "short\n");
-    }
-
-    #[test]
-    fn saving_leaves_no_temporary_files_behind() {
-        let dir = temp_dir();
-        let path = dir.path().join("main.asm");
-        write_file_atomically(&path, "ret\n").expect("save");
-        let entries: Vec<_> = std::fs::read_dir(dir.path())
-            .expect("read dir")
-            .filter_map(Result::ok)
-            .map(|entry| entry.file_name())
-            .collect();
-        assert_eq!(entries.len(), 1, "found stray files: {entries:?}");
-    }
-
-    #[test]
     fn documents_cycle_in_both_directions() {
         let mut workspace = Workspace::new();
-        workspace.new_document();
-        workspace.new_document();
+        workspace.add_document(Document::new());
+        workspace.add_document(Document::new());
         assert_eq!(workspace.active_index(), 2);
 
         workspace.next_document();
@@ -678,18 +439,18 @@ mod tests {
     #[test]
     fn closing_the_last_document_leaves_a_fresh_one() {
         let mut workspace = Workspace::new();
-        workspace.active_mut().insert_char('x');
-        let was_modified = workspace.close(0).expect("close");
-        assert!(was_modified);
+        workspace.add_document(Document::from_text("ret"));
+        workspace.close(1).expect("close");
+        workspace.close(0).expect("close");
         assert_eq!(workspace.len(), 1);
-        assert!(!workspace.active().is_modified());
+        assert!(workspace.active().buffer().is_empty());
     }
 
     #[test]
     fn closing_keeps_the_active_index_in_range() {
         let mut workspace = Workspace::new();
-        workspace.new_document();
-        workspace.new_document();
+        workspace.add_document(Document::new());
+        workspace.add_document(Document::new());
         workspace.set_active(2);
         workspace.close(2).expect("close");
         assert_eq!(workspace.active_index(), 1);
@@ -734,24 +495,35 @@ mod tests {
     }
 
     #[test]
-    fn modified_documents_are_reported_for_a_quit_prompt() {
+    fn reloading_picks_up_changes_made_on_disk() {
+        let dir = temp_dir();
+        let first = dir.path().join("main.asm");
+        let second = dir.path().join("util.asm");
+        std::fs::write(&first, "ret\n").expect("write");
+        std::fs::write(&second, "nop\n").expect("write");
+
         let mut workspace = Workspace::new();
-        workspace.new_document();
-        workspace.active_mut().insert_char('x');
-        assert_eq!(workspace.modified_documents().len(), 1);
-        assert!(workspace.has_unsaved_changes());
+        workspace.open(&first).expect("open");
+        workspace.open(&second).expect("open");
+        assert_eq!(workspace.reload().expect("reload"), 0);
+
+        std::fs::write(&first, "mov rax, 60\nsyscall\n").expect("write");
+        assert_eq!(workspace.reload().expect("reload"), 1);
+        assert_eq!(
+            workspace.documents()[0].buffer().to_text(),
+            "mov rax, 60\nsyscall\n"
+        );
     }
 
     #[test]
-    fn a_round_trip_through_disk_preserves_the_text_exactly() {
+    fn reloading_a_file_that_vanished_reports_it() {
         let dir = temp_dir();
         let path = dir.path().join("main.asm");
-        let source = "section .data\n    msg: db `hi\\n`, 0\n\nsection .text\n_start:\n    ret\n";
-        std::fs::write(&path, source).expect("write");
+        std::fs::write(&path, "ret\n").expect("write");
 
         let mut workspace = Workspace::new();
         workspace.open(&path).expect("open");
-        workspace.save_active().expect("save");
-        assert_eq!(std::fs::read_to_string(&path).expect("read"), source);
+        std::fs::remove_file(&path).expect("remove");
+        assert!(matches!(workspace.reload(), Err(FileError::Read { .. })));
     }
 }

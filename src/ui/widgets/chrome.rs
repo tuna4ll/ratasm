@@ -61,7 +61,7 @@ pub fn draw_output(frame: &mut Frame, app: &App, area: Rect, focused: bool) {
 }
 
 /// Converts the VT cells to styled ratatui lines without interpreting output as build errors.
-fn terminal_lines<'a>(
+pub(super) fn terminal_lines<'a>(
     terminal: &crate::app::terminal::TerminalScreen,
     theme: &crate::ui::Theme,
 ) -> Vec<Line<'a>> {
@@ -348,10 +348,10 @@ pub fn explorer_lines<'a>(app: &App, width: usize) -> Vec<Line<'a>> {
         let selected = index == app.explorer_selected;
 
         let marker = if selected { symbols.selection } else { " " };
-        let state = match document {
-            Some(document) if document.is_modified() => symbols.modified,
-            Some(_) => symbols.flag_set,
-            None => " ",
+        let state = if document.is_some() {
+            symbols.flag_set
+        } else {
+            " "
         };
 
         let name = app
@@ -374,15 +374,6 @@ pub fn explorer_lines<'a>(app: &App, width: usize) -> Vec<Line<'a>> {
             spans.push(Span::styled("  not built", theme.warning()));
         }
         lines.push(Line::from(spans));
-    }
-
-    for document in app.workspace.documents() {
-        if document.path().is_none() {
-            lines.push(Line::from(Span::styled(
-                format!("  {} {}", symbols.modified, document.display_name()),
-                theme.dim(),
-            )));
-        }
     }
 
     let found = crate::editor::symbols::extract(app.workspace.active().buffer());
@@ -489,18 +480,10 @@ pub fn draw_page_bar(frame: &mut Frame, app: &App, area: Rect) {
 
 /// One tab label per open document.
 fn document_labels(app: &App) -> Vec<String> {
-    let modified_glyph = app.theme.symbols().modified;
     app.workspace
         .documents()
         .iter()
-        .map(|document| {
-            let modified = if document.is_modified() {
-                modified_glyph
-            } else {
-                ""
-            };
-            format!(" {}{} ", document.display_name(), modified)
-        })
+        .map(|document| format!(" {} ", document.display_name()))
         .collect()
 }
 
@@ -572,7 +555,6 @@ pub fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
     };
 
     let document = app.workspace.active();
-    let cursor = document.cursor();
     let state = app.debugger.state();
     let state_style = match state {
         DebuggerState::Failed => theme.error(),
@@ -581,20 +563,11 @@ pub fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
         _ => theme.dim(),
     };
 
-    let file = format!(
-        "{}{}",
-        document.display_name(),
-        if document.is_modified() {
-            symbols.modified
-        } else {
-            ""
-        }
-    );
+    let file = document.display_name();
     let optional = [
         app.register_format.label().to_owned(),
         app.focus.title().to_owned(),
         file,
-        format!("{}:{}", cursor.line + 1, cursor.column + 1),
     ];
 
     let fixed = state.label().chars().count() + 4;
@@ -697,11 +670,9 @@ fn draw_prompt(frame: &mut Frame, app: &App, area: Rect, prompt: &crate::app::mo
     };
     frame.render_widget(Paragraph::new(Line::from(content)), inner);
 
-    if !kind.is_confirmation() {
-        let x = inner.x + prompt.cursor() as u16;
-        if x < inner.x + inner.width {
-            frame.set_cursor_position((x, inner.y));
-        }
+    let x = inner.x + prompt.cursor() as u16;
+    if x < inner.x + inner.width {
+        frame.set_cursor_position((x, inner.y));
     }
 }
 

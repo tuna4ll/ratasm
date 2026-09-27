@@ -69,18 +69,8 @@ pub fn sync_scroll(app: &mut App, width: u16, height: u16) {
         return;
     };
 
-    let buffer_lines = app.workspace.active().buffer().line_count();
-    let gutter = if app.settings.editor.line_numbers {
-        buffer_lines.to_string().len().max(2) + 1
-    } else {
-        0
-    };
-    let (inner_width, inner_height) = inner_area(area);
-    let text_width = usize::from(inner_width).saturating_sub(gutter + 2);
-
-    app.workspace
-        .active_mut()
-        .scroll_into_view(usize::from(inner_height), text_width);
+    let (_, inner_height) = inner_area(area);
+    app.workspace.active_mut().fit(usize::from(inner_height));
 }
 
 /// The width and height inside a panel's border and horizontal padding.
@@ -298,7 +288,7 @@ mod tests {
         let mut app = app();
         app.workspace
             .active_mut()
-            .insert("section .text\n_start:\n    ret\n");
+            .reload("section .text\n_start:\n    ret\n");
 
         let roomy = settled(&mut app, 160, 48);
         assert!(roomy.contains("_start"), "the name always shows");
@@ -341,72 +331,6 @@ mod tests {
         assert!(
             text[rip - 1].trim().is_empty(),
             "a blank row should divide the groups: {text:?}"
-        );
-    }
-
-    /// The background colours on the row `line` (zero-based) of the editor.
-    fn editor_row_backgrounds(app: &App, line: u16) -> Vec<ratatui::style::Color> {
-        let backend = TestBackend::new(120, 30);
-        let mut terminal = Terminal::new(backend).expect("terminal");
-        terminal.draw(|frame| draw(frame, app)).expect("draw");
-
-        let buffer = terminal.backend().buffer();
-        (0..120)
-            .map(|x| buffer.cell((x, line + 2)).expect("cell").bg)
-            .collect()
-    }
-
-    #[test]
-    fn a_selection_is_visible_on_screen() {
-        let mut app = app();
-        app.workspace.active_mut().insert("mov rax, 1\n");
-        app.workspace.active_mut().move_cursor(
-            crate::editor::Movement::To(crate::editor::Position::new(0, 0)),
-            crate::editor::SelectionMode::Collapse,
-        );
-
-        let plain = editor_row_backgrounds(&app, 0);
-
-        app.workspace
-            .active_mut()
-            .select_range(crate::editor::Range::new(
-                crate::editor::Position::new(0, 4),
-                crate::editor::Position::new(0, 7),
-            ));
-        let selected = editor_row_backgrounds(&app, 0);
-
-        let changed = plain
-            .iter()
-            .zip(&selected)
-            .filter(|(before, after)| before != after)
-            .count();
-        assert_eq!(changed, 3, "exactly the three selected cells should change");
-    }
-
-    #[test]
-    fn a_selection_across_lines_covers_both() {
-        let mut app = app();
-        app.workspace
-            .active_mut()
-            .insert("mov rax, 1\nmov rdi, 0\n");
-        app.workspace
-            .active_mut()
-            .select_range(crate::editor::Range::new(
-                crate::editor::Position::new(0, 8),
-                crate::editor::Position::new(1, 3),
-            ));
-
-        let first = editor_row_backgrounds(&app, 0);
-        let second = editor_row_backgrounds(&app, 1);
-        let plain = first[60];
-
-        assert!(
-            first.iter().filter(|bg| **bg != plain).count() >= 2,
-            "the tail of the first line is selected"
-        );
-        assert!(
-            second.iter().filter(|bg| **bg != plain).count() >= 3,
-            "the head of the second line is selected"
         );
     }
 
@@ -453,12 +377,12 @@ mod tests {
     }
 
     #[test]
-    fn the_status_bar_shows_the_state_and_position() {
+    fn the_status_bar_shows_the_state_and_file() {
         let app = app();
         let rows = render(&app, 160, 48);
         let status = rows.last().expect("a status bar");
 
-        assert!(status.contains("1:1"), "cursor position: {status}");
+        assert!(status.contains("untitled"), "the file on show: {status}");
         assert!(status.contains("idle"), "debugger state: {status}");
     }
 
@@ -467,7 +391,7 @@ mod tests {
         let mut app = app();
         app.workspace
             .active_mut()
-            .insert("section .text\n_start:\n    mov rax, 60\n");
+            .reload("section .text\n_start:\n    mov rax, 60\n");
 
         let text = screen(&app, 160, 48);
         assert!(text.contains("mov rax, 60"), "the source is not drawn");
@@ -587,9 +511,12 @@ mod tests {
         app.workspace
             .active_mut()
             .set_path("/tmp/ratasm-test/main.asm");
-        app.workspace.active_mut().insert("nop\nnop\nnop\n");
-        app.workspace.active_mut().go_to_line(2);
+        app.workspace.active_mut().reload("nop\nnop\nnop\n");
         app.apply(&crate::command::Command::ToggleBreakpoint);
+        if let crate::app::mode::Mode::Prompt(prompt) = &mut app.mode {
+            prompt.set_text("2");
+        }
+        app.accept_prompt();
 
         let text = screen(&app, 160, 48);
         let glyph = app.theme.symbols().breakpoint;
@@ -597,25 +524,11 @@ mod tests {
     }
 
     #[test]
-    fn the_explanation_panel_shows_the_instruction_under_the_cursor() {
-        let mut app = app();
-        app.open_page(crate::app::Page::Debug);
-        app.workspace.active_mut().insert("    add rax, rbx\n");
-        app.workspace.active_mut().move_cursor(
-            crate::editor::Movement::To(crate::editor::Position::new(0, 6)),
-            crate::editor::SelectionMode::Collapse,
-        );
-
-        let text = screen(&app, 160, 48);
-        assert!(text.contains("ADD"), "the mnemonic should be shown");
-    }
-
-    #[test]
-    fn scrolling_follows_the_cursor_into_a_long_file() {
+    fn a_revealed_line_of_a_long_file_is_scrolled_into_view() {
         let mut app = app();
         let source: String = (1..=200).map(|n| format!("    nop  ; {n}\n")).collect();
-        app.workspace.active_mut().insert(&source);
-        app.workspace.active_mut().go_to_line(150);
+        app.workspace.active_mut().reload(&source);
+        app.workspace.active_mut().reveal(149);
 
         sync_scroll(&mut app, 160, 48);
         let text = screen(&app, 160, 48);
@@ -625,18 +538,18 @@ mod tests {
     #[test]
     fn rendering_does_not_change_the_application() {
         let mut app = app();
-        app.workspace.active_mut().insert("    mov rax, 1\n");
+        app.workspace.active_mut().reload("    mov rax, 1\n");
 
         let before = (
             app.focus,
-            app.workspace.active().cursor(),
+            app.workspace.active().scroll_line(),
             app.status.text.clone(),
             app.workspace.active().buffer().to_text(),
         );
         let _ = render(&app, 160, 48);
         let after = (
             app.focus,
-            app.workspace.active().cursor(),
+            app.workspace.active().scroll_line(),
             app.status.text.clone(),
             app.workspace.active().buffer().to_text(),
         );
@@ -661,8 +574,12 @@ mod tests {
         app.workspace
             .active_mut()
             .set_path("/tmp/ratasm-test/main.asm");
-        app.workspace.active_mut().insert("nop\n");
+        app.workspace.active_mut().reload("nop\n");
         app.apply(&crate::command::Command::ToggleBreakpoint);
+        if let crate::app::mode::Mode::Prompt(prompt) = &mut app.mode {
+            prompt.set_text("1");
+        }
+        app.accept_prompt();
 
         let text = screen(&app, 160, 48);
         assert!(text.contains('*'), "the ASCII breakpoint marker is missing");

@@ -7,12 +7,8 @@
 //! to the clarity it buys: line indexing, per-line syntax highlighting and
 //! diagnostic mapping all become direct lookups.
 //!
-//! Every mutation funnels through the single primitive
-//! [`TextBuffer::replace_range`]. Insertion, deletion, paste and
-//! search-and-replace are all expressed in terms of it. That matters because
-//! undo is implemented as the inverse of exactly one operation: if edits could
-//! reach the line vector by other routes, the history would silently drift out
-//! of sync with the text.
+//! A buffer is never edited in place. The text is written by the user's
+//! `$EDITOR`, and a changed file replaces the buffer wholesale.
 //!
 //! The buffer knows nothing about cursors, selections or rendering. Those live
 //! in [`crate::editor::Document`], which keeps this type trivially testable.
@@ -72,7 +68,7 @@ impl TextBuffer {
         self.path.as_deref()
     }
 
-    /// Associates the buffer with a path, as used by "save as".
+    /// Associates the buffer with a path.
     pub fn set_path(&mut self, path: impl Into<PathBuf>) {
         self.path = Some(path.into());
     }
@@ -197,73 +193,9 @@ impl TextBuffer {
         Range::new(self.clamp(range.start), self.clamp(range.end))
     }
 
-    /// Replaces the text covered by `range` with `text`.
-    ///
-    /// This is the only mutating primitive in the buffer. It returns the text
-    /// that was removed together with the position just past the inserted
-    /// text, which is exactly what the undo history and the cursor need.
-    ///
-    /// The range is clamped first, so out-of-range coordinates are corrected
-    /// rather than producing a panic.
-    pub fn replace_range(&mut self, range: Range, text: &str) -> Replacement {
-        let range = self.clamp_range(range);
-        let removed = self.text_in_range(range);
-
-        let start_byte = self.byte_offset(range.start.line, range.start.column);
-        let end_byte = self.byte_offset(range.end.line, range.end.column);
-
-        let prefix = self.lines[range.start.line][..start_byte].to_owned();
-        let suffix = self.lines[range.end.line][end_byte..].to_owned();
-
-        let inserted: Vec<&str> = text.split('\n').collect();
-        let end_position = if inserted.len() == 1 {
-            Position::new(
-                range.start.line,
-                range.start.column + inserted[0].chars().count(),
-            )
-        } else {
-            Position::new(
-                range.start.line + inserted.len() - 1,
-                inserted[inserted.len() - 1].chars().count(),
-            )
-        };
-
-        let mut replacement: Vec<String> = Vec::with_capacity(inserted.len());
-        for (index, chunk) in inserted.iter().enumerate() {
-            let mut line = String::new();
-            if index == 0 {
-                line.push_str(&prefix);
-            }
-            line.push_str(chunk);
-            if index == inserted.len() - 1 {
-                line.push_str(&suffix);
-            }
-            replacement.push(line);
-        }
-
-        self.lines
-            .splice(range.start.line..=range.end.line, replacement);
-
-        Replacement {
-            removed,
-            end: end_position,
-        }
-    }
-
-    /// Inserts `text` at `position`, returning the position just past it.
-    pub fn insert(&mut self, position: Position, text: &str) -> Replacement {
-        self.replace_range(Range::empty(position), text)
-    }
-
-    /// Deletes the text covered by `range`, returning what was removed.
-    pub fn delete(&mut self, range: Range) -> Replacement {
-        self.replace_range(range, "")
-    }
-
     /// The position one character before `position`, or `None` at the origin.
     ///
-    /// Moving back from column zero lands at the end of the previous line,
-    /// which is what backspace needs in order to join lines.
+    /// Moving back from column zero lands at the end of the previous line.
     pub fn position_before(&self, position: Position) -> Option<Position> {
         let position = self.clamp(position);
         if position.column > 0 {
@@ -293,15 +225,6 @@ impl Default for TextBuffer {
     fn default() -> Self {
         Self::new()
     }
-}
-
-/// The outcome of a [`TextBuffer::replace_range`] call.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Replacement {
-    /// The text that was removed, used to build the inverse edit.
-    pub removed: String,
-    /// The position immediately after the inserted text.
-    pub end: Position,
 }
 
 /// The number of terminal cells `ch` occupies when drawn at `column`.
@@ -346,72 +269,18 @@ mod tests {
     }
 
     #[test]
-    fn insert_within_a_line() {
-        let mut buffer = buffer("mov rax");
-        let result = buffer.insert(Position::new(0, 7), ", 1");
-        assert_eq!(buffer.to_text(), "mov rax, 1");
-        assert_eq!(result.end, Position::new(0, 10));
-        assert_eq!(result.removed, "");
-    }
-
-    #[test]
-    fn insert_newline_splits_the_line() {
-        let mut buffer = buffer("mov rax, 1");
-        let result = buffer.insert(Position::new(0, 3), "\n   ");
-        assert_eq!(buffer.to_text(), "mov\n    rax, 1");
-        assert_eq!(result.end, Position::new(1, 3));
-    }
-
-    #[test]
-    fn delete_across_lines_joins_them() {
-        let mut buffer = buffer("mov rax, 1\nret\nnop");
-        let range = Range::new(Position::new(0, 3), Position::new(2, 0));
-        let result = buffer.delete(range);
-        assert_eq!(buffer.to_text(), "movnop");
-        assert_eq!(result.removed, " rax, 1\nret\n");
-        assert_eq!(result.end, Position::new(0, 3));
-    }
-
-    #[test]
-    fn replace_returns_the_text_it_removed() {
-        let mut buffer = buffer("mov rax, 1");
-        let range = Range::new(Position::new(0, 4), Position::new(0, 7));
-        let result = buffer.replace_range(range, "rbx");
-        assert_eq!(result.removed, "rax");
-        assert_eq!(buffer.to_text(), "mov rbx, 1");
-    }
-
-    #[test]
-    fn replacement_is_exactly_invertible() {
-        // The property undo depends on: applying the inverse of a replacement
-        // restores the original text byte for byte.
-        let original = "section .text\n_start:\n    mov rax, 60\n    syscall\n";
-        let mut buffer = buffer(original);
-        let range = Range::new(Position::new(1, 0), Position::new(2, 8));
-        let result = buffer.replace_range(range, "main:\n  xor");
-        let inverse_end = result.end;
-        buffer.replace_range(Range::new(range.start, inverse_end), &result.removed);
-        assert_eq!(buffer.to_text(), original);
-    }
-
-    #[test]
     fn out_of_range_positions_clamp_instead_of_panicking() {
-        let mut buffer = buffer("ret");
+        let buffer = buffer("ret");
         let far = Position::new(999, 999);
         assert_eq!(buffer.clamp(far), Position::new(0, 3));
-        let result = buffer.insert(far, "!");
-        assert_eq!(buffer.to_text(), "ret!");
-        assert_eq!(result.end, Position::new(0, 4));
     }
 
     #[test]
     fn multibyte_characters_are_not_split() {
-        let mut buffer = buffer("; ölçüm değeri");
+        let buffer = buffer("; ölçüm değeri");
         // Column 3 is a character boundary even though it is not byte 3.
         let range = Range::new(Position::new(0, 2), Position::new(0, 7));
         assert_eq!(buffer.text_in_range(range), "ölçüm");
-        buffer.replace_range(range, "value");
-        assert_eq!(buffer.to_text(), "; value değeri");
     }
 
     #[test]

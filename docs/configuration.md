@@ -110,11 +110,7 @@ theme = "dark"          # dark, light, ansi16, colorblind
 # unicode = false       # omit to detect from the locale
 
 [editor]
-indent_width = 4
 line_numbers = true
-highlight_current_line = true
-match_brackets = true
-auto_close_pairs = true
 
 [debugger]
 gdb = "gdb"
@@ -138,11 +134,10 @@ record = true
 
 | Field | Default | Meaning |
 | --- | --- | --- |
-| `indent_width` | `4` | Spaces inserted by one indent. |
 | `line_numbers` | `true` | Show line numbers beside the source. |
-| `highlight_current_line` | `true` | Tint the line the cursor is on. |
-| `match_brackets` | `true` | Mark the bracket matching the one at the cursor. |
-| `auto_close_pairs` | `true` | Typing `(`, `[`, `{`, `"`, `'` or `` ` `` inserts its partner. |
+
+Text is edited in your own editor, not in ratasm: `$VISUAL`, then `$EDITOR`,
+then `vi`. See [keybindings](keybindings.md#editing).
 
 ### `[debugger]`
 

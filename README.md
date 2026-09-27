@@ -63,7 +63,7 @@ ratasm
 
 `ratasm new` writes a working, commented `write`/`exit` program rather than a
 stub. <kbd>F6</kbd> assembles it, <kbd>F5</kbd> runs it, <kbd>F9</kbd> sets a
-breakpoint on the current line, and <kbd>F7</kbd> steps one instruction while
+breakpoint on the line you name, and <kbd>F7</kbd> steps one instruction while
 you watch the registers move.
 
 Running opens a real terminal in the Output panel. Programs can prompt, read
@@ -80,7 +80,7 @@ between the panels of the page you are on.
 
 | Page | For |
 | --- | --- |
-| Code | Writing and building: editor, project files, build output |
+| Code | Writing and building: source view, project files, build output |
 | Debug | Watching the machine: registers, flags, stack, disassembly |
 | Learn | Lessons and questions, with a scratchpad to try them in |
 | Reference | Looking up a system call or what an instruction does |
@@ -107,13 +107,12 @@ nothing.
 | <kbd>F5</kbd> / <kbd>F6</kbd> | Run or continue / build |
 | <kbd>F7</kbd> / <kbd>F8</kbd> / <kbd>F10</kbd> | Step instruction / over / source line |
 | <kbd>Shift</kbd>+<kbd>F7</kbd> | Step one instruction backwards |
-| <kbd>F9</kbd> | Toggle breakpoint |
+| <kbd>F9</kbd> | Toggle a breakpoint on a line |
 | <kbd>F1</kbd> / <kbd>F2</kbd> | Learning panel / scratchpad |
 | <kbd>F3</kbd> | Show the complete status message in Output |
 | <kbd>Ctrl</kbd>+<kbd>P</kbd> | Command palette |
-| <kbd>Ctrl</kbd>+<kbd>S</kbd> / <kbd>Ctrl</kbd>+<kbd>O</kbd> | Save / open |
-| <kbd>Ctrl</kbd>+<kbd>F</kbd> / <kbd>Ctrl</kbd>+<kbd>G</kbd> | Search / go to line or address |
-| <kbd>Ctrl</kbd>+<kbd>D</kbd> | Go to definition, across files |
+| <kbd>Ctrl</kbd>+<kbd>E</kbd> / <kbd>Ctrl</kbd>+<kbd>O</kbd> | Edit in `$EDITOR` / open |
+| <kbd>Ctrl</kbd>+<kbd>G</kbd> | Show an address in the memory panel |
 | <kbd>Ctrl</kbd>+<kbd>K</kbd> | Syscall finder |
 | <kbd>Alt</kbd>+<kbd>1</kbd>..<kbd>4</kbd> | Open a page |
 

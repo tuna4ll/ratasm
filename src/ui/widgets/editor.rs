@@ -1,4 +1,7 @@
-//! The source editor panel: highlighted text, gutter, breakpoints, selection and the program counter.
+//! The Editor panel: `$EDITOR` running inside it, or, when the editor is
+//! closed or a debug session is on, a read-only listing of the source with
+//! its breakpoints and the line the program stopped on. The listing has no
+//! cursor; ratasm does not edit text.
 
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
@@ -16,6 +19,19 @@ pub fn draw(frame: &mut Frame, app: &App, area: Rect, focused: bool) {
     let Some(inner) = super::frame_panel(frame, area, &app.theme, Panel::Editor, focused) else {
         return;
     };
+    if let Some(screen) = app.editor_screen.as_ref().filter(|_| app.shows_editor()) {
+        frame.render_widget(
+            Paragraph::new(super::chrome::terminal_lines(screen, &app.theme)),
+            inner,
+        );
+        if focused && !screen.screen().hide_cursor() {
+            let (row, column) = screen.screen().cursor_position();
+            if row < inner.height && column < inner.width {
+                frame.set_cursor_position((inner.x + column, inner.y + row));
+            }
+        }
+        return;
+    }
 
     let document = app.workspace.active();
     let buffer = document.buffer();
@@ -28,19 +44,15 @@ pub fn draw(frame: &mut Frame, app: &App, area: Rect, focused: bool) {
         0
     };
     let marker_width = 2;
-    let text_width = inner.width as usize;
 
     let first = document.scroll_line();
     let height = inner.height as usize;
-    let cursor = document.cursor();
     let path = document.path().map(std::path::Path::to_path_buf);
 
     let stopped_here = match (&app.current_line, path.as_deref()) {
         (Some((file, _)), Some(open)) => crate::editor::workspace::same_file(open, file),
         _ => false,
     };
-
-    let selection = document.selection();
 
     let mut lines: Vec<Line> = Vec::with_capacity(height);
     for offset in 0..height {
@@ -81,118 +93,20 @@ pub fn draw(frame: &mut Frame, app: &App, area: Rect, focused: bool) {
         spans.push(marker);
 
         if gutter > 0 {
-            let style = if index == cursor.line {
-                theme.bright()
-            } else {
-                theme.dim()
-            };
             spans.push(Span::styled(
                 format!("{number:>width$} ", width = gutter - 1),
-                style,
+                theme.dim(),
             ));
         }
-
-        let text = buffer.line_or_empty(index);
-        let mut text_spans = highlight(text, theme.palette());
-        if let Some(range) = selected_columns(selection, index, text.chars().count()) {
-            text_spans = mark_selection(text_spans, range, theme.text_selection());
-        }
-        spans.extend(text_spans);
-
-        let mut line = Line::from(spans);
-        if index == cursor.line && app.settings.editor.highlight_current_line {
-            line = line.style(theme.cursor_line());
-        }
-        lines.push(line);
+        spans.extend(highlight(buffer.line_or_empty(index), theme.palette()));
+        lines.push(Line::from(spans));
     }
 
     if lines.is_empty() {
         lines.push(Line::from(Span::styled("  (empty file)", theme.dim())));
     }
 
-    let paragraph = Paragraph::new(lines).scroll((0, document.scroll_column() as u16));
-    frame.render_widget(paragraph, inner);
-
-    if focused && cursor.line >= first && cursor.line < first + height {
-        let column = buffer.display_column(cursor.line, cursor.column);
-        let x = inner.x
-            + (marker_width + gutter + column).saturating_sub(document.scroll_column()) as u16;
-        let y = inner.y + (cursor.line - first) as u16;
-        if x < inner.x + inner.width && y < inner.y + inner.height && text_width > 0 {
-            frame.set_cursor_position((x, y));
-        }
-    }
-}
-
-/// The columns of `line` covered by `selection`, if any.
-fn selected_columns(
-    selection: Option<crate::editor::Range>,
-    line: usize,
-    length: usize,
-) -> Option<(usize, usize)> {
-    let selection = selection?;
-    if line < selection.start.line || line > selection.end.line {
-        return None;
-    }
-
-    let start = if line == selection.start.line {
-        selection.start.column
-    } else {
-        0
-    };
-    let end = if line == selection.end.line {
-        selection.end.column
-    } else {
-        length + 1
-    };
-
-    (start < end).then_some((start.min(length), end.min(length + 1)))
-}
-
-/// Repaints the spans covering `range` with the selection style.
-fn mark_selection<'a>(spans: Vec<Span<'a>>, range: (usize, usize), style: Style) -> Vec<Span<'a>> {
-    let (from, to) = range;
-    let mut out: Vec<Span<'a>> = Vec::with_capacity(spans.len() + 2);
-    let mut column = 0;
-
-    for span in spans {
-        let length = span.content.chars().count();
-        let (start, end) = (column, column + length);
-        column = end;
-
-        if end <= from || start >= to {
-            out.push(span);
-            continue;
-        }
-
-        let take = |span: &Span<'a>, first: usize, last: usize| -> Span<'a> {
-            let text: String = span
-                .content
-                .chars()
-                .skip(first)
-                .take(last.saturating_sub(first))
-                .collect();
-            Span::styled(text, span.style)
-        };
-
-        if start < from {
-            out.push(take(&span, 0, from - start));
-        }
-        let inner_start = from.saturating_sub(start);
-        let inner_end = (to - start).min(length);
-        let mut selected = take(&span, inner_start, inner_end);
-        selected.style = selected.style.patch(style);
-        out.push(selected);
-        if end > to {
-            out.push(take(&span, to - start, length));
-        }
-    }
-
-    if to > column {
-        out.push(Span::styled(" ".repeat(to - column.max(from)), style));
-    }
-
-    out
+    frame.render_widget(Paragraph::new(lines), inner);
 }
 
 /// Converts one line of NASM into styled spans.

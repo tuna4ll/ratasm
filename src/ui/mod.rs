@@ -1,6 +1,5 @@
 //! Terminal user interface: lifecycle, layout, widgets and theming.
 
-pub mod clipboard;
 pub mod layout;
 pub mod render;
 pub mod terminal;

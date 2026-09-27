@@ -15,8 +15,8 @@ use crate::debugger::session::GdbSession;
 use crate::debugger::state::Transition;
 use crate::disassembler;
 use crate::editor::workspace;
+use crate::process::editor;
 use crate::process::pty::{PtyControl, PtyEvent, PtySize};
-use crate::ui::clipboard;
 use crate::ui::render;
 use crate::ui::Tui;
 
@@ -107,11 +107,15 @@ impl Running {
     }
 }
 
-/// The ordinary background task and the debugger inferior's terminal transport.
+/// The ordinary background task, the debugger inferior's terminal transport
+/// and `$EDITOR` in the Editor panel.
 #[derive(Default)]
 struct Runtimes {
     background: Running,
     debugger: Running,
+    editor: Running,
+    /// Where the editor's PTY reports, kept apart from the Output terminal's.
+    editor_events: Option<tokio::sync::mpsc::UnboundedSender<PtyEvent>>,
 }
 
 impl Runtimes {
@@ -135,11 +139,28 @@ pub async fn run(mut app: App, terminal: &mut Tui) -> Result<()> {
     let mut session: Option<GdbSession> = None;
     let (finished_tx, mut finished_rx) = tokio::sync::mpsc::unbounded_channel::<Background>();
     let (pty_tx, mut pty_rx) = tokio::sync::mpsc::unbounded_channel::<PtyEvent>();
-    let mut runtimes = Runtimes::default();
+    let (editor_tx, mut editor_rx) = tokio::sync::mpsc::unbounded_channel::<PtyEvent>();
+    let mut runtimes = Runtimes {
+        editor_events: Some(editor_tx),
+        ..Runtimes::default()
+    };
+
+    let size = terminal.size().context("cannot read the terminal size")?;
+    if let Some(path) = app.workspace.active().path().map(Path::to_path_buf) {
+        let line = 1;
+        start_editor(
+            &mut app,
+            &mut runtimes,
+            (size.width, size.height),
+            path,
+            line,
+        );
+    }
 
     loop {
         let size = terminal.size().context("cannot read the terminal size")?;
         sync_terminal_size(&mut app, &runtimes, size.width, size.height);
+        sync_editor_size(&mut app, &runtimes, size.width, size.height);
         render::sync_scroll(&mut app, size.width, size.height);
         terminal
             .draw(|frame| render::draw(frame, &app))
@@ -153,7 +174,7 @@ pub async fn run(mut app: App, terminal: &mut Tui) -> Result<()> {
             event = events.next() => match event {
                 Some(Ok(Event::Key(key))) => handle_key_event(&mut app, &runtimes, key),
                 Some(Ok(Event::Paste(text))) => {
-                    handle_terminal_paste(&app, &runtimes, text);
+                    handle_paste(&app, &runtimes, text);
                     Effect::None
                 }
                 Some(Ok(Event::Mouse(mouse))) => {
@@ -171,6 +192,10 @@ pub async fn run(mut app: App, terminal: &mut Tui) -> Result<()> {
             },
             Some(event) = pty_rx.recv() => {
                 finish_pty_event(&mut app, &mut runtimes, event);
+                Effect::None
+            },
+            Some(event) = editor_rx.recv() => {
+                finish_editor_event(&mut app, &mut runtimes, event);
                 Effect::None
             },
             () = tokio::time::sleep(TICK) => Effect::None,
@@ -194,6 +219,7 @@ pub async fn run(mut app: App, terminal: &mut Tui) -> Result<()> {
 
     runtimes.background.abort();
     runtimes.debugger.abort();
+    runtimes.editor.abort();
 
     if let Some(session) = session {
         session.shutdown().await;
@@ -203,6 +229,21 @@ pub async fn run(mut app: App, terminal: &mut Tui) -> Result<()> {
 
 /// Applies one key event.
 fn handle_key_event(app: &mut App, runtimes: &Runtimes, key: KeyEvent) -> Effect {
+    if app.shows_editor() && app.focus == super::Panel::Editor && !app.mode.is_overlay() {
+        if editor_reserved_key(key) {
+            if let Some(command) = app.keymap.command_for_event(key).cloned() {
+                return app.apply(&command);
+            }
+        }
+        let application_cursor = app
+            .editor_screen
+            .as_ref()
+            .is_some_and(|screen| screen.screen().application_cursor());
+        if let Some(bytes) = terminal_key_bytes(key, application_cursor) {
+            let _ = runtimes.editor.input(bytes);
+        }
+        return Effect::None;
+    }
     if app.terminal.is_some() && app.focus == super::Panel::Output && !app.mode.is_overlay() {
         if let Some(command) = app.keymap.command_for_event(key).cloned() {
             if terminal_reserved_command(&command) {
@@ -219,6 +260,17 @@ fn handle_key_event(app: &mut App, runtimes: &Runtimes, key: KeyEvent) -> Effect
         return Effect::None;
     }
     crate::event::handle_key(app, key)
+}
+
+/// Keys ratasm keeps while `$EDITOR` has focus: function keys and Alt plus a
+/// digit, which build, run, debug and change page. Everything else, Tab and
+/// every Ctrl chord included, belongs to the editor.
+fn editor_reserved_key(key: KeyEvent) -> bool {
+    match key.code {
+        KeyCode::F(_) => true,
+        KeyCode::Char(ch) => key.modifiers.contains(KeyModifiers::ALT) && ch.is_ascii_digit(),
+        _ => false,
+    }
 }
 
 /// Commands that remain reachable while the Output panel sends ordinary keys to the child.
@@ -311,20 +363,27 @@ fn function_key(number: u8) -> Option<&'static [u8]> {
     })
 }
 
-fn handle_terminal_paste(app: &App, runtimes: &Runtimes, text: String) {
-    if app.terminal.is_none() || app.focus != super::Panel::Output || app.mode.is_overlay() {
+/// Sends pasted text to whichever embedded terminal has focus.
+fn handle_paste(app: &App, runtimes: &Runtimes, text: String) {
+    if app.mode.is_overlay() {
         return;
     }
-    let bracketed = app
-        .terminal
-        .as_ref()
-        .is_some_and(|terminal| terminal.screen().bracketed_paste());
-    let bytes = if bracketed {
+    let (screen, running) = match app.focus {
+        super::Panel::Output => (app.terminal.as_ref(), runtimes.terminal()),
+        super::Panel::Editor if app.shows_editor() => {
+            (app.editor_screen.as_ref(), &runtimes.editor)
+        }
+        _ => return,
+    };
+    let Some(screen) = screen else {
+        return;
+    };
+    let bytes = if screen.screen().bracketed_paste() {
         format!("\x1b[200~{text}\x1b[201~").into_bytes()
     } else {
         text.into_bytes()
     };
-    let _ = runtimes.terminal().input(bytes);
+    let _ = running.input(bytes);
 }
 
 /// Keeps both the parser and the kernel PTY aligned with the visible Output panel.
@@ -344,13 +403,31 @@ fn sync_terminal_size(app: &mut App, runtimes: &Runtimes, width: u16, height: u1
     }
 }
 
+/// Keeps `$EDITOR`'s screen and PTY the size of the Editor panel, when it is shown.
+fn sync_editor_size(app: &mut App, runtimes: &Runtimes, width: u16, height: u16) {
+    let Some(size) = panel_terminal_size(app, super::Panel::Editor, width, height) else {
+        return;
+    };
+    if let Some(screen) = &mut app.editor_screen {
+        if screen.size() != size {
+            screen.resize(size);
+            runtimes.editor.resize(size);
+        }
+    }
+}
+
 fn output_terminal_size(app: &App, width: u16, height: u16) -> Option<PtySize> {
+    panel_terminal_size(app, super::Panel::Output, width, height)
+}
+
+/// The cells inside `panel`'s border on the current page, if the page shows it.
+fn panel_terminal_size(app: &App, panel: super::Panel, width: u16, height: u16) -> Option<PtySize> {
     let layout = crate::ui::layout::compute(
         ratatui::layout::Rect::new(0, 0, width, height),
         app.page,
         app.focus,
     );
-    let area = layout.area_of(super::Panel::Output)?;
+    let area = layout.area_of(panel)?;
     Some(PtySize::new(
         area.width.saturating_sub(2),
         area.height.saturating_sub(2),
@@ -369,6 +446,8 @@ async fn perform(
 ) {
     match effect {
         Effect::None | Effect::Quit => {}
+
+        Effect::Edit { path, line } => start_editor(app, runtimes, viewport, path, line),
 
         Effect::Build { debug } => {
             build(app, debug).await;
@@ -403,22 +482,6 @@ async fn perform(
             }
         }
 
-        Effect::SaveFile(path) => match app.workspace.save_active_as(&path) {
-            Ok(path) => {
-                app.status = Status::success(format!("Saved {}", path.display()));
-                app.refresh_project_files();
-            }
-            Err(error) => app.status = Status::error(error.to_string()),
-        },
-
-        Effect::SaveAndClose(path) => match app.workspace.save_active_as(&path) {
-            Ok(_) => {
-                app.close_active_document();
-                app.refresh_project_files();
-            }
-            Err(error) => app.status = Status::error(error.to_string()),
-        },
-
         Effect::SaveProject => match app.project.save() {
             Ok(path) => {
                 app.status = Status::success(format!(
@@ -430,21 +493,14 @@ async fn perform(
             Err(error) => app.status = Status::error(error.to_string()),
         },
 
-        Effect::SaveAll => {
-            app.status = match save_everything(app) {
-                Ok(status) => status,
-                Err(error) => Status::error(error.to_string()),
-            };
-        }
-
         Effect::OpenFile(path) => match app.workspace.open(&path) {
             Ok(_) => {
-                app.workspace
-                    .active_mut()
-                    .set_indent_width(app.settings.indent_width());
                 app.status = Status::success(format!("Opened {}", path.display()));
                 app.focus = super::Panel::Editor;
                 app.refresh_project_files();
+                if app.editor_screen.is_none() {
+                    start_editor(app, runtimes, viewport, path, 1);
+                }
             }
             Err(error) => app.status = Status::error(error.to_string()),
         },
@@ -516,42 +572,85 @@ async fn perform(
                 start_snippet(app, finished, &mut runtimes.background);
             }
         }
+    }
+}
 
-        Effect::SetSystemClipboard(text) => match clipboard::set_sequence(&text) {
-            Some(sequence) => {
-                use std::io::Write as _;
-                let mut out = std::io::stdout();
-                if write!(out, "{sequence}")
-                    .and_then(|()| out.flush())
-                    .is_err()
-                {
-                    tracing::debug!("could not write the clipboard sequence");
+/// Starts `$EDITOR` on `path` inside the Editor panel, unless one is already open.
+fn start_editor(
+    app: &mut App,
+    runtimes: &mut Runtimes,
+    viewport: (u16, u16),
+    path: std::path::PathBuf,
+    line: usize,
+) {
+    if app.editor_screen.is_some() {
+        app.focus_panel(super::Panel::Editor);
+        return;
+    }
+    let Some(events) = runtimes.editor_events.clone() else {
+        return;
+    };
+
+    app.focus_panel(super::Panel::Editor);
+    let size = panel_terminal_size(app, super::Panel::Editor, viewport.0, viewport.1)
+        .unwrap_or(PtySize::new(80, 24));
+    let program = editor::from_env();
+    app.editor_screen = Some(super::terminal::TerminalScreen::new(size));
+    app.editing = Some(path.clone());
+    app.status = Status::info(format!(
+        "{program} is editing {}; F-keys and Alt+1-4 stay with ratasm",
+        workspace::display_path(&path)
+    ));
+
+    let spec = editor::spec(&program, &path, line);
+    let (control_tx, control_rx) = tokio::sync::mpsc::unbounded_channel();
+    runtimes.editor.control = Some(control_tx);
+    runtimes.editor.handle = Some(tokio::spawn(async move {
+        crate::process::pty::run_interactive(spec, size, control_rx, events).await;
+    }));
+}
+
+/// Folds output from `$EDITOR` into its screen, and reads the file back when it exits.
+fn finish_editor_event(app: &mut App, runtimes: &mut Runtimes, event: PtyEvent) {
+    match event {
+        PtyEvent::Output(bytes) => {
+            if let Some(screen) = &mut app.editor_screen {
+                let replies = screen.process(&bytes);
+                if !replies.is_empty() {
+                    let _ = runtimes.editor.input(replies);
                 }
             }
-            None => {
-                app.status = Status::warning(format!(
-                    "Copied within ratasm; too large for the terminal clipboard (over {} KiB)",
-                    clipboard::MAX_BYTES / 1024
-                ));
+        }
+        PtyEvent::Finished(result) => {
+            runtimes.editor.handle = None;
+            runtimes.editor.control = None;
+            let last_screen = app.editor_screen.take();
+            let program = editor::from_env();
+            let failed = !matches!(&result, Ok(output) if output.outcome.is_success());
+            if let (true, Some(screen)) = (failed, last_screen) {
+                // Whatever the editor printed on its way out explains why.
+                app.output = screen.into_lines();
             }
-        },
+            app.status = match result {
+                Ok(output) if output.outcome.is_success() => Status::default(),
+                Ok(output) => Status::warning(match output.outcome.exit_code() {
+                    Some(127) => format!("{program} was not found; set $EDITOR"),
+                    Some(code) => format!("{program} exited with status {code}"),
+                    None => format!("{program} was stopped"),
+                }),
+                Err(error) => Status::error(format!("cannot start {program}: {error}")),
+            };
+            if let Some(path) = app.editing.take() {
+                app.finish_edit(&path);
+            }
+        }
+        PtyEvent::Closed => {}
     }
 }
 
 /// Builds the project, reporting the outcome.
-fn save_everything(app: &mut App) -> Result<Status, crate::editor::workspace::FileError> {
-    let (written, skipped) = app.workspace.save_all()?;
-    Ok(match (written, skipped) {
-        (0, 0) => Status::info("Nothing to save"),
-        (_, 0) => Status::success(format!("Saved {written} file(s)")),
-        (_, _) => Status::warning(format!(
-            "Saved {written} file(s); {skipped} buffer(s) have no file name yet"
-        )),
-    })
-}
-
 async fn build(app: &mut App, debug: bool) -> bool {
-    if let Err(error) = app.workspace.save_all() {
+    if let Err(error) = app.workspace.reload() {
         app.fail_build(error.to_string());
         return false;
     }
@@ -670,7 +769,10 @@ fn finish_pty_event(app: &mut App, runtimes: &mut Runtimes, event: PtyEvent) {
     match event {
         PtyEvent::Output(bytes) => {
             if let Some(terminal) = &mut app.terminal {
-                terminal.process(&bytes);
+                let replies = terminal.process(&bytes);
+                if !replies.is_empty() {
+                    let _ = runtimes.terminal().input(replies);
+                }
             }
         }
         PtyEvent::Finished(result) => {
@@ -1130,11 +1232,7 @@ pub fn open_initial_file(app: &mut App, path: &Path) {
         return;
     }
     match app.workspace.open(path) {
-        Ok(_) => {
-            app.workspace
-                .active_mut()
-                .set_indent_width(app.settings.indent_width());
-        }
+        Ok(_) => {}
         Err(error) => app.status = Status::error(error.to_string()),
     }
 }
@@ -1186,6 +1284,116 @@ mod tests {
 
         open_project_entry(&mut app);
         assert_eq!(app.status.severity, crate::app::Severity::Warning);
+    }
+
+    #[test]
+    fn only_function_keys_and_alt_digits_leave_the_editor() {
+        let key = |code, modifiers| KeyEvent::new(code, modifiers);
+        assert!(editor_reserved_key(key(KeyCode::F(6), KeyModifiers::NONE)));
+        assert!(editor_reserved_key(key(
+            KeyCode::Char('2'),
+            KeyModifiers::ALT
+        )));
+        for kept in [
+            key(KeyCode::Tab, KeyModifiers::NONE),
+            key(KeyCode::Char('s'), KeyModifiers::CONTROL),
+            key(KeyCode::Char('q'), KeyModifiers::CONTROL),
+            key(KeyCode::Char('p'), KeyModifiers::CONTROL),
+            key(KeyCode::Char('x'), KeyModifiers::ALT),
+            key(KeyCode::Esc, KeyModifiers::NONE),
+        ] {
+            assert!(!editor_reserved_key(kept), "{kept:?} belongs to the editor");
+        }
+    }
+
+    #[test]
+    fn keys_reach_the_editor_instead_of_the_keymap() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let mut app = app_for(dir.path());
+        app.editor_screen = Some(super::super::terminal::TerminalScreen::new(PtySize::new(
+            80, 24,
+        )));
+        let (control_tx, mut control_rx) = tokio::sync::mpsc::unbounded_channel();
+        let runtimes = Runtimes {
+            editor: Running {
+                control: Some(control_tx),
+                ..Running::default()
+            },
+            ..Runtimes::default()
+        };
+
+        let ctrl_q = KeyEvent::new(KeyCode::Char('q'), KeyModifiers::CONTROL);
+        assert_eq!(handle_key_event(&mut app, &runtimes, ctrl_q), Effect::None);
+        assert!(!app.should_quit);
+        assert!(matches!(
+            control_rx.try_recv(),
+            Ok(PtyControl::Input(bytes)) if bytes == [0x11]
+        ));
+
+        let build = KeyEvent::new(KeyCode::F(6), KeyModifiers::NONE);
+        assert_eq!(
+            handle_key_event(&mut app, &runtimes, build),
+            Effect::Build { debug: false }
+        );
+        assert!(control_rx.try_recv().is_err(), "F6 stays with ratasm");
+    }
+
+    #[tokio::test]
+    async fn the_editor_runs_in_the_panel_and_its_file_is_read_back() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let mut app = app_for(dir.path());
+        let path = dir.path().join("main.asm");
+        std::fs::write(&path, "ret\n").expect("write");
+        app.workspace.open(&path).expect("open");
+
+        let script = dir.path().join("fake-editor");
+        std::fs::write(
+            &script,
+            "#!/bin/sh\nprintf 'EDITING %s' \"$1\"\nprintf 'nop\\nret\\n' > \"$1\"\n",
+        )
+        .expect("write");
+        std::fs::set_permissions(&script, std::os::unix::fs::PermissionsExt::from_mode(0o755))
+            .expect("chmod");
+
+        let (events_tx, mut events_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut runtimes = Runtimes {
+            editor_events: Some(events_tx),
+            ..Runtimes::default()
+        };
+        let program = script.display().to_string();
+        app.editing = Some(path.clone());
+        app.editor_screen = Some(super::super::terminal::TerminalScreen::new(PtySize::new(
+            80, 24,
+        )));
+        let spec = crate::process::editor::spec(&program, &path, 1);
+        let (control_tx, control_rx) = tokio::sync::mpsc::unbounded_channel();
+        runtimes.editor.control = Some(control_tx);
+        let events = runtimes.editor_events.clone().expect("sender");
+        tokio::spawn(crate::process::pty::run_interactive(
+            spec,
+            PtySize::new(80, 24),
+            control_rx,
+            events,
+        ));
+
+        let mut seen = String::new();
+        while app.editor_screen.is_some() {
+            let event = tokio::time::timeout(Duration::from_secs(5), events_rx.recv())
+                .await
+                .expect("the editor finishes")
+                .expect("an event");
+            if let PtyEvent::Output(bytes) = &event {
+                seen.push_str(&String::from_utf8_lossy(bytes));
+            }
+            finish_editor_event(&mut app, &mut runtimes, event);
+        }
+
+        assert!(
+            seen.contains("EDITING"),
+            "the editor drew into the panel: {seen:?}"
+        );
+        assert!(app.editing.is_none());
+        assert_eq!(app.workspace.active().buffer().to_text(), "nop\nret\n");
     }
 
     #[test]
@@ -1256,7 +1464,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn building_writes_every_edited_buffer_first() {
+    async fn building_reads_what_the_editor_wrote_first() {
         if !crate::process::is_available(Path::new("nasm"))
             || !crate::process::is_available(Path::new("ld"))
         {
@@ -1269,34 +1477,18 @@ mod tests {
         let entry = app.project.entry_path();
 
         open_initial_file(&mut app, &entry);
-        app.workspace.active_mut().insert("; edited\n");
-        assert!(app.workspace.has_unsaved_changes());
+        let edited = format!(
+            "; edited\n{}",
+            std::fs::read_to_string(&entry).expect("read")
+        );
+        std::fs::write(&entry, &edited).expect("write");
 
         assert!(build(&mut app, false).await, "the build should succeed");
-        assert!(
-            !app.workspace.has_unsaved_changes(),
-            "an unsaved buffer would have been assembled from its old contents"
+        assert_eq!(
+            app.workspace.active().buffer().to_text(),
+            edited,
+            "the view must show the source that was assembled"
         );
-        assert!(std::fs::read_to_string(&entry)
-            .expect("read")
-            .contains("; edited"));
-    }
-
-    #[tokio::test]
-    async fn saving_everything_reports_what_it_wrote() {
-        let dir = tempfile::tempdir().expect("temp dir");
-        let mut app = app_for(dir.path());
-        let mut session = None;
-
-        settle(&mut app, &mut session, Effect::SaveAll).await;
-        assert_eq!(app.status.severity, crate::app::Severity::Info);
-
-        let entry = app.project.entry_path();
-        open_initial_file(&mut app, &entry);
-        app.workspace.active_mut().insert("x");
-        settle(&mut app, &mut session, Effect::SaveAll).await;
-        assert_eq!(app.status.severity, crate::app::Severity::Success);
-        assert!(!app.workspace.has_unsaved_changes());
     }
 
     #[tokio::test]
@@ -1456,20 +1648,6 @@ mod tests {
 
         settle(&mut app, &mut session, Effect::StopProgram).await;
         assert_eq!(app.status.severity, crate::app::Severity::Info);
-    }
-
-    #[tokio::test]
-    async fn saving_through_an_effect_writes_the_file() {
-        let dir = tempfile::tempdir().expect("temp dir");
-        let mut app = app_for(dir.path());
-        let mut session = None;
-
-        app.workspace.active_mut().insert("ret\n");
-        let path = dir.path().join("written.asm");
-        settle(&mut app, &mut session, Effect::SaveFile(path.clone())).await;
-
-        assert_eq!(std::fs::read_to_string(&path).expect("read"), "ret\n");
-        assert_eq!(app.status.severity, crate::app::Severity::Success);
     }
 
     #[tokio::test]

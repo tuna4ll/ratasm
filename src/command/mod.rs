@@ -14,12 +14,8 @@ pub use palette::{fuzzy_match, FuzzyMatch};
 pub enum Category {
     /// Opening, saving and closing files.
     File,
-    /// Modifying text.
-    Edit,
     /// Moving around.
     Navigate,
-    /// Finding things.
-    Search,
     /// Assembling, linking and running.
     Build,
     /// Controlling a debug session.
@@ -32,11 +28,9 @@ pub enum Category {
 
 impl Category {
     /// Every category, in palette order.
-    pub const ALL: [Category; 8] = [
+    pub const ALL: [Category; 6] = [
         Category::File,
-        Category::Edit,
         Category::Navigate,
-        Category::Search,
         Category::Build,
         Category::Debug,
         Category::View,
@@ -47,9 +41,7 @@ impl Category {
     pub const fn title(self) -> &'static str {
         match self {
             Category::File => "File",
-            Category::Edit => "Edit",
             Category::Navigate => "Navigate",
-            Category::Search => "Search",
             Category::Build => "Build",
             Category::Debug => "Debug",
             Category::View => "View",
@@ -67,39 +59,18 @@ impl fmt::Display for Category {
 /// An action the application can perform.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Command {
-    /// Create a new empty buffer.
+    /// Prompt for a file name and create it in the external editor.
     NewFile,
+    /// Edit the active file in the external editor.
+    EditFile,
     /// Prompt for a file to open.
     OpenFile,
-    /// Save the active buffer.
-    SaveFile,
-    /// Save every modified buffer.
-    SaveAll,
-    /// Prompt for a name and save the active buffer under it.
-    SaveFileAs,
     /// Close the active buffer.
     CloseFile,
     /// Add the active buffer's file to the project's sources.
     AddToProject,
     /// Leave the application.
     Quit,
-
-    /// Undo the last change.
-    Undo,
-    /// Redo the last undone change.
-    Redo,
-    /// Select the whole buffer.
-    SelectAll,
-    /// Copy the selection.
-    Copy,
-    /// Cut the selection.
-    Cut,
-    /// Paste the clipboard.
-    Paste,
-    /// Add one indent level.
-    Indent,
-    /// Remove one indent level.
-    Dedent,
 
     /// Open a named page.
     GoToPage(Page),
@@ -129,23 +100,10 @@ pub enum Command {
     ScrollToTop,
     /// Scroll the focused panel to its last screenful.
     ScrollToEnd,
-    /// Prompt for a line number and go to it.
-    GoToLine,
     /// Prompt for an address and show it in the memory panel.
     GoToAddress,
-    /// Jump to the definition of the symbol under the cursor.
-    GoToDefinition,
     /// Jump to the first error from the last build.
     GoToFirstError,
-
-    /// Open the search prompt.
-    Search,
-    /// Go to the next match.
-    SearchNext,
-    /// Go to the previous match.
-    SearchPrevious,
-    /// Open the replace prompt.
-    Replace,
 
     /// Assemble and link.
     Build,
@@ -209,21 +167,11 @@ impl Command {
     pub fn all() -> Vec<Command> {
         let mut commands = vec![
             Command::NewFile,
+            Command::EditFile,
             Command::OpenFile,
-            Command::SaveFile,
-            Command::SaveFileAs,
-            Command::SaveAll,
             Command::AddToProject,
             Command::CloseFile,
             Command::Quit,
-            Command::Undo,
-            Command::Redo,
-            Command::SelectAll,
-            Command::Copy,
-            Command::Cut,
-            Command::Paste,
-            Command::Indent,
-            Command::Dedent,
             Command::NextPanel,
             Command::PreviousPanel,
             Command::NextDocument,
@@ -234,14 +182,8 @@ impl Command {
             Command::ScrollPageDown,
             Command::ScrollToTop,
             Command::ScrollToEnd,
-            Command::GoToLine,
             Command::GoToAddress,
-            Command::GoToDefinition,
             Command::GoToFirstError,
-            Command::Search,
-            Command::SearchNext,
-            Command::SearchPrevious,
-            Command::Replace,
             Command::Build,
             Command::BuildWithDebugInfo,
             Command::Run,
@@ -278,22 +220,11 @@ impl Command {
     pub fn id(&self) -> String {
         match self {
             Command::NewFile => "file.new".into(),
+            Command::EditFile => "file.edit".into(),
             Command::OpenFile => "file.open".into(),
-            Command::SaveFile => "file.save".into(),
-            Command::SaveAll => "file.save-all".into(),
             Command::AddToProject => "file.add-to-project".into(),
-            Command::SaveFileAs => "file.save-as".into(),
             Command::CloseFile => "file.close".into(),
             Command::Quit => "app.quit".into(),
-
-            Command::Undo => "edit.undo".into(),
-            Command::Redo => "edit.redo".into(),
-            Command::SelectAll => "edit.select-all".into(),
-            Command::Copy => "edit.copy".into(),
-            Command::Cut => "edit.cut".into(),
-            Command::Paste => "edit.paste".into(),
-            Command::Indent => "edit.indent".into(),
-            Command::Dedent => "edit.dedent".into(),
 
             Command::GoToPage(page) => format!("navigate.page.{}", page.id()),
             Command::NextPage => "navigate.next-page".into(),
@@ -309,15 +240,8 @@ impl Command {
             Command::ScrollPageDown => "navigate.scroll-page-down".into(),
             Command::ScrollToTop => "navigate.scroll-to-top".into(),
             Command::ScrollToEnd => "navigate.scroll-to-end".into(),
-            Command::GoToLine => "navigate.go-to-line".into(),
             Command::GoToAddress => "navigate.go-to-address".into(),
-            Command::GoToDefinition => "navigate.go-to-definition".into(),
             Command::GoToFirstError => "navigate.go-to-first-error".into(),
-
-            Command::Search => "search.find".into(),
-            Command::SearchNext => "search.next".into(),
-            Command::SearchPrevious => "search.previous".into(),
-            Command::Replace => "search.replace".into(),
 
             Command::Build => "build.build".into(),
             Command::BuildWithDebugInfo => "build.build-debug".into(),
@@ -355,22 +279,11 @@ impl Command {
     pub fn title(&self) -> String {
         match self {
             Command::NewFile => "New file".into(),
+            Command::EditFile => "Edit in $EDITOR".into(),
             Command::OpenFile => "Open file".into(),
-            Command::SaveFile => "Save".into(),
-            Command::SaveAll => "Save all".into(),
             Command::AddToProject => "Add to project".into(),
-            Command::SaveFileAs => "Save as".into(),
             Command::CloseFile => "Close file".into(),
             Command::Quit => "Quit".into(),
-
-            Command::Undo => "Undo".into(),
-            Command::Redo => "Redo".into(),
-            Command::SelectAll => "Select all".into(),
-            Command::Copy => "Copy".into(),
-            Command::Cut => "Cut".into(),
-            Command::Paste => "Paste".into(),
-            Command::Indent => "Indent".into(),
-            Command::Dedent => "Dedent".into(),
 
             Command::GoToPage(page) => format!("{} page", page.title()),
             Command::NextPage => "Next page".into(),
@@ -386,15 +299,8 @@ impl Command {
             Command::ScrollToEnd => "Scroll to the end".into(),
             Command::NextDocument => "Next document".into(),
             Command::PreviousDocument => "Previous document".into(),
-            Command::GoToLine => "Go to line".into(),
             Command::GoToAddress => "Go to address".into(),
-            Command::GoToDefinition => "Go to definition".into(),
             Command::GoToFirstError => "Go to first error".into(),
-
-            Command::Search => "Find".into(),
-            Command::SearchNext => "Find next".into(),
-            Command::SearchPrevious => "Find previous".into(),
-            Command::Replace => "Replace".into(),
 
             Command::Build => "Build".into(),
             Command::BuildWithDebugInfo => "Build with debug info".into(),
@@ -431,10 +337,10 @@ impl Command {
     /// A one-line description shown beside the title.
     pub fn description(&self) -> String {
         match self {
-            Command::SaveFile => "Write the active buffer to its file".into(),
-            Command::SaveAll => "Write every modified buffer to its file".into(),
+            Command::NewFile => "Name a new file and write it in $EDITOR".into(),
+            Command::EditFile => "Run $EDITOR on the active file in the Editor panel".into(),
             Command::AddToProject => "Assemble this file with the rest of the project".into(),
-            Command::Quit => "Leave ratasm, confirming any unsaved changes".into(),
+            Command::Quit => "Leave ratasm".into(),
             Command::Build => "Assemble and link the project".into(),
             Command::BuildWithDebugInfo => "Assemble with -g so source-level stepping works".into(),
             Command::Run => "Build if needed, then run the program".into(),
@@ -450,12 +356,9 @@ impl Command {
             Command::StepBack => "Undo the last instruction and put the registers back".into(),
             Command::StepBackOver => "Undo the last instruction, skipping calls".into(),
             Command::ReverseContinue => "Run backwards to the previous breakpoint".into(),
-            Command::ToggleBreakpoint => "Add or remove a breakpoint on the current line".into(),
+            Command::ToggleBreakpoint => "Add or remove a breakpoint on a line you name".into(),
             Command::GoToAddress => "Show an address in the memory panel; accepts rsp-0x20".into(),
-            Command::GoToDefinition => {
-                "Jump to where the symbol under the cursor is defined".into()
-            }
-            Command::GoToFirstError => "Jump to the first error from the last build".into(),
+            Command::GoToFirstError => "Show the first error from the last build".into(),
             Command::CycleRegisterFormat => "Hexadecimal, decimal, signed, binary or ASCII".into(),
             Command::ToggleDisassemblySyntax => {
                 "Intel puts the destination first; AT&T puts the source first".into()
@@ -475,21 +378,10 @@ impl Command {
     pub fn category(&self) -> Category {
         match self {
             Command::NewFile
+            | Command::EditFile
             | Command::OpenFile
-            | Command::SaveFile
-            | Command::SaveFileAs
-            | Command::SaveAll
             | Command::AddToProject
             | Command::CloseFile => Category::File,
-
-            Command::Undo
-            | Command::Redo
-            | Command::SelectAll
-            | Command::Copy
-            | Command::Cut
-            | Command::Paste
-            | Command::Indent
-            | Command::Dedent => Category::Edit,
 
             Command::GoToPage(_)
             | Command::NextPage
@@ -499,9 +391,7 @@ impl Command {
             | Command::FocusPanel(_)
             | Command::NextDocument
             | Command::PreviousDocument
-            | Command::GoToLine
             | Command::GoToAddress
-            | Command::GoToDefinition
             | Command::GoToFirstError
             | Command::ScrollUp
             | Command::ScrollDown
@@ -509,10 +399,6 @@ impl Command {
             | Command::ScrollPageDown
             | Command::ScrollToTop
             | Command::ScrollToEnd => Category::Navigate,
-
-            Command::Search | Command::SearchNext | Command::SearchPrevious | Command::Replace => {
-                Category::Search
-            }
 
             Command::Build | Command::BuildWithDebugInfo | Command::Run | Command::Stop => {
                 Category::Build
@@ -550,12 +436,7 @@ impl Command {
     pub fn prompts_for_input(&self) -> bool {
         matches!(
             self,
-            Command::OpenFile
-                | Command::SaveFileAs
-                | Command::GoToLine
-                | Command::GoToAddress
-                | Command::Search
-                | Command::Replace
+            Command::OpenFile | Command::NewFile | Command::GoToAddress | Command::ToggleBreakpoint
         )
     }
 
@@ -687,15 +568,15 @@ mod tests {
         }
         assert!(!Command::DebugStart.needs_debug_session());
         assert!(!Command::Build.needs_debug_session());
-        assert!(!Command::SaveFile.needs_debug_session());
+        assert!(!Command::EditFile.needs_debug_session());
     }
 
     #[test]
     fn commands_that_ask_for_a_value_are_marked() {
-        assert!(Command::GoToLine.prompts_for_input());
+        assert!(Command::ToggleBreakpoint.prompts_for_input());
         assert!(Command::GoToAddress.prompts_for_input());
         assert!(Command::OpenFile.prompts_for_input());
-        assert!(!Command::SaveFile.prompts_for_input());
+        assert!(!Command::EditFile.prompts_for_input());
         assert!(!Command::Build.prompts_for_input());
     }
 
@@ -707,7 +588,7 @@ mod tests {
 
     #[test]
     fn identifier_lookup_is_forgiving_about_case_and_space() {
-        assert_eq!(Command::from_id("  FILE.SAVE "), Some(Command::SaveFile));
+        assert_eq!(Command::from_id("  FILE.EDIT "), Some(Command::EditFile));
     }
 
     #[test]
@@ -726,11 +607,9 @@ mod tests {
             "debug.step-over",
             "debug.toggle-breakpoint",
             "debug.step-line",
-            "file.save",
+            "file.edit",
             "file.open",
             "app.palette",
-            "search.find",
-            "navigate.go-to-line",
             "app.syscalls",
             "app.quit",
             "navigate.next-panel",

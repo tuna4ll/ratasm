@@ -30,7 +30,7 @@ tab strip above them naming the others.
 | <kbd>F6</kbd> | Build |
 | <kbd>F7</kbd> | Step one instruction |
 | <kbd>F8</kbd> | Step over |
-| <kbd>F9</kbd> | Toggle breakpoint on the current line |
+| <kbd>F9</kbd> | Toggle a breakpoint; asks for the line of the active file |
 | <kbd>F10</kbd> | Step one source line |
 | <kbd>Ctrl</kbd>+<kbd>F5</kbd> | Stop the running program |
 | <kbd>F11</kbd> | Step out of the current call |
@@ -84,28 +84,27 @@ assembled, and `rax=` removes it again. <kbd>Tab</kbd> still leaves the panel.
 
 | Key | Action |
 | --- | --- |
-| <kbd>Ctrl</kbd>+<kbd>S</kbd> | Save |
-| <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>S</kbd> | Save every modified buffer |
-| <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>A</kbd> | Add this file to the project's sources |
+| <kbd>Ctrl</kbd>+<kbd>E</kbd> | Open `$EDITOR` on the active file in the Editor panel |
+| <kbd>Ctrl</kbd>+<kbd>N</kbd> | Name a new file and create it in `$EDITOR` |
 | <kbd>Ctrl</kbd>+<kbd>O</kbd> | Open |
-| <kbd>Tab</kbd> | Complete the path, inside an open or save prompt |
+| <kbd>Ctrl</kbd>+<kbd>W</kbd> | Close the file |
+| <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>A</kbd> | Add this file to the project's sources |
+| <kbd>Tab</kbd> | Complete the path, inside an open or new-file prompt |
 | <kbd>Ctrl</kbd>+<kbd>Q</kbd> | Quit |
 
-### Navigation and search
+### Navigation
 
 | Key | Action |
 | --- | --- |
 | <kbd>Ctrl</kbd>+<kbd>P</kbd> | Command palette |
-| <kbd>Ctrl</kbd>+<kbd>F</kbd> | Search |
-| <kbd>Ctrl</kbd>+<kbd>G</kbd> | Go to line, or to an address |
+| <kbd>Ctrl</kbd>+<kbd>G</kbd> | Show an address in the memory panel |
 | <kbd>Ctrl</kbd>+<kbd>K</kbd> | Syscall finder |
-| <kbd>Ctrl</kbd>+<kbd>D</kbd> | Go to definition, or open the file an `%include` names |
-| <kbd>Tab</kbd> | Next panel on this page (indents inside the editor) |
-| <kbd>Shift</kbd>+<kbd>Tab</kbd> | Previous panel (dedents inside the editor) |
+| <kbd>Tab</kbd> | Next panel on this page |
+| <kbd>Shift</kbd>+<kbd>Tab</kbd> | Previous panel |
 
 ### Scrolling a panel
 
-Every panel but the editor and the scratchpad holds a list that is often taller
+Every panel but the Editor and the scratchpad holds a list that is often taller
 than the room it has. A scrollbar down the right edge appears when there is more
 than fits.
 
@@ -138,7 +137,7 @@ with <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>A</kbd>.
 | Action | Result |
 | --- | --- |
 | Wheel | Scrolls whatever is under the pointer, without taking focus |
-| Click a panel | Focuses it; in the editor, moves the cursor |
+| Click a panel | Focuses it |
 | Click a page name | Opens that page |
 | Click a file name | Switches to that buffer |
 | Click a tab | Focuses that panel |
@@ -150,49 +149,34 @@ terminal normally would; most terminals reserve that for exactly this.
 
 ### Editing
 
+ratasm does not edit text itself. The Editor panel runs your own editor inside
+it: `$VISUAL`, then `$EDITOR`, then `vi`, started on the project's entry file
+as soon as ratasm opens. While the panel has focus every key goes to the
+editor, <kbd>Tab</kbd> and <kbd>Ctrl</kbd> chords included, except the
+function keys and <kbd>Alt</kbd>+<kbd>1</kbd>..<kbd>4</kbd>, which stay with
+ratasm so building, running, debugging and changing page still work. Click
+another panel to leave it.
+
+The command goes through `sh -c`, so a value such as `emacsclient -t` works.
+Editors known to take `+LINE` (vim, neovim, nano, emacs, micro, kakoune and a
+few more) open at the line the listing was scrolled to; any other editor is
+given just the file.
+When the editor exits, ratasm reads the file back. A build reads every open
+file again first, so what is assembled is always what is on disk.
+
+With the editor closed, or during a debug session, the panel shows a plain
+listing of the source with its breakpoints and the line the program stopped
+on. It has no cursor and nothing in it can be typed into; search, go to line
+and the like are your editor's job.
+
 | Key | Action |
 | --- | --- |
-| <kbd>Ctrl</kbd>+<kbd>Z</kbd> | Undo |
-| <kbd>Ctrl</kbd>+<kbd>Y</kbd> | Redo |
-| <kbd>Ctrl</kbd>+<kbd>A</kbd> | Select all |
-| <kbd>Home</kbd> | First non-blank character, then column zero |
-| <kbd>Ctrl</kbd>+<kbd>←</kbd> / <kbd>→</kbd> | Word left / right |
-| <kbd>Ctrl</kbd>+<kbd>Backspace</kbd> | Delete the word before the cursor |
-| <kbd>Ctrl</kbd>+<kbd>Delete</kbd> | Delete the word after the cursor |
+| <kbd>Enter</kbd> / <kbd>Ctrl</kbd>+<kbd>E</kbd> | Open `$EDITOR` in the panel again |
+| <kbd>↑</kbd> / <kbd>↓</kbd>, <kbd>PgUp</kbd> / <kbd>PgDn</kbd> | Scroll the listing |
+| <kbd>Home</kbd> / <kbd>End</kbd> | First / last line |
 
-Selection works the way it does anywhere else: <kbd>Shift</kbd> with any
-movement key extends it, <kbd>Ctrl</kbd>+<kbd>A</kbd> takes the whole buffer,
-and typing replaces what is selected. <kbd>Ctrl</kbd>+<kbd>C</kbd>,
-<kbd>Ctrl</kbd>+<kbd>X</kbd> and <kbd>Ctrl</kbd>+<kbd>V</kbd> copy, cut and
-paste; with nothing selected, copy and cut take the whole line.
-
-Most terminals send <kbd>Ctrl</kbd>+<kbd>Backspace</kbd> as <kbd>Ctrl</kbd>+<kbd>H</kbd>,
-because backspace is DEL and BS is what <kbd>Ctrl</kbd>+<kbd>H</kbd> has always
-been. Both spellings delete a word, and so does
-<kbd>Alt</kbd>+<kbd>Backspace</kbd>.
-
-<kbd>Ctrl</kbd>+<kbd>Backspace</kbd> takes the whitespace before the cursor and
-then one run: letters or punctuation, not both, so repeated presses are
-predictable. In a line's indentation it clears to column zero in one press, and
-at column zero it joins with the line above. <kbd>Ctrl</kbd>+<kbd>Delete</kbd>
-does the same forwards.
-
-Typing `(`, `[`, `{`, `"`, `'` or `` ` `` inserts its partner and leaves the
-cursor between them, unless the next character is part of a word. Typing the
-closing character steps over the one already there rather than doubling it, and
-backspace between an empty pair removes both. With text selected, typing an
-opening character wraps it instead of replacing it. An apostrophe after a word
-is left alone, so `don't` in a comment stays as written.
-`auto_close_pairs = false` turns all of that off.
-
-Inside the editor, <kbd>Tab</kbd> indents rather than changing panel — an
-editor that cannot insert an indent is not much of an editor. To leave the
-editor by keyboard use <kbd>Alt</kbd> plus a digit, which focuses a panel
-directly from anywhere.
-
-<kbd>Home</kbd> is deliberately two-stage: pressing it once goes to the start of
-the code, pressing it again to the start of the line. Indented assembly makes
-the first far more useful than the second.
+Quitting ratasm while the editor still runs asks for a second Quit, since that
+kills the editor and anything it has not saved.
 
 ## The command palette
 
@@ -209,7 +193,7 @@ Bindings live in the `[keys]` section of your configuration file
 ```toml
 [keys]
 "F5" = "debug.continue"
-"ctrl+s" = "file.save"
+"ctrl+s" = "file.edit"
 "ctrl+shift+p" = "app.palette"
 ```
 
@@ -231,21 +215,11 @@ code, so a command missing here is a build failure rather than a surprise.
 | Identifier | Command |
 | --- | --- |
 | `file.new` | New file |
+| `file.edit` | Edit in $EDITOR |
 | `file.open` | Open file |
-| `file.save` | Save |
-| `file.save-all` | Save all |
 | `file.add-to-project` | Add to project |
-| `file.save-as` | Save as |
 | `file.close` | Close file |
 | `app.quit` | Quit |
-| `edit.undo` | Undo |
-| `edit.redo` | Redo |
-| `edit.select-all` | Select all |
-| `edit.copy` | Copy |
-| `edit.cut` | Cut |
-| `edit.paste` | Paste |
-| `edit.indent` | Indent |
-| `edit.dedent` | Dedent |
 | `navigate.next-panel` | Next panel |
 | `navigate.previous-panel` | Previous panel |
 | `navigate.next-document` | Next document |
@@ -256,14 +230,8 @@ code, so a command missing here is a build failure rather than a surprise.
 | `navigate.scroll-page-down` | Scroll down a page |
 | `navigate.scroll-to-top` | Scroll to the top |
 | `navigate.scroll-to-end` | Scroll to the end |
-| `navigate.go-to-line` | Go to line |
 | `navigate.go-to-address` | Go to address |
-| `navigate.go-to-definition` | Go to definition |
 | `navigate.go-to-first-error` | Go to first error |
-| `search.find` | Find |
-| `search.next` | Find next |
-| `search.previous` | Find previous |
-| `search.replace` | Replace |
 | `build.build` | Build |
 | `build.build-debug` | Build with debug info |
 | `build.run` | Run |

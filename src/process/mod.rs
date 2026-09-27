@@ -4,7 +4,8 @@
 //! GDB — is launched through this module. Four properties matter and each is
 //! easy to get wrong:
 //!
-//! **No shell.** Arguments are passed as a vector to `execve`, never
+//! **No shell.** Apart from the user's own `$EDITOR` (see [`editor`]),
+//! arguments are passed as a vector to `execve`, never
 //! interpolated into a command string. A project whose path contains a space,
 //! a quote or a `;` is then merely a path, not an injection.
 //!
@@ -19,6 +20,7 @@
 //! **No lock-up.** A timeout bounds every run, so a program that never exits
 //! cannot take the editor down with it.
 
+pub mod editor;
 pub mod pty;
 
 use std::path::{Path, PathBuf};

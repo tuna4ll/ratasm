@@ -1,4 +1,4 @@
-//! What the interface is currently doing: editing, or asking a question.
+//! What the interface is currently doing: browsing, or asking a question.
 
 use crate::command::Command;
 
@@ -7,22 +7,12 @@ use crate::command::Command;
 pub enum PromptKind {
     /// A file to open.
     OpenFile,
-    /// A name to save under.
-    SaveAs,
-    /// A name to save under before closing the buffer.
-    SaveAsAndClose,
-    /// A line number.
-    GoToLine,
+    /// A file to create in the external editor.
+    NewFile,
+    /// The line of the active file to add or remove a breakpoint on.
+    BreakpointLine,
     /// An address expression.
     GoToAddress,
-    /// Text to search for.
-    Search,
-    /// Text to replace matches with.
-    Replace,
-    /// Confirmation before discarding unsaved changes.
-    ConfirmQuit,
-    /// Choice of saving, discarding, or cancelling before closing a buffer.
-    ConfirmClose,
 }
 
 impl PromptKind {
@@ -30,16 +20,9 @@ impl PromptKind {
     pub const fn label(self) -> &'static str {
         match self {
             PromptKind::OpenFile => "Open file",
-            PromptKind::SaveAs => "Save as",
-            PromptKind::SaveAsAndClose => "Save and close as",
-            PromptKind::GoToLine => "Go to line",
+            PromptKind::NewFile => "New file",
+            PromptKind::BreakpointLine => "Toggle breakpoint at line",
             PromptKind::GoToAddress => "Go to address",
-            PromptKind::Search => "Find",
-            PromptKind::Replace => "Replace with",
-            PromptKind::ConfirmQuit => "Unsaved changes. Quit anyway? (y/n)",
-            PromptKind::ConfirmClose => {
-                "Unsaved changes. Save and close, discard, or cancel? (s/d/c)"
-            }
         }
     }
 
@@ -47,28 +30,15 @@ impl PromptKind {
     pub const fn hint(self) -> &'static str {
         match self {
             PromptKind::OpenFile => "path to an .asm file",
-            PromptKind::SaveAs => "path to write to",
-            PromptKind::SaveAsAndClose => "path to write to",
-            PromptKind::GoToLine => "line number",
+            PromptKind::NewFile => "path of the file to create",
+            PromptKind::BreakpointLine => "line number",
             PromptKind::GoToAddress => "0x4000b0, rsp-0x20, rbp+8",
-            PromptKind::Search => "text to find",
-            PromptKind::Replace => "replacement text",
-            PromptKind::ConfirmQuit => "y or n",
-            PromptKind::ConfirmClose => "s, d, or c",
         }
-    }
-
-    /// Whether the prompt takes a single keypress rather than a line of text.
-    pub const fn is_confirmation(self) -> bool {
-        matches!(self, PromptKind::ConfirmQuit | PromptKind::ConfirmClose)
     }
 
     /// Whether Tab should complete the input against the filesystem.
     pub const fn completes_paths(self) -> bool {
-        matches!(
-            self,
-            PromptKind::OpenFile | PromptKind::SaveAs | PromptKind::SaveAsAndClose
-        )
+        matches!(self, PromptKind::OpenFile | PromptKind::NewFile)
     }
 }
 
@@ -303,14 +273,14 @@ mod tests {
 
     #[test]
     fn a_new_prompt_puts_the_cursor_after_the_prefilled_text() {
-        let prompt = Prompt::new(PromptKind::Search, "rax");
+        let prompt = Prompt::new(PromptKind::GoToAddress, "rax");
         assert_eq!(prompt.text(), "rax");
         assert_eq!(prompt.cursor(), 3);
     }
 
     #[test]
     fn typing_inserts_at_the_cursor() {
-        let mut prompt = Prompt::new(PromptKind::Search, "rax");
+        let mut prompt = Prompt::new(PromptKind::GoToAddress, "rax");
         prompt.move_home();
         prompt.insert('e');
         assert_eq!(prompt.text(), "erax");
@@ -319,7 +289,7 @@ mod tests {
 
     #[test]
     fn backspace_and_delete_remove_the_right_character() {
-        let mut prompt = Prompt::new(PromptKind::Search, "abc");
+        let mut prompt = Prompt::new(PromptKind::GoToAddress, "abc");
         prompt.backspace();
         assert_eq!(prompt.text(), "ab");
 
@@ -341,7 +311,7 @@ mod tests {
 
     #[test]
     fn multibyte_text_is_edited_by_character_not_byte() {
-        let mut prompt = Prompt::new(PromptKind::Search, "ölçüm");
+        let mut prompt = Prompt::new(PromptKind::GoToAddress, "ölçüm");
         prompt.backspace();
         assert_eq!(prompt.text(), "ölçü");
         prompt.move_home();
@@ -353,7 +323,7 @@ mod tests {
 
     #[test]
     fn cursor_movement_is_clamped_to_the_text() {
-        let mut prompt = Prompt::new(PromptKind::Search, "ab");
+        let mut prompt = Prompt::new(PromptKind::GoToAddress, "ab");
         for _ in 0..10 {
             prompt.move_right();
         }
@@ -368,25 +338,13 @@ mod tests {
     fn every_prompt_kind_has_a_label_and_a_hint() {
         for kind in [
             PromptKind::OpenFile,
-            PromptKind::SaveAs,
-            PromptKind::SaveAsAndClose,
-            PromptKind::GoToLine,
+            PromptKind::NewFile,
+            PromptKind::BreakpointLine,
             PromptKind::GoToAddress,
-            PromptKind::Search,
-            PromptKind::Replace,
-            PromptKind::ConfirmQuit,
-            PromptKind::ConfirmClose,
         ] {
             assert!(!kind.label().is_empty());
             assert!(!kind.hint().is_empty());
         }
-    }
-
-    #[test]
-    fn destructive_prompts_are_confirmations() {
-        assert!(PromptKind::ConfirmQuit.is_confirmation());
-        assert!(PromptKind::ConfirmClose.is_confirmation());
-        assert!(!PromptKind::Search.is_confirmation());
     }
 
     #[test]
@@ -471,7 +429,7 @@ mod tests {
 
     #[test]
     fn overlays_report_themselves_and_expose_their_prompt() {
-        let mode = Mode::Prompt(Prompt::new(PromptKind::GoToLine, "42"));
+        let mode = Mode::Prompt(Prompt::new(PromptKind::BreakpointLine, "42"));
         assert!(mode.is_overlay());
         assert_eq!(mode.prompt().map(Prompt::text), Some("42"));
         assert!(mode.palette().is_none());

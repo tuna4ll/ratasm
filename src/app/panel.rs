@@ -121,7 +121,7 @@ impl Panel {
 
     /// Whether typing into the panel inserts text.
     pub const fn is_text_input(self) -> bool {
-        matches!(self, Panel::Editor | Panel::Scratchpad)
+        matches!(self, Panel::Scratchpad)
     }
 
     /// Resolves a panel from its identifier.
@@ -215,7 +215,7 @@ mod tests {
     #[test]
     fn only_the_text_panels_consume_typed_characters() {
         for panel in Panel::ALL {
-            let expected = matches!(panel, Panel::Editor | Panel::Scratchpad);
+            let expected = matches!(panel, Panel::Scratchpad);
             assert_eq!(panel.is_text_input(), expected, "{panel}");
         }
     }

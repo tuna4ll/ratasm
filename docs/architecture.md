@@ -56,16 +56,13 @@ it lives.
 
 ## Editing
 
-The buffer has exactly one mutating primitive, `replace_range`. Insertion,
-deletion, paste and search-and-replace are all expressed through it, and undo is
-its exact inverse. If edits could reach the line vector by another route, the
-history would drift out of sync with the text; funnelling everything through one
-operation makes that impossible rather than merely unlikely.
-
-Undo groups are closed explicitly by `History::seal` — on cursor movement, on
-save — rather than by a timer, so grouping is deterministic and testable.
-"Modified" is tracked by comparing state ids, not by a boolean, so undoing back
-to the save point correctly clears the marker.
+ratasm does not edit text; the user's `$EDITOR` does, inside the Editor panel.
+It runs on its own pseudo-terminal, the same transport the Output panel uses
+for programs, and its screen is parsed by `vt100` and drawn into the panel.
+Keys go to it untranslated except the function keys and Alt plus a digit.
+Buffers are never written, only read, so disk is the single source of truth.
+`Workspace::reload` re-reads every open file when the editor exits and before
+each build, keeping the cursor where the new text allows.
 
 ## The debugger
 

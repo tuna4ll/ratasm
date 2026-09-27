@@ -26,10 +26,8 @@ pub struct Palette {
     pub border: Color,
     /// Border of the focused panel.
     pub border_focused: Color,
-    /// Background of a selected list row or text selection.
+    /// Background of a selected list row.
     pub selection: Color,
-    /// Background of the line holding the editor cursor.
-    pub cursor_line: Color,
     /// Primary accent used sparingly for emphasis.
     pub accent: Color,
     /// Errors and failed operations.
@@ -83,7 +81,6 @@ impl Palette {
             border: Color::Rgb(0x33, 0x38, 0x42),
             border_focused: Color::Rgb(0x6d, 0x9d, 0xd8),
             selection: Color::Rgb(0x2c, 0x3a, 0x4d),
-            cursor_line: Color::Rgb(0x1e, 0x22, 0x2a),
             accent: Color::Rgb(0x6d, 0x9d, 0xd8),
             error: Color::Rgb(0xd8, 0x6b, 0x6b),
             warning: Color::Rgb(0xd8, 0xaa, 0x5f),
@@ -117,7 +114,6 @@ impl Palette {
             border: Color::Rgb(0xd0, 0xd4, 0xdb),
             border_focused: Color::Rgb(0x1f, 0x63, 0xa8),
             selection: Color::Rgb(0xd6, 0xe4, 0xf5),
-            cursor_line: Color::Rgb(0xef, 0xf1, 0xf4),
             accent: Color::Rgb(0x1f, 0x63, 0xa8),
             error: Color::Rgb(0xa8, 0x27, 0x27),
             warning: Color::Rgb(0x8a, 0x5d, 0x00),
@@ -155,7 +151,6 @@ impl Palette {
             border: Color::DarkGray,
             border_focused: Color::Cyan,
             selection: Color::Blue,
-            cursor_line: Color::Black,
             accent: Color::Cyan,
             error: Color::Red,
             warning: Color::Yellow,
@@ -196,7 +191,6 @@ impl Palette {
             border: Color::Rgb(0x35, 0x3a, 0x44),
             border_focused: Color::Rgb(0x64, 0xa8, 0xe8),
             selection: Color::Rgb(0x2b, 0x3c, 0x52),
-            cursor_line: Color::Rgb(0x1e, 0x22, 0x2a),
             accent: Color::Rgb(0x64, 0xa8, 0xe8),
             error: Color::Rgb(0xe8, 0x8a, 0x1f),
             warning: Color::Rgb(0xe8, 0xc4, 0x4f),

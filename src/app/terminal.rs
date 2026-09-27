@@ -17,9 +17,36 @@ impl TerminalScreen {
         }
     }
 
-    /// Applies bytes emitted by the child process.
-    pub fn process(&mut self, bytes: &[u8]) {
-        self.parser.process(bytes);
+    /// Applies bytes emitted by the child process, returning what a real
+    /// terminal would answer to the queries among them.
+    ///
+    /// Programs such as editors ask for the cursor position and wait for the
+    /// reply; left unanswered they time out and quit. Each query is answered
+    /// with the state as it stood when the query arrived.
+    pub fn process(&mut self, bytes: &[u8]) -> Vec<u8> {
+        let mut replies = Vec::new();
+        let mut rest = bytes;
+        while let Some((start, query)) = next_query(rest) {
+            self.parser.process(&rest[..start]);
+            replies.extend(self.answer(query));
+            rest = &rest[start + query.len()..];
+        }
+        self.parser.process(rest);
+        replies
+    }
+
+    /// The reply to one recognised query.
+    fn answer(&self, query: &[u8]) -> Vec<u8> {
+        match query {
+            b"\x1b[6n" | b"\x1b[?6n" => {
+                let (row, column) = self.parser.screen().cursor_position();
+                let private = if query[2] == b'?' { "?" } else { "" };
+                format!("\x1b[{private}{};{}R", row + 1, column + 1).into_bytes()
+            }
+            b"\x1b[5n" => b"\x1b[0n".to_vec(),
+            b"\x1b[>c" | b"\x1b[>0c" => b"\x1b[>0;0;0c".to_vec(),
+            _ => b"\x1b[?62;22c".to_vec(),
+        }
     }
 
     /// Changes the screen geometry while preserving its contents.
@@ -63,6 +90,28 @@ impl TerminalScreen {
     }
 }
 
+/// Queries answered by [`TerminalScreen::process`]: cursor position, status
+/// and primary and secondary device attributes.
+const QUERIES: [&[u8]; 7] = [
+    b"\x1b[6n",
+    b"\x1b[?6n",
+    b"\x1b[5n",
+    b"\x1b[c",
+    b"\x1b[0c",
+    b"\x1b[>c",
+    b"\x1b[>0c",
+];
+
+/// The first query in `bytes` and where it starts.
+fn next_query(bytes: &[u8]) -> Option<(usize, &'static [u8])> {
+    (0..bytes.len()).find_map(|start| {
+        QUERIES
+            .iter()
+            .find(|query| bytes[start..].starts_with(query))
+            .map(|query| (start, *query))
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -74,6 +123,23 @@ mod tests {
 
         let lines = terminal.into_lines();
         assert_eq!(lines, ["TWO", "two"]);
+    }
+
+    #[test]
+    fn a_cursor_position_query_is_answered_where_it_was_asked() {
+        let mut terminal = TerminalScreen::new(PtySize::new(20, 5));
+        let reply = terminal.process(b"ab\r\ncd\x1b[6nmore text");
+        assert_eq!(reply, b"\x1b[2;3R");
+        assert_eq!(terminal.screen().contents(), "ab\ncdmore text");
+    }
+
+    #[test]
+    fn status_and_device_queries_are_answered() {
+        let mut terminal = TerminalScreen::new(PtySize::new(20, 5));
+        assert_eq!(terminal.process(b"\x1b[5n"), b"\x1b[0n");
+        assert!(terminal.process(b"\x1b[c").starts_with(b"\x1b[?"));
+        assert!(terminal.process(b"\x1b[>c").starts_with(b"\x1b[>"));
+        assert!(terminal.process(b"plain output").is_empty());
     }
 
     #[test]

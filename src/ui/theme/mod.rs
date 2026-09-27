@@ -207,16 +207,6 @@ impl Theme {
             .add_modifier(Modifier::BOLD)
     }
 
-    /// Style for the line containing the editor cursor.
-    pub fn cursor_line(&self) -> Style {
-        Style::default().bg(self.palette.cursor_line)
-    }
-
-    /// Style for a text selection range.
-    pub fn text_selection(&self) -> Style {
-        Style::default().bg(self.palette.selection)
-    }
-
     /// Style for error text.
     pub fn error(&self) -> Style {
         Style::default()

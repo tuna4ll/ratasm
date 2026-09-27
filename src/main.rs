@@ -271,11 +271,6 @@ async fn open_interface(paths: &[PathBuf]) -> Result<ExitCode> {
         });
     }
 
-    let indent = app.settings.indent_width();
-    for index in 0..app.workspace.len() {
-        app.workspace.set_active(index);
-        app.workspace.active_mut().set_indent_width(indent);
-    }
     app.workspace.set_active(0);
     app.refresh_project_files();
 

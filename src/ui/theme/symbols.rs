@@ -21,8 +21,6 @@ pub struct SymbolSet {
     pub info: &'static str,
     /// Indicates a successful operation.
     pub success: &'static str,
-    /// Indicates a buffer with unsaved modifications.
-    pub modified: &'static str,
     /// Points at the stack slot referenced by RSP.
     pub stack_pointer: &'static str,
     /// Points at the stack slot referenced by RBP.
@@ -56,7 +54,6 @@ impl SymbolSet {
             warning: "\u{26a0}",
             info: "\u{2139}",
             success: "\u{2713}",
-            modified: "\u{25cf}",
             stack_pointer: "\u{2192}",
             base_pointer: "\u{21b3}",
             separator: "\u{2502}",
@@ -81,7 +78,6 @@ impl SymbolSet {
             warning: "W",
             info: "i",
             success: "+",
-            modified: "*",
             stack_pointer: "->",
             base_pointer: "=>",
             separator: "|",
@@ -151,7 +147,6 @@ mod tests {
             set.warning,
             set.info,
             set.success,
-            set.modified,
             set.stack_pointer,
             set.base_pointer,
             set.separator,

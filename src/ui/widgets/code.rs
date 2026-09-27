@@ -370,23 +370,9 @@ mod tests {
     }
 
     #[test]
-    fn the_explanation_panel_has_content_for_a_real_instruction() {
-        let mut app = app();
-        app.workspace.active_mut().insert("    add rax, rbx\n");
-        app.workspace.active_mut().move_cursor(
-            crate::editor::Movement::To(crate::editor::Position::new(0, 6)),
-            crate::editor::SelectionMode::Collapse,
-        );
-
-        let explanation = app.current_explanation().expect("an explanation");
-        assert_eq!(explanation.effect, "RAX ← RAX + RBX");
-        assert!(!explanation.lines().is_empty());
-    }
-
-    #[test]
     fn a_comment_line_yields_no_explanation_to_draw() {
         let mut app = app();
-        app.workspace.active_mut().insert("; nothing here\n");
+        app.workspace.active_mut().reload("; nothing here\n");
         assert!(app.current_explanation().is_none());
     }
 }

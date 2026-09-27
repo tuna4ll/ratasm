@@ -10,7 +10,7 @@ use crate::debugger::memory::MemoryBlock;
 use crate::debugger::registers::{Format, RegisterFile};
 use crate::debugger::state::{DebuggerState, StateMachine, Transition};
 use crate::disassembler::{DisassemblyLine, Syntax};
-use crate::editor::{Movement, Position, Range, SelectionMode, Workspace};
+use crate::editor::Workspace;
 use crate::instruction::Database as InstructionDatabase;
 use crate::process::ProcessOutput;
 use crate::project::Project;
@@ -53,20 +53,19 @@ pub enum Effect {
     SyncBreakpoints,
     /// Read memory at an address into the memory panel.
     ReadMemory(u64),
-    /// Write the active buffer to disk.
-    SaveFile(PathBuf),
-    /// Write the active buffer to disk, then close it if the write succeeds.
-    SaveAndClose(PathBuf),
-    /// Write every modified buffer to disk.
-    SaveAll,
+    /// Run `$EDITOR` on a file inside the Editor panel.
+    Edit {
+        /// The file to edit; it need not exist yet.
+        path: PathBuf,
+        /// The one-based line to open it at.
+        line: usize,
+    },
     /// Write the project file back after its sources changed.
     SaveProject,
     /// Read a file into a new buffer.
     OpenFile(PathBuf),
     /// Assemble and run the scratchpad snippet.
     RunScratchpad,
-    /// Offer text to the terminal's clipboard.
-    SetSystemClipboard(String),
 }
 
 /// How far a step goes.
@@ -210,6 +209,12 @@ pub struct App {
     pub output: Vec<String>,
     /// A live VT screen while an interactive program owns the Output panel.
     pub terminal: Option<TerminalScreen>,
+    /// The screen of `$EDITOR` while it runs inside the Editor panel.
+    pub editor_screen: Option<TerminalScreen>,
+    /// The file `$EDITOR` was started on.
+    pub editing: Option<PathBuf>,
+    /// Whether Quit was pressed once while `$EDITOR` still had a file open.
+    quit_armed: bool,
     /// Diagnostics from the last build.
     pub diagnostics: Vec<Diagnostic>,
 
@@ -225,8 +230,6 @@ pub struct App {
     pub scratchpad_result: Option<Result<crate::scratchpad::Outcome, String>>,
     /// Where the reader is in the material.
     pub learning: crate::learning::Progress,
-    /// Text cut or copied, used by paste.
-    pub clipboard: String,
 
     /// Instruction semantics, loaded once.
     pub instructions: InstructionDatabase,
@@ -239,8 +242,6 @@ pub struct App {
     /// Which breakpoint is highlighted.
     pub breakpoint_selected: usize,
 
-    /// The search query in effect.
-    pub search_query: String,
     /// What a pending prompt will do with its answer.
     pending_prompt: Option<PromptKind>,
     /// Whether the application should exit.
@@ -283,6 +284,9 @@ impl App {
             last_run: None,
             output: Vec::new(),
             terminal: None,
+            editor_screen: None,
+            editing: None,
+            quit_armed: false,
             diagnostics: Vec::new(),
 
             register_format: Format::default(),
@@ -291,7 +295,6 @@ impl App {
             scratchpad: crate::scratchpad::Scratchpad::new(),
             scratchpad_result: None,
             learning: crate::learning::Progress::new(),
-            clipboard: String::new(),
 
             instructions: InstructionDatabase::load()?,
             syscalls: SyscallDatabase::load()?,
@@ -299,7 +302,6 @@ impl App {
             syscall_selected: 0,
             breakpoint_selected: 0,
 
-            search_query: String::new(),
             pending_prompt: None,
             should_quit: false,
             settings,
@@ -323,113 +325,54 @@ impl App {
         self.focus = panel;
     }
 
-    /// Copies the selection, or the whole line when there is none.
-    fn copy(&mut self, remove: bool) -> Effect {
-        let document = self.workspace.active_mut();
-        let selected = document.has_selection();
+    /// Whether the Editor panel shows `$EDITOR` rather than the read-only source.
+    ///
+    /// A debug session takes the panel back, since the line the program
+    /// stopped on is what matters then.
+    pub fn shows_editor(&self) -> bool {
+        self.editor_screen.is_some() && !self.debugger.state().is_session_active()
+    }
 
-        let text = if selected {
-            document.selected_text()
-        } else {
-            let line = document.cursor().line;
-            format!("{}\n", document.buffer().line_or_empty(line))
-        };
-
-        if text.trim().is_empty() && !selected {
-            self.status = Status::info("The line is empty");
+    /// Asks for the active file to be edited at the cursor line.
+    fn edit_active(&mut self) -> Effect {
+        if self.editor_screen.is_some() {
+            self.focus_panel(Panel::Editor);
             return Effect::None;
         }
-
-        if remove && !document.delete_selection() {
-            let line = document.cursor().line;
-            let buffer = document.buffer();
-            let end = if line + 1 < buffer.line_count() {
-                Position::new(line + 1, 0)
-            } else {
-                Position::new(line, buffer.line_len(line))
-            };
-            document.replace_range(Range::new(Position::new(line, 0), end), "");
+        let document = self.workspace.active();
+        match document.path() {
+            Some(path) => Effect::Edit {
+                path: path.to_path_buf(),
+                line: document.scroll_line() + 1,
+            },
+            None => {
+                self.status = Status::warning("Open a file (Ctrl+O) or create one (Ctrl+N) first");
+                Effect::None
+            }
         }
-
-        self.clipboard = text.clone();
-        self.status = Status::info(format!(
-            "{} {}",
-            if remove { "Cut" } else { "Copied" },
-            describe(&text)
-        ));
-        Effect::SetSystemClipboard(text)
     }
 
     /// Applies a command, returning any I/O the run loop must perform.
     pub fn apply(&mut self, command: &Command) -> Effect {
         match command {
-            Command::NewFile => {
-                self.workspace.new_document();
-                self.status = Status::info("New buffer");
-                Effect::None
-            }
+            Command::NewFile => self.open_prompt(PromptKind::NewFile),
+            Command::EditFile => self.edit_active(),
             Command::OpenFile => self.open_prompt(PromptKind::OpenFile),
-            Command::SaveFile => match self.workspace.active().path() {
-                Some(path) => Effect::SaveFile(path.to_path_buf()),
-                None => self.open_prompt(PromptKind::SaveAs),
-            },
-            Command::SaveFileAs => self.open_prompt(PromptKind::SaveAs),
-            Command::SaveAll => Effect::SaveAll,
             Command::AddToProject => self.add_active_to_project(),
             Command::CloseFile => {
-                if self.workspace.active().is_modified() {
-                    self.open_prompt(PromptKind::ConfirmClose)
-                } else {
-                    self.close_active_document();
-                    Effect::None
-                }
+                self.close_active_document();
+                Effect::None
             }
             Command::Quit => {
-                if self.workspace.has_unsaved_changes() {
-                    self.mode = Mode::Prompt(Prompt::new(PromptKind::ConfirmQuit, ""));
-                    self.pending_prompt = Some(PromptKind::ConfirmQuit);
-                    Effect::None
-                } else {
-                    self.should_quit = true;
-                    Effect::Quit
-                }
-            }
-
-            Command::Undo => {
-                if !self.workspace.active_mut().undo() {
-                    self.status = Status::info("Nothing to undo");
-                }
-                Effect::None
-            }
-            Command::Redo => {
-                if !self.workspace.active_mut().redo() {
-                    self.status = Status::info("Nothing to redo");
-                }
-                Effect::None
-            }
-            Command::SelectAll => {
-                self.workspace.active_mut().select_all();
-                Effect::None
-            }
-            Command::Indent => {
-                self.workspace.active_mut().indent();
-                Effect::None
-            }
-            Command::Dedent => {
-                self.workspace.active_mut().dedent();
-                Effect::None
-            }
-            Command::Copy => self.copy(false),
-            Command::Cut => self.copy(true),
-            Command::Paste => {
-                if self.clipboard.is_empty() {
-                    self.status = Status::info("Nothing has been copied yet");
+                if self.editor_screen.is_some() && !self.quit_armed {
+                    self.quit_armed = true;
+                    self.status = Status::warning(
+                        "$EDITOR is still open; save and quit it, or press Quit again to kill it",
+                    );
                     return Effect::None;
                 }
-                let text = self.clipboard.clone();
-                self.workspace.active_mut().insert(&text);
-                self.status = Status::info(format!("Pasted {}", describe(&text)));
-                Effect::None
+                self.should_quit = true;
+                Effect::Quit
             }
 
             Command::GoToPage(page) => {
@@ -482,25 +425,9 @@ impl App {
                 self.workspace.previous_document();
                 Effect::None
             }
-            Command::GoToLine => self.open_prompt(PromptKind::GoToLine),
             Command::GoToAddress => self.open_prompt(PromptKind::GoToAddress),
-            Command::GoToDefinition => {
-                self.go_to_definition();
-                Effect::None
-            }
             Command::GoToFirstError => {
                 self.go_to_first_error();
-                Effect::None
-            }
-
-            Command::Search => self.open_prompt(PromptKind::Search),
-            Command::Replace => self.open_prompt(PromptKind::Replace),
-            Command::SearchNext => {
-                self.find(true);
-                Effect::None
-            }
-            Command::SearchPrevious => {
-                self.find(false);
                 Effect::None
             }
 
@@ -550,7 +477,13 @@ impl App {
                     Effect::None
                 }
             }
-            Command::ToggleBreakpoint => self.toggle_breakpoint(),
+            Command::ToggleBreakpoint => {
+                if self.workspace.active().path().is_none() {
+                    self.status = Status::warning("Open a file before setting a breakpoint");
+                    return Effect::None;
+                }
+                self.open_prompt(PromptKind::BreakpointLine)
+            }
             Command::ClearBreakpoints => {
                 self.breakpoints.clear();
                 self.breakpoint_selected = 0;
@@ -628,17 +561,7 @@ impl App {
 
     /// Opens a prompt and remembers what to do with the answer.
     fn open_prompt(&mut self, kind: PromptKind) -> Effect {
-        let prefill = match kind {
-            PromptKind::Search => self.search_query.clone(),
-            PromptKind::SaveAs | PromptKind::SaveAsAndClose => self
-                .workspace
-                .active()
-                .path()
-                .map(|path| path.display().to_string())
-                .unwrap_or_default(),
-            _ => String::new(),
-        };
-        self.mode = Mode::Prompt(Prompt::new(kind, prefill));
+        self.mode = Mode::Prompt(Prompt::new(kind, ""));
         self.pending_prompt = Some(kind);
         Effect::None
     }
@@ -687,38 +610,12 @@ impl App {
         };
 
         match kind {
-            PromptKind::ConfirmQuit => {
-                self.cancel_overlay();
-                if text.eq_ignore_ascii_case("y") || text.eq_ignore_ascii_case("yes") {
-                    self.should_quit = true;
-                    return Effect::Quit;
-                }
-                self.status = Status::info("Quit cancelled");
-                Effect::None
-            }
-            PromptKind::ConfirmClose => {
-                self.cancel_overlay();
-                if text.eq_ignore_ascii_case("s") || text.eq_ignore_ascii_case("save") {
-                    return match self.workspace.active().path() {
-                        Some(path) => Effect::SaveAndClose(path.to_path_buf()),
-                        None => self.open_prompt(PromptKind::SaveAsAndClose),
-                    };
-                }
-                if text.eq_ignore_ascii_case("d") || text.eq_ignore_ascii_case("discard") {
-                    self.close_active_document();
-                } else {
-                    self.status = Status::info("Close cancelled");
-                }
-                Effect::None
-            }
-            PromptKind::GoToLine => match text.parse::<usize>() {
-                Ok(line) => {
+            PromptKind::BreakpointLine => match text.parse::<usize>() {
+                Ok(line) if line > 0 => {
                     self.cancel_overlay();
-                    self.workspace.active_mut().go_to_line(line);
-                    self.focus_panel(Panel::Editor);
-                    Effect::None
+                    self.toggle_breakpoint(line)
                 }
-                Err(_) => {
+                _ => {
                     self.status = Status::error(format!("'{text}' is not a line number"));
                     Effect::None
                 }
@@ -737,17 +634,6 @@ impl App {
                     }
                 }
             }
-            PromptKind::Search => {
-                self.cancel_overlay();
-                self.search_query = text;
-                self.find(true);
-                Effect::None
-            }
-            PromptKind::Replace => {
-                self.cancel_overlay();
-                self.replace_all(&text);
-                Effect::None
-            }
             PromptKind::OpenFile => {
                 if text.is_empty() {
                     self.status = Status::error("Enter a file name");
@@ -756,26 +642,51 @@ impl App {
                 self.cancel_overlay();
                 Effect::OpenFile(PathBuf::from(text))
             }
-            PromptKind::SaveAs => {
+            PromptKind::NewFile => {
                 if text.is_empty() {
                     self.status = Status::error("Enter a file name");
                     return Effect::None;
                 }
                 self.cancel_overlay();
-                Effect::SaveFile(PathBuf::from(text))
-            }
-            PromptKind::SaveAsAndClose => {
-                if text.is_empty() {
-                    self.status = Status::error("Enter a file name");
-                    return Effect::None;
+                Effect::Edit {
+                    path: PathBuf::from(text),
+                    line: 1,
                 }
-                self.cancel_overlay();
-                Effect::SaveAndClose(PathBuf::from(text))
             }
         }
     }
 
-    /// Closes the active document after callers have handled unsaved changes.
+    /// Brings the view up to date after `$EDITOR` has had `path`.
+    pub fn finish_edit(&mut self, path: &Path) {
+        self.quit_armed = false;
+        let name = crate::editor::workspace::display_path(path);
+        if let Err(error) = self.workspace.reload() {
+            self.status = Status::error(error.to_string());
+            return;
+        }
+
+        if path.is_file() {
+            match self.workspace.open(path) {
+                Ok(_) => {
+                    self.focus_panel(Panel::Editor);
+                    if !self.status_needs_attention() {
+                        self.status = Status::info(format!("Back from editing {name}"));
+                    }
+                }
+                Err(error) => self.status = Status::error(error.to_string()),
+            }
+        } else if !self.status_needs_attention() {
+            self.status = Status::info(format!("{name} was not written"));
+        }
+        self.refresh_project_files();
+    }
+
+    /// Whether the status bar holds a warning or error that should not be buried.
+    fn status_needs_attention(&self) -> bool {
+        matches!(self.status.severity, Severity::Warning | Severity::Error)
+    }
+
+    /// Closes the active document.
     pub fn close_active_document(&mut self) {
         let index = self.workspace.active_index();
         match self.workspace.close(index) {
@@ -871,150 +782,7 @@ impl App {
         }
     }
 
-    /// Moves the cursor to the definition of the symbol under it.
-    fn go_to_definition(&mut self) {
-        use crate::editor::symbols;
-
-        let document = self.workspace.active();
-        let cursor = document.cursor();
-        let line = document.buffer().line_or_empty(cursor.line).to_owned();
-        let byte_offset = line
-            .char_indices()
-            .nth(cursor.column)
-            .map_or(line.len(), |(offset, _)| offset);
-
-        if let Some(target) = crate::editor::syntax::include_target(&line) {
-            let target = target.to_owned();
-            self.follow_include(&target);
-            return;
-        }
-
-        let Some((_, word)) = crate::editor::syntax::word_at(&line, byte_offset) else {
-            self.status = Status::info("No symbol under the cursor");
-            return;
-        };
-        let word = word.to_owned();
-
-        let all = symbols::extract(document.buffer());
-        let local = symbols::find_definition(&all, document.buffer(), &word, cursor)
-            .map(|symbol| (symbol.position, symbol.kind));
-
-        if let Some((position, kind)) = local {
-            if kind.is_definition() {
-                self.workspace
-                    .active_mut()
-                    .move_cursor(Movement::To(position), SelectionMode::Collapse);
-                self.focus_panel(Panel::Editor);
-                self.status = Status::info(format!("{word} defined on line {}", position.line + 1));
-                return;
-            }
-        }
-
-        if self.definition_in_another_file(&word) {
-            return;
-        }
-
-        if let Some((position, kind)) = local {
-            self.workspace
-                .active_mut()
-                .move_cursor(Movement::To(position), SelectionMode::Collapse);
-            self.focus_panel(Panel::Editor);
-            self.status = Status::warning(format!(
-                "only the {} for {word} is here, on line {}",
-                kind.description(),
-                position.line + 1
-            ));
-            return;
-        }
-        self.status = Status::warning(format!("'{word}' is not defined in this project"));
-    }
-
-    /// Opens the file an `%include` names.
-    fn follow_include(&mut self, target: &str) {
-        let mut candidates = Vec::new();
-        if let Some(directory) = self
-            .workspace
-            .active()
-            .path()
-            .and_then(|path| path.parent().map(Path::to_path_buf))
-        {
-            candidates.push(directory.join(target));
-        }
-        for directory in &self.project.config().project.include_directories {
-            candidates.push(self.project.resolve(directory).join(target));
-        }
-        candidates.push(self.project.root().join(target));
-
-        for candidate in candidates {
-            if candidate.is_file() && self.show_file(&candidate) {
-                self.focus_panel(Panel::Editor);
-                self.status =
-                    Status::info(format!("Opened {}", self.workspace.active().display_name()));
-                return;
-            }
-        }
-        self.status = Status::warning(format!("cannot find {target}"));
-    }
-
-    /// Looks for `name` in the other open documents, then the project's remaining sources.
-    fn definition_in_another_file(&mut self, name: &str) -> bool {
-        use crate::editor::symbols;
-
-        if name.starts_with('.') {
-            return false;
-        }
-
-        let active = self.workspace.active_index();
-        for index in 0..self.workspace.len() {
-            if index == active {
-                continue;
-            }
-            let buffer = self.workspace.documents()[index].buffer();
-            let found = symbols::extract(buffer)
-                .into_iter()
-                .find(|symbol| symbol.kind.is_definition() && symbol.matches_name(name));
-            if let Some(symbol) = found {
-                self.workspace.set_active(index);
-                self.jump_to_definition(name, symbol.position);
-                return true;
-            }
-        }
-
-        for path in self.project.source_paths() {
-            if self.index_of_document(&path).is_some() {
-                continue;
-            }
-            let Ok(text) = crate::editor::workspace::read_file(&path) else {
-                continue;
-            };
-            let buffer = crate::editor::TextBuffer::from_text(&text);
-            let found = symbols::extract(&buffer)
-                .into_iter()
-                .find(|symbol| symbol.kind.is_definition() && symbol.matches_name(name));
-            let Some(symbol) = found else { continue };
-
-            if self.show_file(&path) {
-                self.jump_to_definition(name, symbol.position);
-                return true;
-            }
-        }
-        false
-    }
-
-    /// Moves the cursor to a definition found in the active document.
-    fn jump_to_definition(&mut self, name: &str, position: Position) {
-        self.workspace
-            .active_mut()
-            .move_cursor(Movement::To(position), SelectionMode::Collapse);
-        self.focus_panel(Panel::Editor);
-        self.status = Status::info(format!(
-            "{name} defined in {} on line {}",
-            self.workspace.active().display_name(),
-            position.line + 1
-        ));
-    }
-
-    /// Jumps to the first error of the last build.
+    /// Shows the line of the first error of the last build.
     fn go_to_first_error(&mut self) {
         let Some(diagnostic) = crate::assembler::diagnostics::first_navigable(&self.diagnostics)
         else {
@@ -1024,7 +792,6 @@ impl App {
         let Some(line) = diagnostic.buffer_line() else {
             return;
         };
-        let column = diagnostic.buffer_column();
         let message = diagnostic.message.clone();
         let file = diagnostic.file.clone();
 
@@ -1038,10 +805,7 @@ impl App {
             }
         }
 
-        self.workspace.active_mut().move_cursor(
-            Movement::To(crate::editor::Position::new(line, column)),
-            SelectionMode::Collapse,
-        );
+        self.workspace.active_mut().reveal(line);
         self.focus_panel(Panel::Editor);
         self.status = Status::error(message);
     }
@@ -1132,136 +896,24 @@ impl App {
         match self.workspace.open(&resolved) {
             Ok(index) => {
                 self.workspace.set_active(index);
-                self.workspace
-                    .active_mut()
-                    .set_indent_width(self.settings.indent_width());
                 true
             }
             Err(_) => false,
         }
     }
 
-    /// Moves to the next or previous search match.
-    fn find(&mut self, forward: bool) {
-        use crate::editor::search::{self, SearchOptions};
-
-        if self.search_query.is_empty() {
-            self.status = Status::info("Nothing to search for");
-            return;
-        }
-
-        let document = self.workspace.active();
-        let cursor = document.cursor();
-        let options = SearchOptions::new();
-        let found = if forward {
-            let from = document.buffer().position_after(cursor).unwrap_or(cursor);
-            search::find_next(document.buffer(), &self.search_query, from, options)
-        } else {
-            search::find_previous(document.buffer(), &self.search_query, cursor, options)
-        };
-
-        if let Some(hit) = found {
-            let range = hit.range;
-            self.workspace.active_mut().select_range(range);
-            self.focus_panel(Panel::Editor);
-            self.status = Status::info(format!(
-                "'{}' on line {}",
-                self.search_query,
-                range.start.line + 1
-            ));
-            return;
-        }
-
-        if self.find_in_another_document(forward) {
-            return;
-        }
-        self.status = Status::warning(format!("'{}' not found", self.search_query));
-    }
-
-    /// Continues the search in the next open document that has a match.
-    fn find_in_another_document(&mut self, forward: bool) -> bool {
-        use crate::editor::search::{self, SearchOptions};
-
-        let count = self.workspace.len();
-        if count < 2 {
-            return false;
-        }
-        let options = SearchOptions::new();
-        let active = self.workspace.active_index();
-
-        for step in 1..count {
-            let index = if forward {
-                (active + step) % count
-            } else {
-                (active + count - step) % count
-            };
-
-            let buffer = self.workspace.documents()[index].buffer();
-            let matches = search::find_all(buffer, &self.search_query, options);
-            let hit = if forward {
-                matches.first()
-            } else {
-                matches.last()
-            };
-            let Some(hit) = hit.map(|hit| hit.range) else {
-                continue;
-            };
-
-            self.workspace.set_active(index);
-            self.workspace.active_mut().select_range(hit);
-            self.focus_panel(Panel::Editor);
-            self.status = Status::info(format!(
-                "'{}' in {} on line {}",
-                self.search_query,
-                self.workspace.active().display_name(),
-                hit.start.line + 1
-            ));
-            return true;
-        }
-        false
-    }
-
-    /// Replaces every match of the current search query.
-    fn replace_all(&mut self, replacement: &str) {
-        use crate::editor::search::{self, SearchOptions};
-
-        if self.search_query.is_empty() {
-            self.status = Status::info("Search for something first");
-            return;
-        }
-
-        let edits = search::replace_all(
-            self.workspace.active().buffer(),
-            &self.search_query,
-            replacement,
-            SearchOptions::new(),
-        );
-        let count = edits.len();
-
-        for (range, text) in edits {
-            self.workspace.active_mut().replace_range(range, &text);
-        }
-
-        self.status = if count == 0 {
-            Status::warning(format!("'{}' not found", self.search_query))
-        } else {
-            Status::success(format!("Replaced {count} occurrence(s)"))
-        };
-    }
-
-    /// Adds or removes a breakpoint on the cursor's line.
-    fn toggle_breakpoint(&mut self) -> Effect {
+    /// Adds or removes a breakpoint on one-based `line` of the active file.
+    fn toggle_breakpoint(&mut self, line: usize) -> Effect {
         if !self.debugger.state().can_edit_breakpoints() {
             self.status = Status::warning("Cannot change breakpoints while the program runs");
             return Effect::None;
         }
 
         let Some(path) = self.workspace.active().path().map(PathBuf::from) else {
-            self.status = Status::warning("Save the file before setting a breakpoint");
+            self.status = Status::warning("Open a file before setting a breakpoint");
             return Effect::None;
         };
-        let line = self.workspace.active().cursor().line + 1;
-
+        self.workspace.active_mut().reveal(line - 1);
         let added = self.breakpoints.toggle_line(&path, line);
         self.status = Status::info(if added {
             format!("Breakpoint set on line {line}")
@@ -1332,11 +984,8 @@ impl App {
                     return explain(&line.instruction.text());
                 }
             }
-            return None;
         }
-
-        let document = self.workspace.active();
-        explain(document.buffer().line_or_empty(document.cursor().line))
+        None
     }
 
     /// The open document for a path GDB reported.
@@ -1354,7 +1003,7 @@ impl App {
         if !self.show_file(&file) {
             return false;
         }
-        self.workspace.active_mut().go_to_line(line);
+        self.workspace.active_mut().reveal(line.saturating_sub(1));
         true
     }
 
@@ -1398,20 +1047,6 @@ impl App {
     }
 }
 
-/// Describes an amount of copied text for the status bar.
-fn describe(text: &str) -> String {
-    let lines = text.lines().count().max(1);
-    if lines > 1 {
-        format!("{lines} lines")
-    } else {
-        let characters = text.trim_end_matches('\n').chars().count();
-        format!(
-            "{characters} character{}",
-            if characters == 1 { "" } else { "s" }
-        )
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1424,11 +1059,24 @@ mod tests {
 
     fn app_with_source(text: &str) -> App {
         let mut app = app();
-        app.workspace.active_mut().insert(text);
-        app.workspace
-            .active_mut()
-            .move_cursor(Movement::DocumentStart, SelectionMode::Collapse);
+        app.workspace.active_mut().reload(text);
         app
+    }
+
+    /// Toggles a breakpoint on one-based `line` the way F9 does, through its prompt.
+    fn toggle_line(app: &mut App, line: usize) -> Effect {
+        app.apply(&Command::ToggleBreakpoint);
+        if let Mode::Prompt(prompt) = &mut app.mode {
+            prompt.set_text(line.to_string());
+        }
+        app.accept_prompt()
+    }
+
+    /// The zero-based line the source listing was asked to show.
+    fn line_on_show(app: &mut App) -> usize {
+        let document = app.workspace.active_mut();
+        document.fit(1);
+        document.scroll_line()
     }
 
     #[test]
@@ -1523,9 +1171,9 @@ mod tests {
 
         assert_eq!(app.page, Page::Debug, "the registers are on the debug page");
         assert_eq!(
-            app.workspace.active().cursor().line,
+            line_on_show(&mut app),
             4,
-            "the editor should be on the stopped line"
+            "the listing should show the stopped line"
         );
     }
 
@@ -1548,7 +1196,7 @@ mod tests {
 
         assert!(app.follow_execution(), "stepping into a file must open it");
         assert_eq!(app.workspace.active().path(), Some(other.as_path()));
-        assert_eq!(app.workspace.active().cursor().line, 2);
+        assert_eq!(line_on_show(&mut app), 2);
     }
 
     #[test]
@@ -1643,76 +1291,75 @@ mod tests {
     }
 
     #[test]
-    fn quitting_with_no_changes_exits_immediately() {
+    fn quitting_exits_immediately() {
         let mut app = app();
         assert_eq!(app.apply(&Command::Quit), Effect::Quit);
         assert!(app.should_quit);
     }
 
     #[test]
-    fn quitting_with_unsaved_changes_asks_first() {
-        let mut app = app();
-        app.workspace.active_mut().insert_char('x');
-
-        assert_eq!(app.apply(&Command::Quit), Effect::None);
-        assert!(!app.should_quit, "must not quit yet");
-        assert!(app.mode.is_overlay());
-    }
-
-    #[test]
-    fn confirming_the_quit_prompt_exits_and_declining_does_not() {
-        let mut app = app();
-        app.workspace.active_mut().insert_char('x');
-        app.apply(&Command::Quit);
-
-        if let Mode::Prompt(prompt) = &mut app.mode {
-            prompt.insert('n');
-        }
-        assert_eq!(app.accept_prompt(), Effect::None);
-        assert!(!app.should_quit, "declining must not quit");
-
-        app.apply(&Command::Quit);
-        if let Mode::Prompt(prompt) = &mut app.mode {
-            prompt.insert('y');
-        }
-        assert_eq!(app.accept_prompt(), Effect::Quit);
-        assert!(app.should_quit);
-    }
-
-    #[test]
-    fn closing_a_modified_buffer_asks_before_discarding_it() {
+    fn closing_drops_the_buffer_without_asking() {
         let mut app = app_with_source("mov rax, 1\n");
-
         assert_eq!(app.apply(&Command::CloseFile), Effect::None);
-        assert!(matches!(
-            app.mode,
-            Mode::Prompt(ref prompt) if prompt.kind() == Some(PromptKind::ConfirmClose)
-        ));
-        assert_eq!(app.workspace.active().buffer().to_text(), "mov rax, 1\n");
-
-        if let Mode::Prompt(prompt) = &mut app.mode {
-            prompt.insert('d');
-        }
-        assert_eq!(app.accept_prompt(), Effect::None);
+        assert!(!app.mode.is_overlay());
         assert!(app.workspace.active().buffer().is_empty());
     }
 
     #[test]
-    fn closing_a_modified_buffer_can_save_first() {
-        let mut app = app_with_source("ret\n");
-        let path = app.project.root().join("saved.asm");
+    fn editing_opens_the_active_file_at_the_top_line_on_show() {
+        let mut app = app_with_source("nop\nnop\nret\n");
+        let path = app.project.root().join("main.asm");
         app.workspace.active_mut().set_path(&path);
-        app.apply(&Command::CloseFile);
+        app.workspace.active_mut().scroll_by(2);
 
-        if let Mode::Prompt(prompt) = &mut app.mode {
-            prompt.insert('s');
-        }
-        assert_eq!(app.accept_prompt(), Effect::SaveAndClose(path));
         assert_eq!(
-            app.workspace.active().buffer().to_text(),
-            "ret\n",
-            "the buffer stays open until the save effect succeeds"
+            app.apply(&Command::EditFile),
+            Effect::Edit { path, line: 3 }
         );
+    }
+
+    #[test]
+    fn editing_an_untitled_buffer_explains_what_to_do() {
+        let mut app = app();
+        assert_eq!(app.apply(&Command::EditFile), Effect::None);
+        assert_eq!(app.status.severity, Severity::Warning);
+    }
+
+    #[test]
+    fn a_new_file_is_named_then_handed_to_the_editor() {
+        let mut app = app();
+        app.apply(&Command::NewFile);
+        if let Mode::Prompt(prompt) = &mut app.mode {
+            prompt.set_text("src/util.asm");
+        }
+        assert_eq!(
+            app.accept_prompt(),
+            Effect::Edit {
+                path: PathBuf::from("src/util.asm"),
+                line: 1
+            }
+        );
+        assert!(!app.mode.is_overlay());
+    }
+
+    #[test]
+    fn returning_from_the_editor_shows_what_was_written() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("fresh.asm");
+        let mut app = app();
+
+        app.finish_edit(&path);
+        assert!(app.status.text.contains("not written"));
+
+        std::fs::write(&path, "ret\n").expect("write");
+        app.finish_edit(&path);
+        assert_eq!(app.workspace.active().path(), Some(path.as_path()));
+        assert_eq!(app.workspace.active().buffer().to_text(), "ret\n");
+
+        std::fs::write(&path, "nop\nret\n").expect("write");
+        app.finish_edit(&path);
+        assert_eq!(app.workspace.len(), 1, "the open buffer is reused");
+        assert_eq!(app.workspace.active().buffer().to_text(), "nop\nret\n");
     }
 
     #[test]
@@ -1801,7 +1448,7 @@ mod tests {
         let mut app = app();
         assert_eq!(app.apply(&Command::ToggleBreakpoint), Effect::None);
         assert!(
-            app.status.text.contains("Save the file"),
+            app.status.text.contains("Open a file"),
             "{}",
             app.status.text
         );
@@ -1813,14 +1460,11 @@ mod tests {
         let mut app = app();
         app.workspace.active_mut().set_path("/tmp/main.asm");
 
-        assert_eq!(
-            app.apply(&Command::ToggleBreakpoint),
-            Effect::SyncBreakpoints
-        );
+        assert_eq!(toggle_line(&mut app, 1), Effect::SyncBreakpoints);
         assert_eq!(app.breakpoints.len(), 1);
         assert!(app.status.text.contains("set"));
 
-        app.apply(&Command::ToggleBreakpoint);
+        toggle_line(&mut app, 1);
         assert!(app.breakpoints.is_empty());
         assert!(app.status.text.contains("removed"));
     }
@@ -1868,28 +1512,16 @@ mod tests {
         app.cancel_overlay();
         assert_eq!(app.mode, Mode::Normal);
 
-        app.apply(&Command::GoToLine);
+        app.apply(&Command::ToggleBreakpoint);
         app.cancel_overlay();
-        assert_eq!(app.mode, Mode::Normal);
-    }
-
-    #[test]
-    fn go_to_line_moves_the_cursor() {
-        let mut app = app_with_source("one\ntwo\nthree\nfour");
-        app.apply(&Command::GoToLine);
-        if let Mode::Prompt(prompt) = &mut app.mode {
-            prompt.insert('3');
-        }
-
-        assert_eq!(app.accept_prompt(), Effect::None);
-        assert_eq!(app.workspace.active().cursor().line, 2);
         assert_eq!(app.mode, Mode::Normal);
     }
 
     #[test]
     fn a_bad_line_number_keeps_the_prompt_open_and_says_why() {
         let mut app = app_with_source("one\ntwo");
-        app.apply(&Command::GoToLine);
+        app.workspace.active_mut().set_path("/tmp/main.asm");
+        app.apply(&Command::ToggleBreakpoint);
         if let Mode::Prompt(prompt) = &mut app.mode {
             for ch in "abc".chars() {
                 prompt.insert(ch);
@@ -1929,83 +1561,6 @@ mod tests {
         assert_eq!(app.accept_prompt(), Effect::ReadMemory(0x0040_00b0));
         assert_eq!(app.focus, Panel::Memory);
         assert_eq!(app.memory_address, Some(0x0040_00b0));
-    }
-
-    #[test]
-    fn search_finds_a_match_and_selects_it() {
-        let mut app = app_with_source("mov rax, 1\nadd rbx, 2\n");
-        app.apply(&Command::Search);
-        if let Mode::Prompt(prompt) = &mut app.mode {
-            for ch in "rbx".chars() {
-                prompt.insert(ch);
-            }
-        }
-        app.accept_prompt();
-
-        assert_eq!(app.workspace.active().selected_text(), "rbx");
-        assert_eq!(app.focus, Panel::Editor);
-    }
-
-    #[test]
-    fn searching_for_something_absent_says_so() {
-        let mut app = app_with_source("mov rax, 1\n");
-        app.search_query = "zzz".to_owned();
-        app.apply(&Command::SearchNext);
-        assert_eq!(app.status.severity, Severity::Warning);
-    }
-
-    #[test]
-    fn replace_rewrites_every_match() {
-        let mut app = app_with_source("mov rax, rax\nadd rax, 1\n");
-        app.search_query = "rax".to_owned();
-        app.apply(&Command::Replace);
-        if let Mode::Prompt(prompt) = &mut app.mode {
-            for ch in "r10".chars() {
-                prompt.insert(ch);
-            }
-        }
-        app.accept_prompt();
-
-        assert_eq!(
-            app.workspace.active().buffer().to_text(),
-            "mov r10, r10\nadd r10, 1\n"
-        );
-        assert_eq!(app.status.severity, Severity::Success);
-    }
-
-    #[test]
-    fn go_to_definition_jumps_to_the_label() {
-        let source = "_start:\n    nop\n    jmp _start\n";
-        let mut app = app_with_source(source);
-        app.workspace.active_mut().move_cursor(
-            Movement::To(crate::editor::Position::new(2, 9)),
-            SelectionMode::Collapse,
-        );
-
-        app.apply(&Command::GoToDefinition);
-        assert_eq!(app.workspace.active().cursor().line, 0);
-        assert!(app.status.text.contains("_start"));
-    }
-
-    #[test]
-    fn go_to_definition_follows_an_extern_into_another_open_file() {
-        let dir = tempfile::tempdir().expect("temp dir");
-        let other = dir.path().join("util.asm");
-        std::fs::write(&other, "section .text\nhelper:\n    ret\n").expect("write");
-
-        let mut app = app_with_source("extern helper\n_start:\n    call helper\n");
-        app.workspace.active_mut().set_path("main.asm");
-        app.workspace.open(&other).expect("open");
-        app.workspace.set_active(0);
-        app.workspace.active_mut().move_cursor(
-            Movement::To(crate::editor::Position::new(2, 10)),
-            SelectionMode::Collapse,
-        );
-
-        app.apply(&Command::GoToDefinition);
-        assert_eq!(app.workspace.active().path(), Some(other.as_path()));
-        assert_eq!(app.workspace.active().cursor().line, 1);
-        assert!(app.status.text.contains("util.asm"), "{}", app.status.text);
     }
 
     #[test]
@@ -2062,122 +1617,6 @@ mod tests {
     }
 
     #[test]
-    fn go_to_definition_on_an_include_opens_the_included_file() {
-        let dir = tempfile::tempdir().expect("temp dir");
-        let included = dir.path().join("macros.inc");
-        std::fs::write(&included, "%define WIDTH 8\n").expect("write");
-
-        let mut app = app_with_source("%include \"macros.inc\"\n");
-        app.workspace
-            .active_mut()
-            .set_path(dir.path().join("main.asm"));
-        app.workspace.active_mut().move_cursor(
-            Movement::To(crate::editor::Position::new(0, 2)),
-            SelectionMode::Collapse,
-        );
-
-        app.apply(&Command::GoToDefinition);
-        assert_eq!(app.workspace.active().path(), Some(included.as_path()));
-    }
-
-    #[test]
-    fn an_include_that_is_nowhere_says_which_file_is_missing() {
-        let mut app = app_with_source("%include \"absent.inc\"\n");
-        app.workspace.active_mut().set_path("main.asm");
-        app.workspace.active_mut().move_cursor(
-            Movement::To(crate::editor::Position::new(0, 2)),
-            SelectionMode::Collapse,
-        );
-
-        app.apply(&Command::GoToDefinition);
-        assert_eq!(app.status.severity, Severity::Warning);
-        assert!(
-            app.status.text.contains("absent.inc"),
-            "{}",
-            app.status.text
-        );
-    }
-
-    #[test]
-    fn go_to_definition_opens_a_project_source_that_is_not_open_yet() {
-        let dir = tempfile::tempdir().expect("temp dir");
-        let mut project = Project::create(dir.path(), "cross").expect("create");
-        let other = dir.path().join("src/util.asm");
-        std::fs::write(&other, "section .text\nhelper:\n    ret\n").expect("write");
-        project.add_source(&other).expect("add");
-
-        let mut app = App::new(project, Settings::default()).expect("databases load");
-        app.workspace.active_mut().insert("    call helper\n");
-        app.workspace.active_mut().set_path("main.asm");
-        app.workspace.active_mut().move_cursor(
-            Movement::To(crate::editor::Position::new(0, 10)),
-            SelectionMode::Collapse,
-        );
-
-        app.apply(&Command::GoToDefinition);
-        assert_eq!(app.workspace.active().path(), Some(other.as_path()));
-    }
-
-    #[test]
-    fn a_declaration_is_not_mistaken_for_a_definition() {
-        let dir = tempfile::tempdir().expect("temp dir");
-        let other = dir.path().join("util.asm");
-        std::fs::write(&other, "global helper\nextern helper\n").expect("write");
-
-        let mut app = app_with_source("    call helper\n");
-        app.workspace.active_mut().set_path("main.asm");
-        app.workspace.open(&other).expect("open");
-        app.workspace.set_active(0);
-        app.workspace.active_mut().move_cursor(
-            Movement::To(crate::editor::Position::new(0, 10)),
-            SelectionMode::Collapse,
-        );
-
-        app.apply(&Command::GoToDefinition);
-        assert_eq!(app.status.severity, Severity::Warning);
-    }
-
-    #[test]
-    fn search_carries_on_into_the_next_open_document() {
-        let dir = tempfile::tempdir().expect("temp dir");
-        let other = dir.path().join("util.asm");
-        std::fs::write(&other, "one\ntwo\nneedle here\n").expect("write");
-
-        let mut app = app_with_source("nothing\nto see\n");
-        app.workspace.active_mut().set_path("main.asm");
-        app.workspace.open(&other).expect("open");
-        app.workspace.set_active(0);
-        app.search_query = "needle".to_owned();
-
-        app.apply(&Command::SearchNext);
-        assert_eq!(app.workspace.active().path(), Some(other.as_path()));
-        assert_eq!(app.workspace.active().cursor().line, 2);
-        assert_eq!(app.status.severity, Severity::Info);
-    }
-
-    #[test]
-    fn a_query_in_no_open_document_is_still_reported_missing() {
-        let mut app = app_with_source("nothing\n");
-        app.search_query = "needle".to_owned();
-        app.apply(&Command::SearchNext);
-        assert_eq!(app.status.severity, Severity::Warning);
-    }
-
-    #[test]
-    fn go_to_definition_on_nothing_says_so() {
-        let mut app = app_with_source("    nop\n");
-        app.workspace.active_mut().move_cursor(
-            Movement::To(crate::editor::Position::new(0, 0)),
-            SelectionMode::Collapse,
-        );
-        app.apply(&Command::GoToDefinition);
-        assert!(matches!(
-            app.status.severity,
-            Severity::Info | Severity::Warning
-        ));
-    }
-
-    #[test]
     fn view_settings_cycle_and_report() {
         let mut app = app();
         let before = app.register_format;
@@ -2199,20 +1638,11 @@ mod tests {
     }
 
     #[test]
-    fn undo_and_redo_report_when_there_is_nothing_to_do() {
-        let mut app = app();
-        app.apply(&Command::Undo);
-        assert!(app.status.text.contains("Nothing to undo"));
-        app.apply(&Command::Redo);
-        assert!(app.status.text.contains("Nothing to redo"));
-    }
-
-    #[test]
     fn the_shortcut_list_shows_every_binding() {
         let mut app = app();
         app.apply(&Command::ShowKeybindings);
         assert_eq!(app.focus, Panel::Output);
-        assert!(app.output.iter().any(|line| line.contains("ctrl+s")));
+        assert!(app.output.iter().any(|line| line.contains("ctrl+e")));
         assert!(app.output.iter().any(|line| line.contains("F5")));
     }
 
@@ -2227,74 +1657,6 @@ mod tests {
         assert_eq!(app.focus, Panel::Output);
         assert_eq!(app.output.last().map(String::as_str), Some(message));
         assert_eq!(app.status.text, message, "the command remains repeatable");
-    }
-
-    #[test]
-    fn copying_a_selection_offers_it_to_the_terminal_too() {
-        let mut app = app_with_source("mov rax, 1\nmov rdi, 0\n");
-        app.workspace
-            .active_mut()
-            .select_range(Range::new(Position::new(0, 0), Position::new(0, 3)));
-
-        let effect = app.apply(&Command::Copy);
-        assert_eq!(app.clipboard, "mov");
-        assert_eq!(effect, Effect::SetSystemClipboard("mov".to_owned()));
-    }
-
-    #[test]
-    fn copying_with_no_selection_takes_the_whole_line() {
-        let mut app = app_with_source("mov rax, 1\nmov rdi, 0\n");
-        app.apply(&Command::Copy);
-        assert_eq!(app.clipboard, "mov rax, 1\n");
-    }
-
-    #[test]
-    fn cutting_removes_what_it_copied() {
-        let mut app = app_with_source("mov rax, 1\nmov rdi, 0\n");
-        app.apply(&Command::Cut);
-
-        assert_eq!(app.clipboard, "mov rax, 1\n");
-        assert_eq!(
-            app.workspace.active().buffer().to_text(),
-            "mov rdi, 0\n",
-            "the line itself must be gone, not just copied"
-        );
-    }
-
-    #[test]
-    fn pasting_puts_back_exactly_what_was_cut() {
-        let mut app = app_with_source("mov rax, 1\nmov rdi, 0\n");
-        let before = app.workspace.active().buffer().to_text();
-
-        app.apply(&Command::Cut);
-        app.apply(&Command::Paste);
-
-        assert_eq!(app.workspace.active().buffer().to_text(), before);
-    }
-
-    #[test]
-    fn pasting_an_empty_clipboard_says_so_rather_than_doing_nothing() {
-        let mut app = app_with_source("mov rax, 1\n");
-        let effect = app.apply(&Command::Paste);
-
-        assert_eq!(effect, Effect::None);
-        assert_eq!(app.status.severity, Severity::Info);
-        assert!(app.status.text.contains("copied"));
-    }
-
-    #[test]
-    fn cutting_the_last_line_does_not_run_off_the_end() {
-        let mut app = app_with_source("only line");
-        app.apply(&Command::Cut);
-        assert_eq!(app.workspace.active().buffer().to_text(), "");
-    }
-
-    #[test]
-    fn an_amount_of_text_is_described_for_the_status_bar() {
-        assert_eq!(describe("x"), "1 character");
-        assert_eq!(describe("mov"), "3 characters");
-        assert_eq!(describe("mov rax, 1\n"), "10 characters");
-        assert_eq!(describe("one\ntwo\n"), "2 lines");
     }
 
     #[test]
@@ -2315,7 +1677,7 @@ mod tests {
         assert_eq!(app.status.severity, Severity::Error);
 
         app.apply(&Command::GoToFirstError);
-        assert_eq!(app.workspace.active().cursor().line, 2, "line 3 is index 2");
+        assert_eq!(line_on_show(&mut app), 2, "line 3 is index 2");
     }
 
     #[test]
@@ -2342,7 +1704,7 @@ mod tests {
             Some(other.as_path()),
             "the jump must land in the file the diagnostic names"
         );
-        assert_eq!(app.workspace.active().cursor().line, 3);
+        assert_eq!(line_on_show(&mut app), 3);
     }
 
     #[test]
@@ -2376,18 +1738,6 @@ mod tests {
         assert_eq!(app.focus, Panel::Output);
     }
 
-    #[test]
-    fn the_explanation_follows_the_cursor_when_not_debugging() {
-        let mut app = app_with_source("    add rax, rbx\n    ret\n");
-        app.workspace.active_mut().move_cursor(
-            Movement::To(crate::editor::Position::new(0, 4)),
-            SelectionMode::Collapse,
-        );
-
-        let explanation = app.current_explanation().expect("an explanation");
-        assert_eq!(explanation.effect, "RAX ← RAX + RBX");
-    }
-
     /// Puts the app in a stopped state at a given file and line.
     fn stopped_at(app: &mut App, file: &str, line: usize) {
         app.debugger.apply(Transition::BuildStarted).expect("build");
@@ -2400,6 +1750,28 @@ mod tests {
             .expect("running");
         app.debugger.apply(Transition::Stopped).expect("paused");
         app.current_line = Some((PathBuf::from(file), line));
+    }
+
+    #[test]
+    fn a_debug_session_takes_the_editor_panel_back() {
+        let mut app = app();
+        app.editor_screen = Some(TerminalScreen::new(crate::process::pty::PtySize::new(
+            80, 24,
+        )));
+        assert!(app.shows_editor());
+        stopped_at(&mut app, "/tmp/main.asm", 1);
+        assert!(!app.shows_editor(), "the stopped line is shown instead");
+    }
+
+    #[test]
+    fn quitting_with_the_editor_open_warns_once() {
+        let mut app = app();
+        app.editor_screen = Some(TerminalScreen::new(crate::process::pty::PtySize::new(
+            80, 24,
+        )));
+        assert_eq!(app.apply(&Command::Quit), Effect::None);
+        assert_eq!(app.status.severity, Severity::Warning);
+        assert_eq!(app.apply(&Command::Quit), Effect::Quit);
     }
 
     #[test]
@@ -2476,7 +1848,7 @@ mod tests {
     fn clearing_breakpoints_empties_the_list_and_syncs() {
         let mut app = app();
         app.workspace.active_mut().set_path("/tmp/main.asm");
-        app.apply(&Command::ToggleBreakpoint);
+        toggle_line(&mut app, 1);
         assert_eq!(app.breakpoints.len(), 1);
 
         assert_eq!(

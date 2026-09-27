@@ -11,7 +11,6 @@ use crate::app::state::Severity;
 use crate::app::state::{Effect, Status};
 use crate::app::App;
 use crate::command::Command;
-use crate::editor::{Movement, SelectionMode};
 
 /// How many lines a page key moves.
 const PAGE_LINES: usize = 20;
@@ -26,13 +25,13 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Effect {
         return handle_overlay(app, key);
     }
 
-    let editor_claims_key = app.focus.is_text_input()
+    let panel_claims_key = app.focus.is_text_input()
         && matches!(key.code, KeyCode::Char(_) | KeyCode::Tab | KeyCode::BackTab)
         && !key
             .modifiers
             .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT);
 
-    if !editor_claims_key {
+    if !panel_claims_key {
         if let Some(command) = app.keymap.command_for_event(key).cloned() {
             return app.apply(&command);
         }
@@ -158,12 +157,6 @@ pub fn handle_mouse(app: &mut App, mouse: MouseEvent, width: u16, height: u16) -
             };
             app.focus_panel(panel);
             match panel {
-                Panel::Editor => {
-                    if let Some(area) = layout.area_of(Panel::Editor) {
-                        place_cursor(app, area, column, row);
-                    }
-                    Effect::None
-                }
                 Panel::Explorer => layout
                     .area_of(Panel::Explorer)
                     .map_or(Effect::None, |area| select_file(app, area, row)),
@@ -192,17 +185,15 @@ fn select_file(app: &mut App, area: ratatui::layout::Rect, row: u16) -> Effect {
     app.open_selected_file()
 }
 
-/// Scrolls the editor or scratchpad, which move a cursor rather than a view.
+/// Scrolls the source listing, which keeps its own scroll position.
 fn scroll_text_panel(app: &mut App, panel: Panel, down: bool) -> Effect {
-    if panel != Panel::Editor {
+    if panel != Panel::Editor || app.shows_editor() {
         return Effect::None;
     }
-    let movement = if down { Movement::Down } else { Movement::Up };
-    for _ in 0..crate::app::scroll::STEP {
-        app.workspace
-            .active_mut()
-            .move_cursor(movement, SelectionMode::Collapse);
-    }
+    let step = crate::app::scroll::STEP as isize;
+    app.workspace
+        .active_mut()
+        .scroll_by(if down { step } else { -step });
     Effect::None
 }
 
@@ -222,8 +213,7 @@ fn click_page_bar(app: &mut App, column: u16) -> Effect {
 
     offset += 5;
     for (index, document) in app.workspace.documents().iter().enumerate() {
-        let modified = usize::from(document.is_modified());
-        let width = document.display_name().chars().count() as u16 + 2 + modified as u16;
+        let width = document.display_name().chars().count() as u16 + 2;
         if column >= offset && column < offset + width {
             app.workspace.set_active(index);
             app.focus_panel(Panel::Editor);
@@ -232,30 +222,6 @@ fn click_page_bar(app: &mut App, column: u16) -> Effect {
         offset += width;
     }
     Effect::None
-}
-
-/// Puts the editor cursor at the cell that was clicked.
-fn place_cursor(app: &mut App, area: ratatui::layout::Rect, column: u16, row: u16) {
-    let document = app.workspace.active();
-    let gutter = if app.settings.editor.line_numbers {
-        document.buffer().line_count().to_string().len().max(2) + 1
-    } else {
-        0
-    };
-    let text_x = area.x + 2 + 2 + gutter as u16;
-    let text_y = area.y + 1;
-    if row < text_y || column < text_x {
-        return;
-    }
-
-    let line = document.scroll_line() + usize::from(row - text_y);
-    let offset = document.scroll_column() + usize::from(column - text_x);
-    let line = line.min(document.buffer().line_count().saturating_sub(1));
-    let position = crate::editor::Position::new(line, offset);
-
-    app.workspace
-        .active_mut()
-        .move_cursor(Movement::To(position), SelectionMode::Collapse);
 }
 
 /// Whether a key is a chord rather than text to insert.
@@ -297,20 +263,12 @@ fn handle_overlay(app: &mut App, key: KeyEvent) -> Effect {
                 return Effect::None;
             };
 
-            let mut confirmed = None;
             match key.code {
                 KeyCode::Char('h' | 'H') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                     prompt.backspace();
                 }
                 KeyCode::Char(_) if is_chord(&key) => return Effect::None,
-                KeyCode::Char(ch) => {
-                    prompt.insert(ch);
-                    if let Mode::Prompt(prompt) = &app.mode {
-                        if prompt.kind().is_some_and(|kind| kind.is_confirmation()) {
-                            confirmed = Some(());
-                        }
-                    }
-                }
+                KeyCode::Char(ch) => prompt.insert(ch),
                 KeyCode::Backspace => prompt.backspace(),
                 KeyCode::Delete => prompt.delete(),
                 KeyCode::Left => prompt.move_left(),
@@ -320,9 +278,6 @@ fn handle_overlay(app: &mut App, key: KeyEvent) -> Effect {
                 _ => return Effect::None,
             }
 
-            if confirmed.is_some() {
-                return app.accept_prompt();
-            }
             if refresh {
                 if let Mode::Palette(palette) = &mut app.mode {
                     palette.refresh();
@@ -342,73 +297,21 @@ fn prompt_mut(app: &mut App) -> Option<&mut crate::app::mode::Prompt> {
     }
 }
 
-/// Handles a key with the editor focused.
+/// Handles a key on the read-only source listing: it scrolls, and Enter
+/// hands the file to `$EDITOR`.
 fn handle_editor(app: &mut App, key: KeyEvent) -> Effect {
-    let extend = if key.modifiers.contains(KeyModifiers::SHIFT) {
-        SelectionMode::Extend
-    } else {
-        SelectionMode::Collapse
-    };
-    let word_wise = key.modifiers.contains(KeyModifiers::CONTROL);
-    let held = is_chord(&key);
-    let auto_pairs = app.settings.editor.auto_close_pairs;
     let document = app.workspace.active_mut();
-
-    match key.code {
-        KeyCode::Char('h' | 'H') if word_wise => document.delete_word_before(),
-        KeyCode::Char(_) if held => return Effect::None,
-        KeyCode::Char(ch) if auto_pairs => document.type_char(ch),
-        KeyCode::Char(ch) => document.insert_char(ch),
-        KeyCode::Enter => document.insert_newline(),
-        KeyCode::Backspace if word_wise || key.modifiers.contains(KeyModifiers::ALT) => {
-            document.delete_word_before();
-        }
-        KeyCode::Backspace => document.backspace(),
-        KeyCode::Delete if word_wise => document.delete_word_after(),
-        KeyCode::Delete => document.delete_forward(),
-        KeyCode::Tab => document.indent(),
-        KeyCode::BackTab => document.dedent(),
-
-        KeyCode::Left => document.move_cursor(
-            if word_wise {
-                Movement::WordLeft
-            } else {
-                Movement::Left
-            },
-            extend,
-        ),
-        KeyCode::Right => document.move_cursor(
-            if word_wise {
-                Movement::WordRight
-            } else {
-                Movement::Right
-            },
-            extend,
-        ),
-        KeyCode::Up => document.move_cursor(Movement::Up, extend),
-        KeyCode::Down => document.move_cursor(Movement::Down, extend),
-        KeyCode::Home => document.move_cursor(
-            if word_wise {
-                Movement::DocumentStart
-            } else {
-                Movement::LineStart
-            },
-            extend,
-        ),
-        KeyCode::End => document.move_cursor(
-            if word_wise {
-                Movement::DocumentEnd
-            } else {
-                Movement::LineEnd
-            },
-            extend,
-        ),
-        KeyCode::PageUp => document.move_cursor(Movement::PageUp(PAGE_LINES), extend),
-        KeyCode::PageDown => document.move_cursor(Movement::PageDown(PAGE_LINES), extend),
-        KeyCode::Esc => document.clear_selection(),
+    let rows = match key.code {
+        KeyCode::Enter => return app.apply(&Command::EditFile),
+        KeyCode::Up => -1,
+        KeyCode::Down => 1,
+        KeyCode::PageUp => -(PAGE_LINES as isize),
+        KeyCode::PageDown => PAGE_LINES as isize,
+        KeyCode::Home => -(document.scroll_line() as isize),
+        KeyCode::End => isize::MAX / 2,
         _ => return Effect::None,
-    }
-
+    };
+    document.scroll_by(rows);
     Effect::None
 }
 
@@ -591,16 +494,8 @@ mod tests {
         KeyEvent::new(code, KeyModifiers::NONE)
     }
 
-    fn ctrl_key(code: KeyCode) -> KeyEvent {
-        KeyEvent::new(code, KeyModifiers::CONTROL)
-    }
-
     fn ctrl(ch: char) -> KeyEvent {
         KeyEvent::new(KeyCode::Char(ch), KeyModifiers::CONTROL)
-    }
-
-    fn shift(code: KeyCode) -> KeyEvent {
-        KeyEvent::new(code, KeyModifiers::SHIFT)
     }
 
     /// A mouse event of `kind` at a cell, with no modifiers held.
@@ -625,46 +520,9 @@ mod tests {
     }
 
     #[test]
-    fn selecting_with_shift_then_typing_replaces_the_selection() {
-        let mut app = app();
-        type_text(&mut app, "mov rax, 1");
-        for _ in 0..4 {
-            handle_key(&mut app, shift(KeyCode::Left));
-        }
-        assert_eq!(app.workspace.active().selected_text(), "x, 1");
-
-        handle_key(&mut app, press(KeyCode::Char('9')));
-        assert_eq!(app.workspace.active().buffer().to_text(), "mov ra9");
-    }
-
-    #[test]
-    fn select_all_then_cut_and_paste_round_trips() {
-        let mut app = app();
-        type_text(&mut app, "mov rax, 1");
-
-        handle_key(&mut app, ctrl('a'));
-        assert_eq!(app.workspace.active().selected_text(), "mov rax, 1");
-
-        handle_key(&mut app, ctrl('x'));
-        assert_eq!(app.workspace.active().buffer().to_text(), "");
-
-        handle_key(&mut app, ctrl('v'));
-        assert_eq!(app.workspace.active().buffer().to_text(), "mov rax, 1");
-    }
-
-    #[test]
-    fn ctrl_backspace_arriving_as_ctrl_h_still_deletes() {
-        let mut app = app();
-        type_text(&mut app, "mov rax");
-
-        handle_key(&mut app, ctrl('h'));
-        assert_eq!(app.workspace.active().buffer().to_text(), "mov ");
-    }
-
-    #[test]
     fn an_unbound_chord_never_types_a_letter() {
         let mut app = app();
-        for ch in ['h', 'j', 'e', 'r', 'b'] {
+        for ch in ['h', 'j', 'u', 'r', 'b'] {
             handle_key(&mut app, ctrl(ch));
             handle_key(
                 &mut app,
@@ -700,46 +558,6 @@ mod tests {
         handle_key(&mut app, ctrl('e'));
 
         assert_eq!(app.scratchpad.snippet, "shl ra");
-    }
-
-    #[test]
-    fn ctrl_backspace_clears_indentation_in_one_press() {
-        let mut app = app();
-        type_text(&mut app, "        mov");
-        for _ in 0..3 {
-            handle_key(&mut app, press(KeyCode::Backspace));
-        }
-
-        handle_key(&mut app, ctrl_key(KeyCode::Backspace));
-        assert_eq!(app.workspace.active().buffer().to_text(), "");
-    }
-
-    #[test]
-    fn ctrl_delete_takes_the_word_ahead() {
-        let mut app = app();
-        type_text(&mut app, "mov rax");
-        handle_key(&mut app, press(KeyCode::Home));
-
-        handle_key(&mut app, ctrl_key(KeyCode::Delete));
-        assert_eq!(app.workspace.active().buffer().to_text(), " rax");
-    }
-
-    #[test]
-    fn typing_a_bracket_in_the_editor_completes_the_pair() {
-        let mut app = app();
-        type_text(&mut app, "lea rsi, [rel message");
-        assert_eq!(
-            app.workspace.active().buffer().to_text(),
-            "lea rsi, [rel message]"
-        );
-    }
-
-    #[test]
-    fn pairing_can_be_turned_off() {
-        let mut app = app();
-        app.settings.editor.auto_close_pairs = false;
-        type_text(&mut app, "[");
-        assert_eq!(app.workspace.active().buffer().to_text(), "[");
     }
 
     #[test]
@@ -853,17 +671,46 @@ mod tests {
     }
 
     #[test]
-    fn typing_inserts_text_into_the_editor() {
+    fn typing_never_changes_the_source() {
         let mut app = app();
+        app.workspace.active_mut().reload("ret");
         type_text(&mut app, "mov rax, 1");
-        assert_eq!(app.workspace.active().buffer().to_text(), "mov rax, 1");
+        for code in [KeyCode::Backspace, KeyCode::Delete, KeyCode::Tab] {
+            handle_key(&mut app, press(code));
+        }
+        assert_eq!(app.workspace.active().buffer().to_text(), "ret");
+        assert!(!app.mode.is_overlay());
     }
 
     #[test]
-    fn a_printable_character_does_not_run_a_bound_command() {
+    fn enter_opens_the_file_in_the_external_editor() {
         let mut app = app();
-        type_text(&mut app, "s");
-        assert_eq!(app.workspace.active().buffer().to_text(), "s");
+        app.workspace
+            .active_mut()
+            .set_path("/tmp/ratasm-test/main.asm");
+        app.workspace.active_mut().reload("nop\nret\n");
+        handle_key(&mut app, press(KeyCode::Down));
+
+        assert_eq!(
+            handle_key(&mut app, press(KeyCode::Enter)),
+            Effect::Edit {
+                path: "/tmp/ratasm-test/main.asm".into(),
+                line: 2
+            }
+        );
+    }
+
+    #[test]
+    fn ctrl_e_opens_the_external_editor_from_any_panel() {
+        let mut app = app();
+        app.workspace
+            .active_mut()
+            .set_path("/tmp/ratasm-test/main.asm");
+        app.focus_panel(Panel::Output);
+        assert!(matches!(
+            handle_key(&mut app, ctrl('e')),
+            Effect::Edit { line: 1, .. }
+        ));
     }
 
     #[test]
@@ -891,64 +738,6 @@ mod tests {
 
         handle_key(&mut app, event);
         assert_eq!(app.workspace.active().buffer().to_text(), "");
-    }
-
-    #[test]
-    fn enter_and_backspace_edit_the_document() {
-        let mut app = app();
-        type_text(&mut app, "ab");
-        handle_key(&mut app, press(KeyCode::Enter));
-        type_text(&mut app, "cd");
-        assert_eq!(app.workspace.active().buffer().to_text(), "ab\ncd");
-
-        handle_key(&mut app, press(KeyCode::Backspace));
-        assert_eq!(app.workspace.active().buffer().to_text(), "ab\nc");
-    }
-
-    #[test]
-    fn shift_with_an_arrow_extends_the_selection() {
-        let mut app = app();
-        type_text(&mut app, "mov rax");
-        app.workspace
-            .active_mut()
-            .move_cursor(Movement::LineStart, SelectionMode::Collapse);
-
-        for _ in 0..3 {
-            handle_key(&mut app, shift(KeyCode::Right));
-        }
-        assert_eq!(app.workspace.active().selected_text(), "mov");
-    }
-
-    #[test]
-    fn control_with_an_arrow_moves_by_word() {
-        let mut app = app();
-        type_text(&mut app, "mov rax, rbx");
-        app.workspace
-            .active_mut()
-            .move_cursor(Movement::LineStart, SelectionMode::Collapse);
-
-        handle_key(
-            &mut app,
-            KeyEvent::new(KeyCode::Right, KeyModifiers::CONTROL),
-        );
-        assert_eq!(app.workspace.active().cursor().column, 3, "end of 'mov'");
-
-        handle_key(
-            &mut app,
-            KeyEvent::new(KeyCode::Right, KeyModifiers::CONTROL),
-        );
-        assert_eq!(app.workspace.active().cursor().column, 7, "end of 'rax'");
-    }
-
-    #[test]
-    fn escape_clears_a_selection_without_leaving_the_editor() {
-        let mut app = app();
-        type_text(&mut app, "mov");
-        app.workspace.active_mut().select_all();
-        assert!(app.workspace.active().has_selection());
-
-        handle_key(&mut app, press(KeyCode::Esc));
-        assert!(!app.workspace.active().has_selection());
     }
 
     #[test]
@@ -1017,38 +806,19 @@ mod tests {
     }
 
     #[test]
-    fn a_prompt_accepts_text_and_acts_on_enter() {
+    fn f9_asks_for_a_line_and_sets_a_breakpoint_there() {
         let mut app = app();
-        app.workspace.active_mut().insert("a\nb\nc\nd\n");
+        app.workspace.active_mut().set_path("/tmp/main.asm");
+        app.workspace.active_mut().reload("a\nb\nc\nd\n");
 
-        handle_key(&mut app, ctrl('g'));
+        handle_key(&mut app, press(KeyCode::F(9)));
         type_text(&mut app, "3");
-        handle_key(&mut app, press(KeyCode::Enter));
+        let effect = handle_key(&mut app, press(KeyCode::Enter));
 
-        assert_eq!(app.workspace.active().cursor().line, 2);
-        assert!(!app.mode.is_overlay());
-    }
-
-    #[test]
-    fn a_confirmation_prompt_acts_on_a_single_keypress() {
-        let mut app = app();
-        app.workspace.active_mut().insert_char('x');
-        app.apply(&Command::Quit);
-        assert!(app.mode.is_overlay());
-
-        let effect = handle_key(&mut app, press(KeyCode::Char('y')));
-        assert_eq!(effect, Effect::Quit);
-        assert!(app.should_quit);
-    }
-
-    #[test]
-    fn declining_a_confirmation_does_not_quit() {
-        let mut app = app();
-        app.workspace.active_mut().insert_char('x');
-        app.apply(&Command::Quit);
-
-        handle_key(&mut app, press(KeyCode::Char('n')));
-        assert!(!app.should_quit);
+        assert_eq!(effect, Effect::SyncBreakpoints);
+        assert!(app
+            .breakpoints
+            .is_set_at(std::path::Path::new("/tmp/main.asm"), 3));
         assert!(!app.mode.is_overlay());
     }
 
@@ -1102,11 +872,12 @@ mod tests {
     fn the_breakpoint_list_can_be_navigated_and_edited() {
         let mut app = app();
         app.workspace.active_mut().set_path("/tmp/main.asm");
-        app.workspace.active_mut().insert("nop\nnop\nnop\n");
+        app.workspace.active_mut().reload("nop\nnop\nnop\n");
 
-        for line in [1, 2, 3] {
-            app.workspace.active_mut().go_to_line(line);
-            app.apply(&Command::ToggleBreakpoint);
+        for line in ['1', '2', '3'] {
+            handle_key(&mut app, press(KeyCode::F(9)));
+            handle_key(&mut app, press(KeyCode::Char(line)));
+            handle_key(&mut app, press(KeyCode::Enter));
         }
         assert_eq!(app.breakpoints.len(), 3);
 
@@ -1147,7 +918,7 @@ mod tests {
     }
 
     #[test]
-    fn tab_moves_between_panels_outside_the_editor() {
+    fn tab_moves_between_panels() {
         let mut app = app();
         app.focus_panel(Panel::Registers);
         handle_key(&mut app, press(KeyCode::Tab));
@@ -1172,25 +943,6 @@ mod tests {
             "",
             "the digit must not have been typed"
         );
-    }
-
-    #[test]
-    fn tab_indents_in_the_editor_rather_than_changing_panel() {
-        let mut app = app();
-        app.focus_panel(Panel::Editor);
-        type_text(&mut app, "ret");
-        app.workspace
-            .active_mut()
-            .move_cursor(Movement::LineStart, SelectionMode::Collapse);
-
-        handle_key(&mut app, press(KeyCode::Tab));
-        assert_eq!(app.focus, Panel::Editor, "focus must not have moved");
-        assert!(app
-            .workspace
-            .active()
-            .buffer()
-            .to_text()
-            .starts_with("    "));
     }
 
     #[test]
