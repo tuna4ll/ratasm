@@ -190,6 +190,8 @@ pub struct App {
     pub stack: MemoryBlock,
     /// Whether execution is being recorded, so it can be stepped backwards.
     pub recording: bool,
+    /// Whether recording halted the program just before it exits.
+    pub at_exit: bool,
     /// The call stack at the last stop, innermost frame first.
     pub frames: Vec<crate::debugger::frames::Frame>,
     /// Which frame the call stack panel highlights.
@@ -274,6 +276,7 @@ impl App {
             memory_address: None,
             stack: MemoryBlock::default(),
             recording: false,
+            at_exit: false,
             frames: Vec::new(),
             frame_selected: 0,
             disassembly: Vec::new(),

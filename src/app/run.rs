@@ -530,11 +530,16 @@ async fn perform(
                 finished,
                 &mut runtimes.background,
                 &mi::exec_continue(),
+                true,
                 "continuing",
             )
             .await;
         }
         Effect::Step(kind) => {
+            let forward = !matches!(
+                kind,
+                StepKind::Back | StepKind::BackOver | StepKind::ReverseContinue
+            );
             let command = match kind {
                 StepKind::Instruction => mi::exec_step_instruction(),
                 StepKind::Over => mi::exec_next_instruction(),
@@ -550,6 +555,7 @@ async fn perform(
                 finished,
                 &mut runtimes.background,
                 &command,
+                forward,
                 "stepping",
             )
             .await;
@@ -978,6 +984,7 @@ async fn stop_session(app: &mut App, session: &mut Option<GdbSession>) {
     let _ = app.debugger.apply(Transition::Reset);
 
     app.recording = false;
+    app.at_exit = false;
     app.registers.clear();
     app.breakpoints.detach();
     app.frames.clear();
@@ -995,12 +1002,17 @@ async fn resume(
     finished: &tokio::sync::mpsc::UnboundedSender<Background>,
     running: &mut Running,
     command: &crate::debugger::mi::Command,
+    forward: bool,
     what: &str,
 ) {
     let Some(mut active) = session.take() else {
         app.status = Status::warning("No debug session");
         return;
     };
+    if forward && app.at_exit && active.execute(&mi::record_stop()).await.is_ok() {
+        app.recording = false;
+        app.at_exit = false;
+    }
 
     if let Err(error) = active.execute(command).await {
         app.status = Status::error(error.to_string());
@@ -1059,6 +1071,7 @@ async fn handle_stop(app: &mut App, session: &mut Option<GdbSession>, record: &R
     }
 
     let _ = app.debugger.apply(Transition::Stopped);
+    app.at_exit = app.recording && is_recorded_exit(record);
 
     if let Some(frame) = record.get("frame") {
         app.current_address = frame.get_address("addr");
@@ -1078,6 +1091,9 @@ async fn handle_stop(app: &mut App, session: &mut Option<GdbSession>, record: &R
     }
 
     app.status = match record.stop_reason() {
+        _ if app.at_exit => {
+            Status::info("The program is about to exit; F5 lets it, Shift+F7 steps back")
+        }
         Some("breakpoint-hit") => Status::success("Stopped at a breakpoint"),
         Some("signal-received") => {
             let signal = record.get_str("signal-name").unwrap_or("a signal");
@@ -1092,6 +1108,10 @@ async fn handle_stop(app: &mut App, session: &mut Option<GdbSession>, record: &R
     };
 
     refresh_state(app, session).await;
+}
+
+fn is_recorded_exit(record: &Record) -> bool {
+    record.stop_reason() == Some("signal-received") && record.get_str("signal-name") == Some("0")
 }
 
 /// Reads registers, the stack and the disassembly after a stop.
@@ -1907,6 +1927,37 @@ mod tests {
         assert!(!runtimes.inferior_orphaned(false));
         runtimes.background.abort();
         runtimes.debugger.abort();
+    }
+
+    #[tokio::test]
+    async fn a_recorded_program_runs_to_its_exit() {
+        for tool in ["nasm", "ld", "gdb"] {
+            if !crate::process::is_available(Path::new(tool)) {
+                eprintln!("skipping: {tool} not installed");
+                return;
+            }
+        }
+        let dir = tempfile::tempdir().expect("temp dir");
+        let mut app = app_for(dir.path());
+        app.settings.debugger.record = true;
+        std::fs::write(
+            app.project.entry_path(),
+            "global _start\n_start:\n    mov eax, 60\n    mov edi, 3\n    syscall\n",
+        )
+        .expect("write");
+
+        let mut session = None;
+        let (mut terminal, _events) = start_test_session(&mut app, &mut session).await;
+        assert!(app.recording, "{}", app.status.text);
+
+        settle(&mut app, &mut session, Effect::DebugContinue).await;
+        assert!(app.at_exit, "{}", app.status.text);
+        assert_ne!(app.status.severity, crate::app::Severity::Error);
+
+        settle(&mut app, &mut session, Effect::DebugContinue).await;
+        assert!(session.is_none(), "{}", app.status.text);
+        assert!(app.status.text.contains('3'), "{}", app.status.text);
+        terminal.abort();
     }
 
     #[tokio::test]

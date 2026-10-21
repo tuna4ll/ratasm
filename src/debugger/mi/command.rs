@@ -224,6 +224,11 @@ pub fn record_full() -> Command {
     console("record full")
 }
 
+/// Stops recording, so the program can run past an exit.
+pub fn record_stop() -> Command {
+    console("record stop")
+}
+
 /// Runs until the current function returns.
 pub fn exec_finish() -> Command {
     Command::new("-exec-finish")
