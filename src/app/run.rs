@@ -131,6 +131,10 @@ impl Runtimes {
         self.background.resize(size);
         self.debugger.resize(size);
     }
+
+    fn inferior_orphaned(&self, has_session: bool) -> bool {
+        !has_session && !self.background.is_busy() && self.debugger.is_busy()
+    }
 }
 
 /// Runs the interface until the user quits.
@@ -212,7 +216,7 @@ pub async fn run(mut app: App, terminal: &mut Tui) -> Result<()> {
         )
         .await;
         drain_debugger_events(&mut app, &mut session).await;
-        if session.is_none() && runtimes.debugger.is_busy() {
+        if runtimes.inferior_orphaned(session.is_some()) {
             let _ = runtimes.debugger.request_stop();
         }
     }
@@ -1890,6 +1894,19 @@ mod tests {
         settle(&mut app, &mut session, Effect::DebugStop).await;
         assert!(session.is_none(), "the session should be gone");
         assert!(app.registers.is_empty(), "state should have been cleared");
+    }
+
+    #[tokio::test]
+    async fn resuming_keeps_the_inferior_terminal_open() {
+        let forever = || tokio::spawn(std::future::pending::<()>());
+        let mut runtimes = Runtimes::default();
+        runtimes.debugger.handle = Some(forever());
+        assert!(runtimes.inferior_orphaned(false));
+        assert!(!runtimes.inferior_orphaned(true));
+        runtimes.background.handle = Some(forever());
+        assert!(!runtimes.inferior_orphaned(false));
+        runtimes.background.abort();
+        runtimes.debugger.abort();
     }
 
     #[tokio::test]
