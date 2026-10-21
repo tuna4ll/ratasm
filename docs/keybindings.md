@@ -13,7 +13,9 @@ page bar across the top names them, with the number that opens it:
 | <kbd>Alt</kbd>+<kbd>4</kbd> | Reference | System calls and instruction semantics |
 
 <kbd>Tab</kbd> moves between the panels of the *current page*, except while a
-live terminal has focus, where it is sent to the program. Starting a debug
+live terminal has focus, where it is sent to the program. Pressing the number
+of the page you are already on moves to its next panel, so
+<kbd>Alt</kbd>+<kbd>1</kbd> is also a way out of the editor. Starting a debug
 session opens the Debug page, and so does stopping at a breakpoint — being
 stopped is the one moment the machine state is unambiguously what you want.
 
@@ -32,9 +34,10 @@ tab strip above them naming the others.
 | <kbd>F8</kbd> | Step over |
 | <kbd>F9</kbd> | Toggle a breakpoint; asks for the line of the active file |
 | <kbd>F10</kbd> | Step one source line |
-| <kbd>Ctrl</kbd>+<kbd>F5</kbd> | Stop the running program |
+| <kbd>Ctrl</kbd>+<kbd>F5</kbd> | Stop the running program or debug session |
 | <kbd>F11</kbd> | Step out of the current call |
 | <kbd>F12</kbd> | Start a debug session |
+| <kbd>Shift</kbd>+<kbd>F12</kbd> | Stop the debug session |
 | <kbd>Shift</kbd>+<kbd>F5</kbd> | Continue *backwards* |
 | <kbd>Shift</kbd>+<kbd>F7</kbd> | Step one instruction backwards |
 | <kbd>Shift</kbd>+<kbd>F8</kbd> | Step backwards over a call |
@@ -153,9 +156,17 @@ ratasm does not edit text itself. The Editor panel runs your own editor inside
 it: `$VISUAL`, then `$EDITOR`, then `vi`, started on the project's entry file
 as soon as ratasm opens. While the panel has focus every key goes to the
 editor, <kbd>Tab</kbd> and <kbd>Ctrl</kbd> chords included, except the
-function keys and <kbd>Alt</kbd>+<kbd>1</kbd>..<kbd>4</kbd>, which stay with
-ratasm so building, running, debugging and changing page still work. Click
-another panel to leave it.
+function keys and the Alt chords below, which stay with ratasm so building,
+running, debugging and changing page still work.
+
+| Key | Action |
+| --- | --- |
+| <kbd>Alt</kbd>+<kbd>←</kbd> / <kbd>→</kbd> | Previous / next panel |
+| <kbd>Alt</kbd>+<kbd>P</kbd> | Command palette |
+| <kbd>Alt</kbd>+<kbd>O</kbd> / <kbd>Alt</kbd>+<kbd>N</kbd> | Open / new file |
+| <kbd>Alt</kbd>+<kbd>Q</kbd> | Quit |
+
+The same chords work while a program owns the Output terminal.
 
 The command goes through `sh -c`, so a value such as `emacsclient -t` works.
 Editors known to take `+LINE` (vim, neovim, nano, emacs, micro, kakoune and a

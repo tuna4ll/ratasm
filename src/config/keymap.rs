@@ -253,6 +253,10 @@ impl Keymap {
         );
         bind(KeyBinding::plain(KeyCode::F(12)), Command::DebugStart);
         bind(KeyBinding::ctrl(KeyCode::F(5)), Command::Stop);
+        bind(
+            KeyBinding::new(KeyCode::F(12), KeyModifiers::SHIFT),
+            Command::DebugStop,
+        );
 
         bind(KeyBinding::ctrl(KeyCode::Char('e')), Command::EditFile);
         bind(KeyBinding::ctrl(KeyCode::Char('o')), Command::OpenFile);

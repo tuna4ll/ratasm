@@ -233,8 +233,16 @@ pub async fn run(mut app: App, terminal: &mut Tui) -> Result<()> {
 
 /// Applies one key event.
 fn handle_key_event(app: &mut App, runtimes: &Runtimes, key: KeyEvent) -> Effect {
+    let in_terminal = !app.mode.is_overlay()
+        && ((app.shows_editor() && app.focus == super::Panel::Editor)
+            || (app.terminal.is_some() && app.focus == super::Panel::Output));
+    if in_terminal && key.kind != KeyEventKind::Release {
+        if let Some(command) = terminal_escape(key) {
+            return app.apply(&command);
+        }
+    }
     if app.shows_editor() && app.focus == super::Panel::Editor && !app.mode.is_overlay() {
-        if editor_reserved_key(key) {
+        if editor_reserved_key(&app.keymap, key) {
             if let Some(command) = app.keymap.command_for_event(key).cloned() {
                 return app.apply(&command);
             }
@@ -269,12 +277,24 @@ fn handle_key_event(app: &mut App, runtimes: &Runtimes, key: KeyEvent) -> Effect
 /// Keys ratasm keeps while `$EDITOR` has focus: function keys and Alt plus a
 /// digit, which build, run, debug and change page. Everything else, Tab and
 /// every Ctrl chord included, belongs to the editor.
-fn editor_reserved_key(key: KeyEvent) -> bool {
-    match key.code {
-        KeyCode::F(_) => true,
-        KeyCode::Char(ch) => key.modifiers.contains(KeyModifiers::ALT) && ch.is_ascii_digit(),
-        _ => false,
+fn editor_reserved_key(keymap: &crate::config::Keymap, key: KeyEvent) -> bool {
+    matches!(key.code, KeyCode::F(_))
+        || (key.modifiers.contains(KeyModifiers::ALT) && keymap.command_for_event(key).is_some())
+}
+
+fn terminal_escape(key: KeyEvent) -> Option<Command> {
+    if key.modifiers != KeyModifiers::ALT {
+        return None;
     }
+    Some(match key.code {
+        KeyCode::Char('p') => Command::OpenPalette,
+        KeyCode::Char('o') => Command::OpenFile,
+        KeyCode::Char('n') => Command::NewFile,
+        KeyCode::Char('q') => Command::Quit,
+        KeyCode::Right => Command::NextPanel,
+        KeyCode::Left => Command::PreviousPanel,
+        _ => return None,
+    })
 }
 
 /// Commands that remain reachable while the Output panel sends ordinary keys to the child.
@@ -481,6 +501,10 @@ async fn perform(
                 app.status = Status::warning("Debug session stopped");
             } else if runtimes.background.cancel() {
                 app.status = Status::warning("Stopped");
+            } else if app.debugger.state().can_stop() {
+                stop_session(app, session).await;
+                let _ = runtimes.debugger.request_stop();
+                app.status = Status::warning("Debug session stopped");
             } else {
                 app.status = Status::info("Nothing is running");
             }
@@ -1094,6 +1118,9 @@ async fn handle_stop(app: &mut App, session: &mut Option<GdbSession>, record: &R
         _ if app.at_exit => {
             Status::info("The program is about to exit; F5 lets it, Shift+F7 steps back")
         }
+        Some("breakpoint-hit") if record.get_str("disp") == Some("del") => {
+            Status::info("Stopped at the entry point")
+        }
         Some("breakpoint-hit") => Status::success("Stopped at a breakpoint"),
         Some("signal-received") => {
             let signal = record.get_str("signal-name").unwrap_or("a signal");
@@ -1311,13 +1338,27 @@ mod tests {
     }
 
     #[test]
-    fn only_function_keys_and_alt_digits_leave_the_editor() {
+    fn only_function_keys_and_bound_alt_chords_leave_the_editor() {
+        let keymap = crate::config::Keymap::defaults();
         let key = |code, modifiers| KeyEvent::new(code, modifiers);
-        assert!(editor_reserved_key(key(KeyCode::F(6), KeyModifiers::NONE)));
-        assert!(editor_reserved_key(key(
-            KeyCode::Char('2'),
-            KeyModifiers::ALT
-        )));
+        for left in [
+            key(KeyCode::F(6), KeyModifiers::NONE),
+            key(KeyCode::Char('2'), KeyModifiers::ALT),
+        ] {
+            assert!(editor_reserved_key(&keymap, left), "{left:?}");
+        }
+        assert_eq!(
+            terminal_escape(key(KeyCode::Char('p'), KeyModifiers::ALT)),
+            Some(Command::OpenPalette)
+        );
+        assert_eq!(
+            terminal_escape(key(KeyCode::Right, KeyModifiers::ALT)),
+            Some(Command::NextPanel)
+        );
+        assert_eq!(
+            terminal_escape(key(KeyCode::Char('x'), KeyModifiers::ALT)),
+            None
+        );
         for kept in [
             key(KeyCode::Tab, KeyModifiers::NONE),
             key(KeyCode::Char('s'), KeyModifiers::CONTROL),
@@ -1326,7 +1367,10 @@ mod tests {
             key(KeyCode::Char('x'), KeyModifiers::ALT),
             key(KeyCode::Esc, KeyModifiers::NONE),
         ] {
-            assert!(!editor_reserved_key(kept), "{kept:?} belongs to the editor");
+            assert!(
+                !editor_reserved_key(&keymap, kept),
+                "{kept:?} belongs to the editor"
+            );
         }
     }
 

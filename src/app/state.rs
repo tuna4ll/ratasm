@@ -378,6 +378,10 @@ impl App {
                 Effect::Quit
             }
 
+            Command::GoToPage(page) if *page == self.page => {
+                self.focus = self.page.next_panel(self.focus);
+                Effect::None
+            }
             Command::GoToPage(page) => {
                 self.open_page(*page);
                 Effect::None
@@ -1127,6 +1131,15 @@ mod tests {
 
         assert_eq!(app.page, Page::Debug);
         assert_eq!(app.focus, Panel::Output);
+    }
+
+    #[test]
+    fn the_open_page_s_number_moves_to_its_next_panel() {
+        let mut app = app();
+        let before = app.focus;
+        app.apply(&Command::GoToPage(app.page));
+        assert_ne!(app.focus, before);
+        assert!(app.page.contains(app.focus));
     }
 
     #[test]
