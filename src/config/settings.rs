@@ -13,11 +13,19 @@ use crate::ui::theme::ThemeKind;
 pub struct EditorSettings {
     /// Whether to show line numbers.
     pub line_numbers: bool,
+    /// The editor to run, overriding `$VISUAL` and `$EDITOR`.
+    pub command: Option<String>,
+    /// How the editor takes a line: `+{line}`, or `{file}:{line}` to replace the file.
+    pub line_argument: Option<String>,
 }
 
 impl Default for EditorSettings {
     fn default() -> Self {
-        Self { line_numbers: true }
+        Self {
+            line_numbers: true,
+            command: None,
+            line_argument: None,
+        }
     }
 }
 

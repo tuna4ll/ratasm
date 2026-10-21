@@ -1,7 +1,5 @@
-//! The Editor panel: `$EDITOR` running inside it, or, when the editor is
-//! closed or a debug session is on, a read-only listing of the source with
-//! its breakpoints and the line the program stopped on. The listing has no
-//! cursor; ratasm does not edit text.
+//! The Editor panel: `$EDITOR` running inside it, or a read-only listing of
+//! the source with its breakpoints, errors and the line the program stopped on.
 
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
@@ -72,6 +70,9 @@ pub fn draw(frame: &mut Frame, app: &App, area: Rect, focused: bool) {
                 .current_line
                 .as_ref()
                 .is_some_and(|(_, line)| *line == number);
+        let diagnostic = path
+            .as_deref()
+            .and_then(|path| app.diagnostic_at(path, number));
 
         let marker = if is_current {
             Span::styled(
@@ -87,6 +88,11 @@ pub fn draw(frame: &mut Frame, app: &App, area: Rect, focused: bool) {
                 format!("{:<width$}", symbols.breakpoint, width = marker_width),
                 theme.breakpoint(),
             )
+        } else if let Some(diagnostic) = diagnostic {
+            Span::styled(
+                format!("{:<width$}", symbols.error, width = marker_width),
+                severity_style(diagnostic.severity, theme),
+            )
         } else {
             Span::raw(" ".repeat(marker_width))
         };
@@ -99,7 +105,17 @@ pub fn draw(frame: &mut Frame, app: &App, area: Rect, focused: bool) {
             ));
         }
         spans.extend(highlight(buffer.line_or_empty(index), theme.palette()));
-        lines.push(Line::from(spans));
+        if let Some(diagnostic) = diagnostic {
+            spans.push(Span::styled(
+                format!("  {}", diagnostic.message),
+                severity_style(diagnostic.severity, theme),
+            ));
+        }
+        let mut line = Line::from(spans);
+        if focused && index == document.cursor() {
+            line = line.patch_style(theme.selection());
+        }
+        lines.push(line);
     }
 
     if lines.is_empty() {
@@ -107,6 +123,13 @@ pub fn draw(frame: &mut Frame, app: &App, area: Rect, focused: bool) {
     }
 
     frame.render_widget(Paragraph::new(lines), inner);
+}
+
+fn severity_style(severity: crate::assembler::Severity, theme: &crate::ui::theme::Theme) -> Style {
+    match severity {
+        crate::assembler::Severity::Error => theme.error(),
+        _ => theme.warning(),
+    }
 }
 
 /// Converts one line of NASM into styled spans.

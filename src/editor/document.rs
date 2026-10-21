@@ -1,8 +1,5 @@
-//! An open file as the source listing shows it: its text and how far it is scrolled.
-//!
-//! There is no cursor and no selection. Text is edited in `$EDITOR`; this is
-//! only what ratasm shows when the editor is closed or a debug session wants
-//! the line the program stopped on.
+//! An open file as the source listing shows it: its text, the selected line
+//! and how far it is scrolled.
 
 use std::path::{Path, PathBuf};
 
@@ -13,7 +10,7 @@ use super::buffer::TextBuffer;
 pub struct Document {
     buffer: TextBuffer,
     scroll_line: usize,
-    /// A line to bring into view the next time the listing's height is known.
+    cursor: usize,
     reveal: Option<usize>,
 }
 
@@ -23,6 +20,7 @@ impl Document {
         Self {
             buffer: TextBuffer::new(),
             scroll_line: 0,
+            cursor: 0,
             reveal: None,
         }
     }
@@ -66,6 +64,18 @@ impl Document {
         self.scroll_line
     }
 
+    /// The selected line, zero-based.
+    pub fn cursor(&self) -> usize {
+        self.cursor
+    }
+
+    /// Moves the selected line by `rows`, keeping it in view.
+    pub fn move_cursor(&mut self, rows: isize) {
+        let last = self.buffer.line_count().saturating_sub(1);
+        self.cursor = self.cursor.saturating_add_signed(rows).min(last);
+        self.reveal = Some(self.cursor);
+    }
+
     /// Scrolls by `rows`, negative for up, staying inside the text.
     pub fn scroll_by(&mut self, rows: isize) {
         let last = self.buffer.line_count().saturating_sub(1);
@@ -75,7 +85,9 @@ impl Document {
 
     /// Asks for the zero-based `line` to be brought into view.
     pub fn reveal(&mut self, line: usize) {
-        self.reveal = Some(line.min(self.buffer.line_count().saturating_sub(1)));
+        let line = line.min(self.buffer.line_count().saturating_sub(1));
+        self.cursor = line;
+        self.reveal = Some(line);
     }
 
     /// Settles the scroll for a listing `height` rows tall, showing a line
@@ -84,7 +96,12 @@ impl Document {
         if let Some(line) = self.reveal.take() {
             let visible = self.scroll_line..self.scroll_line + height;
             if height > 0 && !visible.contains(&line) {
-                self.scroll_line = line.saturating_sub(height / 3);
+                self.scroll_line =
+                    if line < self.scroll_line || line >= self.scroll_line + 2 * height {
+                        line.saturating_sub(height / 3)
+                    } else {
+                        line + 1 - height
+                    };
             }
         }
         let last = self.buffer.line_count().saturating_sub(1);
@@ -101,6 +118,7 @@ impl Document {
         };
         let last = self.buffer.line_count().saturating_sub(1);
         self.scroll_line = self.scroll_line.min(last);
+        self.cursor = self.cursor.min(last);
     }
 }
 
@@ -153,6 +171,25 @@ mod tests {
         document.reveal(5);
         document.fit(30);
         assert_eq!(document.scroll_line(), 0);
+    }
+
+    #[test]
+    fn the_selected_line_moves_inside_the_text_and_stays_in_view() {
+        let text = (0..100)
+            .map(|n| n.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        let mut document = Document::from_file_contents("main.asm", &text);
+        document.move_cursor(-3);
+        assert_eq!(document.cursor(), 0);
+        document.move_cursor(12);
+        document.fit(10);
+        assert_eq!(document.cursor(), 12);
+        assert_eq!(document.scroll_line(), 3, "scrolls just enough");
+        document.move_cursor(500);
+        assert_eq!(document.cursor(), 99);
+        document.reload("a\nb");
+        assert_eq!(document.cursor(), 1);
     }
 
     #[test]

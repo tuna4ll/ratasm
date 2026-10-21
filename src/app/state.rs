@@ -51,6 +51,8 @@ pub enum Effect {
     Step(StepKind),
     /// Send a breakpoint change to the debugger.
     SyncBreakpoints,
+    /// Toggle a breakpoint on the line the editor's cursor is on.
+    BreakpointAtEditorCursor,
     /// Read memory at an address into the memory panel.
     ReadMemory(u64),
     /// Run `$EDITOR` on a file inside the Editor panel.
@@ -346,7 +348,7 @@ impl App {
         match document.path() {
             Some(path) => Effect::Edit {
                 path: path.to_path_buf(),
-                line: document.scroll_line() + 1,
+                line: document.cursor() + 1,
             },
             None => {
                 self.status = Status::warning("Open a file (Ctrl+O) or create one (Ctrl+N) first");
@@ -485,11 +487,11 @@ impl App {
                 }
             }
             Command::ToggleBreakpoint => {
-                if self.workspace.active().path().is_none() {
-                    self.status = Status::warning("Open a file before setting a breakpoint");
-                    return Effect::None;
+                if self.shows_editor() {
+                    return Effect::BreakpointAtEditorCursor;
                 }
-                self.open_prompt(PromptKind::BreakpointLine)
+                let line = self.workspace.active().cursor() + 1;
+                self.toggle_breakpoint(line)
             }
             Command::ClearBreakpoints => {
                 self.breakpoints.clear();
@@ -909,17 +911,35 @@ impl App {
         }
     }
 
-    /// Adds or removes a breakpoint on one-based `line` of the active file.
-    fn toggle_breakpoint(&mut self, line: usize) -> Effect {
-        if !self.debugger.state().can_edit_breakpoints() {
-            self.status = Status::warning("Cannot change breakpoints while the program runs");
+    /// Asks for the line of the active file to toggle a breakpoint on.
+    pub fn ask_breakpoint_line(&mut self) -> Effect {
+        if self.workspace.active().path().is_none() {
+            self.status = Status::warning("Open a file before setting a breakpoint");
             return Effect::None;
         }
+        self.open_prompt(PromptKind::BreakpointLine)
+    }
 
+    /// Adds or removes a breakpoint on one-based `line` of the active file.
+    fn toggle_breakpoint(&mut self, line: usize) -> Effect {
         let Some(path) = self.workspace.active().path().map(PathBuf::from) else {
             self.status = Status::warning("Open a file before setting a breakpoint");
             return Effect::None;
         };
+        self.toggle_breakpoint_in(&path, line)
+    }
+
+    /// Adds or removes a breakpoint on one-based `line` of `path`.
+    pub fn toggle_breakpoint_in(&mut self, path: &Path, line: usize) -> Effect {
+        if !self.debugger.state().can_edit_breakpoints() {
+            self.status = Status::warning("Cannot change breakpoints while the program runs");
+            return Effect::None;
+        }
+        if !self.show_file(path) {
+            self.status = Status::error(format!("cannot open {}", path.display()));
+            return Effect::None;
+        }
+        let path = path.to_path_buf();
         self.workspace.active_mut().reveal(line - 1);
         let added = self.breakpoints.toggle_line(&path, line);
         self.status = Status::info(if added {
@@ -928,6 +948,16 @@ impl App {
             format!("Breakpoint removed from line {line}")
         });
         Effect::SyncBreakpoints
+    }
+
+    /// The first build message on one-based `line` of `path`.
+    pub fn diagnostic_at(&self, path: &Path, line: usize) -> Option<&Diagnostic> {
+        self.diagnostics.iter().find(|diagnostic| {
+            diagnostic.line == Some(line)
+                && diagnostic.file.as_deref().is_some_and(|file| {
+                    crate::editor::workspace::same_file(&self.resolve_reported_path(file), path)
+                })
+        })
     }
 
     /// The breakpoint locations that still need sending to the debugger.
@@ -1032,7 +1062,11 @@ impl App {
         let documents = self.workspace.documents();
         documents
             .iter()
-            .position(|document| document.path() == Some(path))
+            .position(|document| {
+                document
+                    .path()
+                    .is_some_and(|open| crate::editor::workspace::same_target(open, path))
+            })
             .or_else(|| {
                 let rooted = self.project.root().join(path);
                 documents
@@ -1072,7 +1106,7 @@ mod tests {
 
     /// Toggles a breakpoint on one-based `line` the way F9 does, through its prompt.
     fn toggle_line(app: &mut App, line: usize) -> Effect {
-        app.apply(&Command::ToggleBreakpoint);
+        app.ask_breakpoint_line();
         if let Mode::Prompt(prompt) = &mut app.mode {
             prompt.set_text(line.to_string());
         }
@@ -1322,11 +1356,11 @@ mod tests {
     }
 
     #[test]
-    fn editing_opens_the_active_file_at_the_top_line_on_show() {
+    fn editing_opens_the_active_file_at_the_selected_line() {
         let mut app = app_with_source("nop\nnop\nret\n");
         let path = app.project.root().join("main.asm");
         app.workspace.active_mut().set_path(&path);
-        app.workspace.active_mut().scroll_by(2);
+        app.workspace.active_mut().move_cursor(2);
 
         assert_eq!(
             app.apply(&Command::EditFile),
@@ -1472,6 +1506,19 @@ mod tests {
     }
 
     #[test]
+    fn with_the_editor_open_the_breakpoint_goes_on_its_cursor_line() {
+        let mut app = app();
+        app.workspace.active_mut().set_path("/tmp/main.asm");
+        app.editor_screen = Some(TerminalScreen::new(crate::process::pty::PtySize::new(
+            80, 24,
+        )));
+        assert_eq!(
+            app.apply(&Command::ToggleBreakpoint),
+            Effect::BreakpointAtEditorCursor
+        );
+    }
+
+    #[test]
     fn toggling_a_breakpoint_adds_then_removes_it() {
         let mut app = app();
         app.workspace.active_mut().set_path("/tmp/main.asm");
@@ -1537,7 +1584,7 @@ mod tests {
     fn a_bad_line_number_keeps_the_prompt_open_and_says_why() {
         let mut app = app_with_source("one\ntwo");
         app.workspace.active_mut().set_path("/tmp/main.asm");
-        app.apply(&Command::ToggleBreakpoint);
+        app.ask_breakpoint_line();
         if let Mode::Prompt(prompt) = &mut app.mode {
             for ch in "abc".chars() {
                 prompt.insert(ch);

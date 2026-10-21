@@ -32,7 +32,7 @@ tab strip above them naming the others.
 | <kbd>F6</kbd> | Build |
 | <kbd>F7</kbd> | Step one instruction |
 | <kbd>F8</kbd> | Step over |
-| <kbd>F9</kbd> | Toggle a breakpoint; asks for the line of the active file |
+| <kbd>F9</kbd> | Toggle a breakpoint on the selected line, or the editor's cursor line |
 | <kbd>F10</kbd> | Step one source line |
 | <kbd>Ctrl</kbd>+<kbd>F5</kbd> | Stop the running program or debug session |
 | <kbd>F11</kbd> | Step out of the current call |
@@ -153,7 +153,8 @@ terminal normally would; most terminals reserve that for exactly this.
 ### Editing
 
 ratasm does not edit text itself. The Editor panel runs your own editor inside
-it: `$VISUAL`, then `$EDITOR`, then `vi`, started on the project's entry file
+it: `editor.command` from the configuration, then `$VISUAL`, then `$EDITOR`,
+then `vi`, started on the project's entry file
 as soon as ratasm opens. While the panel has focus every key goes to the
 editor, <kbd>Tab</kbd> and <kbd>Ctrl</kbd> chords included, except the
 function keys and the Alt chords below, which stay with ratasm so building,
@@ -170,21 +171,33 @@ The same chords work while a program owns the Output terminal.
 
 The command goes through `sh -c`, so a value such as `emacsclient -t` works.
 Editors known to take `+LINE` (vim, neovim, nano, emacs, micro, kakoune and a
-few more) open at the line the listing was scrolled to; any other editor is
-given just the file.
-When the editor exits, ratasm reads the file back. A build reads every open
-file again first, so what is assembled is always what is on disk.
+few more) open at the selected line; for any other editor set
+`editor.line_argument`, or it is given just the file.
 
-With the editor closed, or during a debug session, the panel shows a plain
-listing of the source with its breakpoints and the line the program stopped
-on. It has no cursor and nothing in it can be typed into; search, go to line
-and the like are your editor's job.
+**Neovim is driven.** ratasm starts it with `--listen` and talks to it through
+that socket:
+
+- a build first writes every modified buffer, so unsaved changes are built;
+- <kbd>F9</kbd> toggles a breakpoint on the cursor's line;
+- opening a file, from the explorer or <kbd>Alt</kbd>+<kbd>O</kbd>, opens it in
+  the running Neovim;
+- a failed build moves the cursor to the first error;
+- breakpoints and build errors appear in the sign column.
+
+Any other editor is run as it is. A build reads what is on disk and says so
+when the editor may hold unsaved changes, <kbd>F9</kbd> asks for a line, and a
+file opened while the editor runs opens in it as soon as you quit it.
+
+With the editor closed, or during a debug session, the panel shows a listing of
+the source with a selected line, its breakpoints, the build's errors and the
+line the program stopped on.
 
 | Key | Action |
 | --- | --- |
-| <kbd>Enter</kbd> / <kbd>Ctrl</kbd>+<kbd>E</kbd> | Open `$EDITOR` in the panel again |
-| <kbd>↑</kbd> / <kbd>↓</kbd>, <kbd>PgUp</kbd> / <kbd>PgDn</kbd> | Scroll the listing |
+| <kbd>Enter</kbd> / <kbd>Ctrl</kbd>+<kbd>E</kbd> | Open the editor at the selected line |
+| <kbd>↑</kbd> / <kbd>↓</kbd>, <kbd>PgUp</kbd> / <kbd>PgDn</kbd> | Move the selected line |
 | <kbd>Home</kbd> / <kbd>End</kbd> | First / last line |
+| <kbd>F9</kbd> | Toggle a breakpoint on the selected line |
 
 Quitting ratasm while the editor still runs asks for a second Quit, since that
 kills the editor and anything it has not saved.

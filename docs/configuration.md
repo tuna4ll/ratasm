@@ -111,6 +111,8 @@ theme = "dark"          # dark, light, ansi16, colorblind
 
 [editor]
 line_numbers = true
+command = "nvim"           # overrides $VISUAL and $EDITOR
+line_argument = "+{line}"  # or "{file}:{line}"
 
 [debugger]
 gdb = "gdb"
@@ -135,6 +137,8 @@ record = true
 | Field | Default | Meaning |
 | --- | --- | --- |
 | `line_numbers` | `true` | Show line numbers beside the source. |
+| `command` | unset | The editor to run; unset uses `$VISUAL`, then `$EDITOR`, then `vi`. |
+| `line_argument` | unset | How the editor takes a line. `{line}` is replaced; a value containing `{file}` replaces the file argument too. Unset gives `+LINE` to editors known to take it. |
 
 Text is edited in your own editor, not in ratasm: `$VISUAL`, then `$EDITOR`,
 then `vi`. See [keybindings](keybindings.md#editing).

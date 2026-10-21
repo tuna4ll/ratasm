@@ -63,7 +63,7 @@ ratasm
 
 `ratasm new` writes a working, commented `write`/`exit` program rather than a
 stub. <kbd>F6</kbd> assembles it, <kbd>F5</kbd> runs it, <kbd>F9</kbd> sets a
-breakpoint on the line you name, and <kbd>F7</kbd> steps one instruction while
+breakpoint on the cursor's line, and <kbd>F7</kbd> steps one instruction while
 you watch the registers move.
 
 Running opens a real terminal in the Output panel. Programs can prompt, read
@@ -107,7 +107,7 @@ nothing.
 | <kbd>F5</kbd> / <kbd>F6</kbd> | Run or continue / build |
 | <kbd>F7</kbd> / <kbd>F8</kbd> / <kbd>F10</kbd> | Step instruction / over / source line |
 | <kbd>Shift</kbd>+<kbd>F7</kbd> | Step one instruction backwards |
-| <kbd>F9</kbd> | Toggle a breakpoint on a line |
+| <kbd>F9</kbd> | Toggle a breakpoint on the cursor's line |
 | <kbd>F1</kbd> / <kbd>F2</kbd> | Learning panel / scratchpad |
 | <kbd>F3</kbd> | Show the complete status message in Output |
 | <kbd>Ctrl</kbd>+<kbd>P</kbd> | Command palette |

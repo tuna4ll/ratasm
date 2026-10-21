@@ -116,6 +116,9 @@ struct Runtimes {
     editor: Running,
     /// Where the editor's PTY reports, kept apart from the Output terminal's.
     editor_events: Option<tokio::sync::mpsc::UnboundedSender<PtyEvent>>,
+    remote: Option<editor::Remote>,
+    signs: Vec<editor::Sign>,
+    queued_edit: Option<(std::path::PathBuf, usize)>,
 }
 
 impl Runtimes {
@@ -151,14 +154,7 @@ pub async fn run(mut app: App, terminal: &mut Tui) -> Result<()> {
 
     let size = terminal.size().context("cannot read the terminal size")?;
     if let Some(path) = app.workspace.active().path().map(Path::to_path_buf) {
-        let line = 1;
-        start_editor(
-            &mut app,
-            &mut runtimes,
-            (size.width, size.height),
-            path,
-            line,
-        );
+        start_editor(&mut app, &mut runtimes, (size.width, size.height), path, 1).await;
     }
 
     loop {
@@ -216,6 +212,21 @@ pub async fn run(mut app: App, terminal: &mut Tui) -> Result<()> {
         )
         .await;
         drain_debugger_events(&mut app, &mut session).await;
+        if app.editor_screen.is_none() {
+            if let Some((path, line)) = runtimes.queued_edit.take() {
+                app.show_file(&path);
+                app.focus_panel(super::Panel::Editor);
+                start_editor(
+                    &mut app,
+                    &mut runtimes,
+                    (size.width, size.height),
+                    path,
+                    line,
+                )
+                .await;
+            }
+        }
+        sync_signs(&app, &mut runtimes).await;
         if runtimes.inferior_orphaned(session.is_some()) {
             let _ = runtimes.debugger.request_stop();
         }
@@ -471,16 +482,16 @@ async fn perform(
     match effect {
         Effect::None | Effect::Quit => {}
 
-        Effect::Edit { path, line } => start_editor(app, runtimes, viewport, path, line),
+        Effect::Edit { path, line } => start_editor(app, runtimes, viewport, path, line).await,
 
         Effect::Build { debug } => {
-            build(app, debug).await;
+            build(app, runtimes, debug).await;
         }
 
         Effect::Run => {
             if runtimes.background.is_busy() || runtimes.debugger.is_busy() {
                 app.status = Status::warning("Something is already running");
-            } else if build(app, false).await {
+            } else if build(app, runtimes, false).await {
                 start_program(
                     app,
                     pty_events,
@@ -526,9 +537,7 @@ async fn perform(
                 app.status = Status::success(format!("Opened {}", path.display()));
                 app.focus = super::Panel::Editor;
                 app.refresh_project_files();
-                if app.editor_screen.is_none() {
-                    start_editor(app, runtimes, viewport, path, 1);
-                }
+                start_editor(app, runtimes, viewport, path, 1).await;
             }
             Err(error) => app.status = Status::error(error.to_string()),
         },
@@ -536,7 +545,7 @@ async fn perform(
         Effect::DebugStart => {
             let size =
                 output_terminal_size(app, viewport.0, viewport.1).unwrap_or(PtySize::new(80, 24));
-            start_session(app, session, &mut runtimes.debugger, pty_events, size).await;
+            start_session(app, session, runtimes, pty_events, size).await;
         }
         Effect::DebugStop => {
             if session.is_none() && app.debugger.state() == crate::debugger::DebuggerState::Running
@@ -597,6 +606,24 @@ async fn perform(
 
         Effect::SyncBreakpoints => sync_breakpoints(app, session).await,
 
+        Effect::BreakpointAtEditorCursor => {
+            let cursor = match &runtimes.remote {
+                Some(remote) => Some(remote.cursor().await),
+                None => None,
+            };
+            match cursor {
+                Some(Ok((path, line))) => {
+                    if app.toggle_breakpoint_in(&path, line) == Effect::SyncBreakpoints {
+                        sync_breakpoints(app, session).await;
+                    }
+                }
+                Some(Err(error)) => app.status = Status::error(error),
+                None => {
+                    let _ = app.ask_breakpoint_line();
+                }
+            }
+        }
+
         Effect::ReadMemory(address) => read_memory(app, session, address).await,
 
         Effect::RunScratchpad => {
@@ -609,8 +636,9 @@ async fn perform(
     }
 }
 
-/// Starts `$EDITOR` on `path` inside the Editor panel, unless one is already open.
-fn start_editor(
+/// Starts `$EDITOR` on `path` inside the Editor panel, or shows `path` in
+/// the one already running.
+async fn start_editor(
     app: &mut App,
     runtimes: &mut Runtimes,
     viewport: (u16, u16),
@@ -619,6 +647,10 @@ fn start_editor(
 ) {
     if app.editor_screen.is_some() {
         app.focus_panel(super::Panel::Editor);
+        if app.editing.as_deref() == Some(path.as_path()) && runtimes.remote.is_none() {
+            return;
+        }
+        reveal_in_editor(app, runtimes, path, line).await;
         return;
     }
     let Some(events) = runtimes.editor_events.clone() else {
@@ -628,20 +660,52 @@ fn start_editor(
     app.focus_panel(super::Panel::Editor);
     let size = panel_terminal_size(app, super::Panel::Editor, viewport.0, viewport.1)
         .unwrap_or(PtySize::new(80, 24));
-    let program = editor::from_env();
+    let program = editor::resolve(&app.settings.editor);
+    let remote = editor::Remote::for_editor(&program);
     app.editor_screen = Some(super::terminal::TerminalScreen::new(size));
     app.editing = Some(path.clone());
     app.status = Status::info(format!(
-        "{program} is editing {}; F-keys and Alt+1-4 stay with ratasm",
+        "{} is editing {}; F-keys and Alt chords stay with ratasm",
+        program.name(),
         workspace::display_path(&path)
     ));
 
-    let spec = editor::spec(&program, &path, line);
+    let spec = program.spec(&path, line, remote.as_ref().map(editor::Remote::socket));
+    runtimes.remote = remote;
+    runtimes.signs.clear();
     let (control_tx, control_rx) = tokio::sync::mpsc::unbounded_channel();
     runtimes.editor.control = Some(control_tx);
     runtimes.editor.handle = Some(tokio::spawn(async move {
         crate::process::pty::run_interactive(spec, size, control_rx, events).await;
     }));
+}
+
+/// Moves the running editor to `path` at `line`, or, when it cannot be
+/// driven, opens `path` once the user leaves it.
+async fn reveal_in_editor(
+    app: &mut App,
+    runtimes: &mut Runtimes,
+    path: std::path::PathBuf,
+    line: usize,
+) {
+    let name = workspace::display_path(&path);
+    match &runtimes.remote {
+        Some(remote) => match remote.open(&path, line).await {
+            Ok(()) => {
+                app.editing = Some(path);
+                runtimes.signs.clear();
+            }
+            Err(error) => app.status = Status::error(format!("cannot open {name}: {error}")),
+        },
+        None => {
+            let program = editor::resolve(&app.settings.editor);
+            app.status = Status::warning(format!(
+                "{} is still open; {name} opens when you quit it",
+                program.name()
+            ));
+            runtimes.queued_edit = Some((path, line));
+        }
+    }
 }
 
 /// Folds output from `$EDITOR` into its screen, and reads the file back when it exits.
@@ -658,11 +722,14 @@ fn finish_editor_event(app: &mut App, runtimes: &mut Runtimes, event: PtyEvent) 
         PtyEvent::Finished(result) => {
             runtimes.editor.handle = None;
             runtimes.editor.control = None;
+            if let Some(remote) = runtimes.remote.take() {
+                remote.close();
+            }
             let last_screen = app.editor_screen.take();
-            let program = editor::from_env();
+            let program = editor::resolve(&app.settings.editor);
+            let program = program.name();
             let failed = !matches!(&result, Ok(output) if output.outcome.is_success());
             if let (true, Some(screen)) = (failed, last_screen) {
-                // Whatever the editor printed on its way out explains why.
                 app.output = screen.into_lines();
             }
             app.status = match result {
@@ -682,8 +749,58 @@ fn finish_editor_event(app: &mut App, runtimes: &mut Runtimes, event: PtyEvent) 
     }
 }
 
+/// Sends breakpoint and error marks to a driven editor when they change.
+async fn sync_signs(app: &App, runtimes: &mut Runtimes) {
+    let Some(remote) = &runtimes.remote else {
+        return;
+    };
+    let signs = editor_signs(app);
+    if signs == runtimes.signs {
+        return;
+    }
+    if remote.place_signs(&signs).await.is_ok() {
+        runtimes.signs = signs;
+    }
+}
+
+fn editor_signs(app: &App) -> Vec<editor::Sign> {
+    let absolute = |path: &Path| std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let mut signs: Vec<editor::Sign> = app
+        .breakpoints
+        .all()
+        .iter()
+        .filter_map(|breakpoint| match &breakpoint.location {
+            crate::debugger::breakpoints::Location::Line { file, line } => Some(editor::Sign {
+                path: absolute(file),
+                line: *line,
+                kind: editor::SignKind::Breakpoint,
+            }),
+            _ => None,
+        })
+        .collect();
+    for diagnostic in &app.diagnostics {
+        if let (Some(file), Some(line)) = (&diagnostic.file, diagnostic.line) {
+            signs.push(editor::Sign {
+                path: absolute(&app.resolve_reported_path(file)),
+                line,
+                kind: match diagnostic.severity {
+                    crate::assembler::Severity::Error => editor::SignKind::Error,
+                    _ => editor::SignKind::Warning,
+                },
+            });
+        }
+    }
+    signs.sort();
+    signs.dedup();
+    signs
+}
+
 /// Builds the project, reporting the outcome.
-async fn build(app: &mut App, debug: bool) -> bool {
+async fn build(app: &mut App, runtimes: &mut Runtimes, debug: bool) -> bool {
+    let unsaved = match &runtimes.remote {
+        Some(remote) => remote.save_all().await.is_err(),
+        None => app.editor_screen.is_some(),
+    };
     if let Err(error) = app.workspace.reload() {
         app.fail_build(error.to_string());
         return false;
@@ -705,6 +822,17 @@ async fn build(app: &mut App, debug: bool) -> bool {
             app.finish_build(outcome);
             if let Some(path) = &executable {
                 load_static_disassembly(app, path);
+                if unsaved {
+                    app.status = Status::success(format!(
+                        "{}; changes not yet saved in the editor were not included",
+                        app.status.text
+                    ));
+                }
+            } else if let Some((path, line)) = first_error_location(app) {
+                if runtimes.remote.is_some() {
+                    reveal_in_editor(app, runtimes, path, line).await;
+                    app.focus_panel(super::Panel::Editor);
+                }
             }
             executable.is_some()
         }
@@ -713,6 +841,12 @@ async fn build(app: &mut App, debug: bool) -> bool {
             false
         }
     }
+}
+
+fn first_error_location(app: &App) -> Option<(std::path::PathBuf, usize)> {
+    let diagnostic = crate::assembler::diagnostics::first_navigable(&app.diagnostics)?;
+    let file = diagnostic.file.as_deref()?;
+    Some((app.resolve_reported_path(file), diagnostic.line?))
 }
 
 /// Starts the built program on its own task.
@@ -848,13 +982,14 @@ fn load_static_disassembly(app: &mut App, executable: &Path) {
 async fn start_session(
     app: &mut App,
     session: &mut Option<GdbSession>,
-    terminal_runtime: &mut Running,
+    runtimes: &mut Runtimes,
     terminal_events: &tokio::sync::mpsc::UnboundedSender<PtyEvent>,
     terminal_size: PtySize,
 ) {
-    if !build(app, true).await {
+    if !build(app, runtimes, true).await {
         return;
     }
+    let terminal_runtime = &mut runtimes.debugger;
     let Some(executable) = app
         .build
         .as_ref()
@@ -1433,7 +1568,7 @@ mod tests {
         app.editor_screen = Some(super::super::terminal::TerminalScreen::new(PtySize::new(
             80, 24,
         )));
-        let spec = crate::process::editor::spec(&program, &path, 1);
+        let spec = crate::process::editor::Editor::new(program).spec(&path, 1, None);
         let (control_tx, control_rx) = tokio::sync::mpsc::unbounded_channel();
         runtimes.editor.control = Some(control_tx);
         let events = runtimes.editor_events.clone().expect("sender");
@@ -1525,10 +1660,10 @@ mod tests {
         app: &mut App,
         session: &mut Option<GdbSession>,
     ) -> (Running, tokio::sync::mpsc::UnboundedReceiver<PtyEvent>) {
-        let mut runtime = Running::default();
+        let mut runtimes = Runtimes::default();
         let (events, incoming) = tokio::sync::mpsc::unbounded_channel();
-        start_session(app, session, &mut runtime, &events, PtySize::new(80, 24)).await;
-        (runtime, incoming)
+        start_session(app, session, &mut runtimes, &events, PtySize::new(80, 24)).await;
+        (std::mem::take(&mut runtimes.debugger), incoming)
     }
 
     #[tokio::test]
@@ -1551,7 +1686,10 @@ mod tests {
         );
         std::fs::write(&entry, &edited).expect("write");
 
-        assert!(build(&mut app, false).await, "the build should succeed");
+        assert!(
+            build(&mut app, &mut Runtimes::default(), false).await,
+            "the build should succeed"
+        );
         assert_eq!(
             app.workspace.active().buffer().to_text(),
             edited,
@@ -1571,7 +1709,10 @@ mod tests {
         let dir = tempfile::tempdir().expect("temp dir");
         let mut app = app_for(dir.path());
 
-        assert!(build(&mut app, false).await, "the build should succeed");
+        assert!(
+            build(&mut app, &mut Runtimes::default(), false).await,
+            "the build should succeed"
+        );
         assert_eq!(app.status.severity, crate::app::Severity::Success);
         assert!(
             !app.disassembly.is_empty(),
@@ -1591,7 +1732,7 @@ mod tests {
         let mut app = app_for(dir.path());
         std::fs::write(app.project.entry_path(), "    this is not assembly\n").expect("write");
 
-        assert!(!build(&mut app, false).await);
+        assert!(!build(&mut app, &mut Runtimes::default(), false).await);
         assert_eq!(app.status.severity, crate::app::Severity::Error);
         assert!(app.disassembly.is_empty());
         assert!(!app.diagnostics.is_empty(), "the error should be recorded");

@@ -297,8 +297,8 @@ fn prompt_mut(app: &mut App) -> Option<&mut crate::app::mode::Prompt> {
     }
 }
 
-/// Handles a key on the read-only source listing: it scrolls, and Enter
-/// hands the file to `$EDITOR`.
+/// Handles a key on the read-only source listing: it moves the selected
+/// line, and Enter hands the file to `$EDITOR` there.
 fn handle_editor(app: &mut App, key: KeyEvent) -> Effect {
     let document = app.workspace.active_mut();
     let rows = match key.code {
@@ -307,11 +307,11 @@ fn handle_editor(app: &mut App, key: KeyEvent) -> Effect {
         KeyCode::Down => 1,
         KeyCode::PageUp => -(PAGE_LINES as isize),
         KeyCode::PageDown => PAGE_LINES as isize,
-        KeyCode::Home => -(document.scroll_line() as isize),
+        KeyCode::Home => -(document.cursor() as isize),
         KeyCode::End => isize::MAX / 2,
         _ => return Effect::None,
     };
-    document.scroll_by(rows);
+    document.move_cursor(rows);
     Effect::None
 }
 
@@ -806,14 +806,14 @@ mod tests {
     }
 
     #[test]
-    fn f9_asks_for_a_line_and_sets_a_breakpoint_there() {
+    fn f9_sets_a_breakpoint_on_the_selected_line() {
         let mut app = app();
         app.workspace.active_mut().set_path("/tmp/main.asm");
         app.workspace.active_mut().reload("a\nb\nc\nd\n");
 
-        handle_key(&mut app, press(KeyCode::F(9)));
-        type_text(&mut app, "3");
-        let effect = handle_key(&mut app, press(KeyCode::Enter));
+        handle_key(&mut app, press(KeyCode::Down));
+        handle_key(&mut app, press(KeyCode::Down));
+        let effect = handle_key(&mut app, press(KeyCode::F(9)));
 
         assert_eq!(effect, Effect::SyncBreakpoints);
         assert!(app
@@ -874,10 +874,9 @@ mod tests {
         app.workspace.active_mut().set_path("/tmp/main.asm");
         app.workspace.active_mut().reload("nop\nnop\nnop\n");
 
-        for line in ['1', '2', '3'] {
+        for _ in 0..3 {
             handle_key(&mut app, press(KeyCode::F(9)));
-            handle_key(&mut app, press(KeyCode::Char(line)));
-            handle_key(&mut app, press(KeyCode::Enter));
+            handle_key(&mut app, press(KeyCode::Down));
         }
         assert_eq!(app.breakpoints.len(), 3);
 

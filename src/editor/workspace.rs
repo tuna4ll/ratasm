@@ -113,6 +113,15 @@ pub fn same_file(open: &Path, reported: &Path) -> bool {
     open[open.len() - reported.len()..] == reported[..]
 }
 
+/// Whether `a` and `b` name the same file on disk, however each is spelled.
+pub fn same_target(a: &Path, b: &Path) -> bool {
+    a == b
+        || matches!(
+            (std::fs::canonicalize(a), std::fs::canonicalize(b)),
+            (Ok(a), Ok(b)) if a == b
+        )
+}
+
 /// The open documents and which one is active; always holds at least one.
 #[derive(Debug)]
 pub struct Workspace {
@@ -202,7 +211,7 @@ impl Workspace {
         if let Some(index) = self
             .documents
             .iter()
-            .position(|document| document.path() == Some(path))
+            .position(|document| document.path().is_some_and(|open| same_target(open, path)))
         {
             self.active = index;
             self.remember(path);
@@ -455,6 +464,18 @@ mod tests {
         workspace.close(2).expect("close");
         assert_eq!(workspace.active_index(), 1);
         assert_eq!(workspace.len(), 2);
+    }
+
+    #[test]
+    fn a_file_is_opened_once_however_its_path_is_spelled() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("a.asm");
+        std::fs::write(&path, "nop\n").expect("write");
+        let mut workspace = Workspace::new();
+        workspace.open(&path).expect("open");
+        let indirect = dir.path().join(".").join("a.asm");
+        workspace.open(&indirect).expect("open again");
+        assert_eq!(workspace.documents().len(), 1);
     }
 
     #[test]
