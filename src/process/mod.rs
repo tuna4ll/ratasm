@@ -370,6 +370,50 @@ pub async fn run(spec: &CommandSpec) -> Result<ProcessOutput, ProcessError> {
     })
 }
 
+/// Runs `spec` on the caller's own terminal, stdin included unless `spec`
+/// supplies it.
+pub async fn run_attached(spec: &CommandSpec) -> Result<Outcome, ProcessError> {
+    let program = spec.program.display().to_string();
+    let mut command = Command::new(&spec.program);
+    command
+        .args(&spec.args)
+        .stdin(if spec.stdin.is_some() {
+            Stdio::piped()
+        } else {
+            Stdio::inherit()
+        })
+        .kill_on_drop(true);
+    if let Some(directory) = &spec.working_directory {
+        command.current_dir(directory);
+    }
+    for (key, value) in &spec.env {
+        command.env(key, value);
+    }
+    let mut child = command.spawn().map_err(|source| ProcessError::Spawn {
+        program: program.clone(),
+        source,
+    })?;
+    if let (Some(text), Some(mut pipe)) = (spec.stdin.as_ref(), child.stdin.take()) {
+        use tokio::io::AsyncWriteExt;
+        let _ = pipe.write_all(text.as_bytes()).await;
+        let _ = pipe.shutdown().await;
+    }
+    let status = match spec.timeout {
+        Some(limit) => match tokio::time::timeout(limit, child.wait()).await {
+            Ok(status) => status,
+            Err(_) => {
+                let _ = child.start_kill();
+                let _ = child.wait().await;
+                return Ok(Outcome::TimedOut);
+            }
+        },
+        None => child.wait().await,
+    };
+    status
+        .map(|status| outcome_from_status(&status))
+        .map_err(|source| ProcessError::Io { program, source })
+}
+
 /// Converts an exit status into an [`Outcome`].
 fn outcome_from_status(status: &std::process::ExitStatus) -> Outcome {
     #[cfg(unix)]
@@ -399,6 +443,19 @@ pub fn is_available(program: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn an_attached_run_reports_the_exit_and_honours_stdin_and_timeout() {
+        let spec = CommandSpec::new("sh")
+            .arg("-c")
+            .arg("read line; test \"$line\" = hi && exit 4")
+            .stdin("hi\n");
+        assert_eq!(run_attached(&spec).await.expect("runs"), Outcome::Exited(4));
+        let spec = CommandSpec::new("sleep")
+            .arg("5")
+            .timeout(Duration::from_millis(50));
+        assert_eq!(run_attached(&spec).await.expect("runs"), Outcome::TimedOut);
+    }
 
     /// A program that is present on any Linux system running these tests.
     const TRUE: &str = "/usr/bin/true";

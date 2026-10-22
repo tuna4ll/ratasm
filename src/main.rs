@@ -173,14 +173,12 @@ async fn run_project(path: Option<&Path>) -> Result<ExitCode> {
         .clone()
         .context("the build reported success but produced no executable")?;
 
-    let result = assembler::run_executable(&project, &executable)
+    let spec = assembler::run_command(&project, &executable);
+    let outcome = ratasm::process::run_attached(&spec)
         .await
         .with_context(|| format!("cannot run {}", executable.display()))?;
 
-    print!("{}", result.stdout);
-    eprint!("{}", result.stderr);
-
-    match result.outcome {
+    match outcome {
         ratasm::process::Outcome::Exited(0) => Ok(ExitCode::SUCCESS),
         other => {
             eprintln!("ratasm: program {}", other.description());
