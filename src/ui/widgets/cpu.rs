@@ -211,15 +211,26 @@ pub fn flag_lines<'a>(app: &App, width: usize) -> Vec<Line<'a>> {
     let taken: Vec<String> = ConditionCode::ALL
         .into_iter()
         .filter(|code| code.evaluate(flags))
-        .flat_map(ConditionCode::jump_mnemonics)
+        .map(|code| code.jump_mnemonics().join("/"))
         .collect();
 
     if !taken.is_empty() {
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled("Would be taken:", theme.dim())));
-        for chunk in taken.chunks(width.max(8) / 5) {
-            lines.push(Line::from(Span::styled(chunk.join(" "), theme.success())));
+        let mut row = String::new();
+        for group in taken {
+            if !row.is_empty() && row.len() + 2 + group.len() > width.max(8) {
+                lines.push(Line::from(Span::styled(
+                    std::mem::take(&mut row),
+                    theme.success(),
+                )));
+            }
+            if !row.is_empty() {
+                row.push_str("  ");
+            }
+            row.push_str(&group);
         }
+        lines.push(Line::from(Span::styled(row, theme.success())));
     }
 
     lines
