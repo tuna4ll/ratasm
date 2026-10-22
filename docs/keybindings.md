@@ -101,6 +101,8 @@ assembled, and `rax=` removes it again. <kbd>Tab</kbd> still leaves the panel.
 | --- | --- |
 | <kbd>Ctrl</kbd>+<kbd>P</kbd> | Command palette |
 | <kbd>Ctrl</kbd>+<kbd>G</kbd> | Show an address in the memory panel |
+| <kbd>Ctrl</kbd>+<kbd>T</kbd> | Go to a symbol anywhere in the project |
+| <kbd>Ctrl</kbd>+<kbd>F</kbd> | Search every project file |
 | <kbd>Ctrl</kbd>+<kbd>K</kbd> | Syscall finder |
 | <kbd>Tab</kbd> | Next panel on this page |
 | <kbd>Shift</kbd>+<kbd>Tab</kbd> | Previous panel |
@@ -165,6 +167,7 @@ running, debugging and changing page still work.
 | <kbd>Alt</kbd>+<kbd>←</kbd> / <kbd>→</kbd> | Previous / next panel |
 | <kbd>Alt</kbd>+<kbd>P</kbd> | Command palette |
 | <kbd>Alt</kbd>+<kbd>O</kbd> / <kbd>Alt</kbd>+<kbd>N</kbd> | Open / new file |
+| <kbd>Alt</kbd>+<kbd>T</kbd> / <kbd>Alt</kbd>+<kbd>F</kbd> | Go to symbol / search in files |
 | <kbd>Alt</kbd>+<kbd>Q</kbd> | Quit |
 
 The same chords work while a program owns the Output terminal.
@@ -243,6 +246,8 @@ code, so a command missing here is a build failure rather than a surprise.
 | `file.open` | Open file |
 | `file.add-to-project` | Add to project |
 | `file.close` | Close file |
+| `file.rename` | Rename file |
+| `file.delete` | Delete file |
 | `app.quit` | Quit |
 | `navigate.next-panel` | Next panel |
 | `navigate.previous-panel` | Previous panel |
@@ -256,6 +261,8 @@ code, so a command missing here is a build failure rather than a surprise.
 | `navigate.scroll-to-end` | Scroll to the end |
 | `navigate.go-to-address` | Go to address |
 | `navigate.go-to-first-error` | Go to first error |
+| `navigate.go-to-symbol` | Go to symbol |
+| `navigate.search` | Search in files |
 | `build.build` | Build |
 | `build.build-debug` | Build with debug info |
 | `build.run` | Run |
@@ -273,6 +280,9 @@ code, so a command missing here is a build failure rather than a surprise.
 | `debug.stop` | Stop debugging |
 | `debug.toggle-breakpoint` | Toggle breakpoint |
 | `debug.clear-breakpoints` | Clear all breakpoints |
+| `debug.watch` | Watch an expression |
+| `debug.condition` | Set breakpoint condition |
+| `debug.set-register` | Set a register |
 | `view.cycle-register-format` | Change register format |
 | `view.toggle-disassembly-syntax` | Toggle Intel/AT&T syntax |
 | `view.cycle-theme` | Change theme |

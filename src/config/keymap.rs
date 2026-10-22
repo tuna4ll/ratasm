@@ -273,6 +273,8 @@ impl Keymap {
 
         bind(KeyBinding::ctrl(KeyCode::Char('p')), Command::OpenPalette);
         bind(KeyBinding::ctrl(KeyCode::Char('g')), Command::GoToAddress);
+        bind(KeyBinding::ctrl(KeyCode::Char('t')), Command::GoToSymbol);
+        bind(KeyBinding::ctrl(KeyCode::Char('f')), Command::SearchFiles);
         bind(
             KeyBinding::ctrl(KeyCode::Char('k')),
             Command::OpenSyscallFinder,

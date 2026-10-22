@@ -30,6 +30,8 @@ pub enum Location {
     Address(u64),
     /// A symbol name.
     Symbol(String),
+    /// A watchpoint: stop when the expression's value changes.
+    Watch(String),
 }
 
 impl Location {
@@ -44,7 +46,7 @@ impl Location {
                 format!("{name}:{line}")
             }
             Location::Address(address) => format!("*0x{address:x}"),
-            Location::Symbol(name) => name.clone(),
+            Location::Symbol(name) | Location::Watch(name) => name.clone(),
         }
     }
 
@@ -60,6 +62,7 @@ impl Location {
             }
             Location::Address(address) => format!("0x{address:x}"),
             Location::Symbol(name) => name.clone(),
+            Location::Watch(expression) => format!("watch {expression}"),
         }
     }
 
@@ -87,6 +90,10 @@ pub struct Breakpoint {
     pub function: Option<String>,
     /// How many times it has been hit.
     pub hit_count: u32,
+    /// Stop only when this expression is true.
+    pub condition: Option<String>,
+    /// The enabled state and condition GDB was last told.
+    pub synced: Option<(bool, Option<String>)>,
 }
 
 impl Breakpoint {
@@ -99,6 +106,8 @@ impl Breakpoint {
             address: None,
             function: None,
             hit_count: 0,
+            condition: None,
+            synced: None,
         }
     }
 
@@ -117,6 +126,9 @@ impl Breakpoint {
         if let Some(function) = &self.function {
             text.push_str(&format!(" in {function}"));
         }
+        if let Some(condition) = &self.condition {
+            text.push_str(&format!(" if {condition}"));
+        }
         if !self.enabled {
             text.push_str(" (disabled)");
         }
@@ -131,6 +143,7 @@ impl Breakpoint {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct BreakpointSet {
     breakpoints: Vec<Breakpoint>,
+    removed: Vec<u32>,
 }
 
 impl BreakpointSet {
@@ -178,7 +191,7 @@ impl BreakpointSet {
     /// removed, so the caller knows which GDB command to send.
     pub fn toggle_line(&mut self, file: &Path, line: usize) -> bool {
         if let Some(index) = self.index_of_line(file, line) {
-            self.breakpoints.remove(index);
+            self.remove_index(index);
             false
         } else {
             self.breakpoints.push(Breakpoint::pending(Location::Line {
@@ -203,6 +216,96 @@ impl BreakpointSet {
         true
     }
 
+    /// Adds a watchpoint on `expression`, if there is not one already.
+    pub fn add_watch(&mut self, expression: &str) -> bool {
+        let location = Location::Watch(expression.trim().to_owned());
+        if self
+            .breakpoints
+            .iter()
+            .any(|breakpoint| breakpoint.location == location)
+        {
+            return false;
+        }
+        self.breakpoints.push(Breakpoint::pending(location));
+        true
+    }
+
+    /// Sets or clears the condition of the breakpoint at `index`.
+    pub fn set_condition(&mut self, index: usize, condition: Option<String>) -> bool {
+        match self.breakpoints.get_mut(index) {
+            Some(breakpoint) => {
+                breakpoint.condition = condition.filter(|text| !text.trim().is_empty());
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Adds a breakpoint as it was saved.
+    pub fn restore(&mut self, location: Location, enabled: bool, condition: Option<String>) {
+        if self
+            .breakpoints
+            .iter()
+            .any(|breakpoint| breakpoint.location == location)
+        {
+            return;
+        }
+        let mut breakpoint = Breakpoint::pending(location);
+        breakpoint.enabled = enabled;
+        breakpoint.condition = condition;
+        self.breakpoints.push(breakpoint);
+    }
+
+    /// Moves breakpoints in `from` to `to`, or drops them when `to` is `None`.
+    pub fn move_file(&mut self, from: &Path, to: Option<&Path>) {
+        let mut index = 0;
+        while index < self.breakpoints.len() {
+            let here = matches!(&self.breakpoints[index].location, Location::Line { file, .. } if same_file(file, from));
+            match (here, to) {
+                (true, None) => {
+                    self.remove_index(index);
+                    continue;
+                }
+                (true, Some(to)) => {
+                    if let Location::Line { file, .. } = &mut self.breakpoints[index].location {
+                        *file = to.to_path_buf();
+                    }
+                }
+                _ => {}
+            }
+            index += 1;
+        }
+    }
+
+    /// GDB numbers of breakpoints removed since GDB was last told.
+    pub fn take_removed(&mut self) -> Vec<u32> {
+        std::mem::take(&mut self.removed)
+    }
+
+    /// Adopted breakpoints whose enabled state or condition GDB has not been told.
+    pub fn out_of_sync(&self) -> Vec<(u32, bool, Option<String>)> {
+        self.breakpoints
+            .iter()
+            .filter_map(|breakpoint| {
+                let number = breakpoint.number?;
+                let wanted = (breakpoint.enabled, breakpoint.condition.clone());
+                (breakpoint.synced.as_ref() != Some(&wanted))
+                    .then_some((number, wanted.0, wanted.1))
+            })
+            .collect()
+    }
+
+    /// Records that GDB now holds `enabled` and `condition` for breakpoint `number`.
+    pub fn mark_synced(&mut self, number: u32, enabled: bool, condition: Option<String>) {
+        if let Some(breakpoint) = self
+            .breakpoints
+            .iter_mut()
+            .find(|breakpoint| breakpoint.number == Some(number))
+        {
+            breakpoint.synced = Some((enabled, condition));
+        }
+    }
+
     /// Adds a breakpoint at a symbol, if one is not already there.
     pub fn add_symbol(&mut self, name: &str) -> bool {
         let location = Location::Symbol(name.to_owned());
@@ -219,19 +322,24 @@ impl BreakpointSet {
 
     /// Removes the breakpoint with a GDB number.
     pub fn remove_number(&mut self, number: u32) -> bool {
-        let before = self.breakpoints.len();
-        self.breakpoints
-            .retain(|breakpoint| breakpoint.number != Some(number));
-        self.breakpoints.len() != before
+        match self
+            .breakpoints
+            .iter()
+            .position(|breakpoint| breakpoint.number == Some(number))
+        {
+            Some(index) => self.remove_index(index).is_some(),
+            None => false,
+        }
     }
 
     /// Removes the breakpoint at an index in the list.
     pub fn remove_index(&mut self, index: usize) -> Option<Breakpoint> {
-        if index < self.breakpoints.len() {
-            Some(self.breakpoints.remove(index))
-        } else {
-            None
+        if index >= self.breakpoints.len() {
+            return None;
         }
+        let breakpoint = self.breakpoints.remove(index);
+        self.removed.extend(breakpoint.number);
+        Some(breakpoint)
     }
 
     /// Enables or disables a breakpoint by index.
@@ -247,7 +355,11 @@ impl BreakpointSet {
 
     /// Removes every breakpoint.
     pub fn clear(&mut self) {
-        self.breakpoints.clear();
+        self.removed.extend(
+            self.breakpoints
+                .drain(..)
+                .filter_map(|breakpoint| breakpoint.number),
+        );
     }
 
     /// Forgets every GDB number, marking all breakpoints pending again.
@@ -259,7 +371,9 @@ impl BreakpointSet {
             breakpoint.number = None;
             breakpoint.address = None;
             breakpoint.hit_count = 0;
+            breakpoint.synced = None;
         }
+        self.removed.clear();
     }
 
     /// The breakpoints that still need to be sent to GDB.
@@ -287,9 +401,9 @@ impl BreakpointSet {
         breakpoint.number = record.get_int("number").and_then(|n| u32::try_from(n).ok());
         breakpoint.address = record.get_address("addr");
         breakpoint.function = record.get_str("func").map(str::to_owned);
-        if let Some(enabled) = record.get_str("enabled") {
-            breakpoint.enabled = enabled == "y";
-        }
+        let enabled = record.get_str("enabled") != Some("n");
+        let condition = record.get_str("cond").map(str::to_owned);
+        breakpoint.synced = Some((enabled, condition));
         true
     }
 
@@ -426,7 +540,7 @@ mod tests {
     }
 
     #[test]
-    fn a_disabled_breakpoint_is_recorded_as_disabled() {
+    fn what_gdb_holds_is_compared_with_what_was_asked_for() {
         let mut set = BreakpointSet::new();
         let location = Location::Symbol("_start".to_owned());
         set.add_symbol("_start");
@@ -435,8 +549,35 @@ mod tests {
             ("enabled".to_owned(), Value::String("n".to_owned())),
         ]);
         set.adopt(&location, &record);
-        assert!(!set.all()[0].enabled);
+        assert_eq!(set.out_of_sync(), vec![(1, true, None)]);
+        set.mark_synced(1, true, None);
+        assert!(set.out_of_sync().is_empty());
+
+        set.set_enabled(0, false);
+        set.set_condition(0, Some("$rax == 1".into()));
+        assert_eq!(
+            set.out_of_sync(),
+            vec![(1, false, Some("$rax == 1".into()))]
+        );
         assert!(set.all()[0].describe().contains("disabled"));
+        assert!(set.all()[0].describe().contains("if $rax == 1"));
+
+        set.clear();
+        assert_eq!(set.take_removed(), vec![1]);
+        assert!(set.take_removed().is_empty());
+    }
+
+    #[test]
+    fn watchpoints_and_moved_files() {
+        let mut set = BreakpointSet::new();
+        assert!(set.add_watch(" $rax "));
+        assert!(!set.add_watch("$rax"));
+        assert_eq!(set.all()[0].location.display(), "watch $rax");
+        set.toggle_line(Path::new("/p/a.asm"), 3);
+        set.move_file(Path::new("/p/a.asm"), Some(Path::new("/p/b.asm")));
+        assert!(set.is_set_at(Path::new("/p/b.asm"), 3));
+        set.move_file(Path::new("/p/b.asm"), None);
+        assert_eq!(set.len(), 1);
     }
 
     #[test]

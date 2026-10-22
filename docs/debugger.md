@@ -121,7 +121,7 @@ Recording costs time per instruction. That is invisible for the programs ratasm
 is for, and would not be for a large one, so `debugger.record = false` turns it
 off.
 
-## Breakpoints across sessions
+## Breakpoints across sessions and runs
 
 Breakpoints are set in the editor before any session exists. GDB assigns numbers
 only once it has loaded the program, and may reject or renumber them. So a
@@ -130,6 +130,25 @@ adopts it, and pending breakpoints are replayed when one starts.
 
 When a session ends, every number is forgotten. They belonged to that session
 and mean nothing to the next one.
+
+Each breakpoint also remembers the enabled state and condition GDB was last
+told. Removing, disabling or re-conditioning one during a session sends
+`-break-delete`, `-break-disable`, `-break-enable` or `-break-condition` for
+exactly the ones that differ.
+
+In the Breakpoints panel:
+
+| Key | Action |
+| --- | --- |
+| <kbd>Space</kbd> | Enable or disable |
+| <kbd>D</kbd> / <kbd>Delete</kbd> | Remove |
+| <kbd>C</kbd> | Stop only when a condition holds, such as `$rcx == 3` |
+| <kbd>W</kbd> | Watch an expression: `rax`, `(int)counter`, `*(long *)0x402000` |
+
+A register name typed alone is watched as `$rax`. Watchpoints use GDB's
+`-break-watch` and stop when the value changes.
+
+`debug.set-register` (palette) assigns a register while paused: `rax=0x10`.
 
 ## Cleanup
 

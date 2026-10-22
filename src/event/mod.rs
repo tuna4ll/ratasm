@@ -239,11 +239,14 @@ fn handle_overlay(app: &mut App, key: KeyEvent) -> Effect {
         }
         KeyCode::Enter => match &app.mode {
             Mode::Palette(_) => app.accept_palette(),
+            Mode::Picker(_) => app.accept_picker(),
             _ => app.accept_prompt(),
         },
         KeyCode::Up | KeyCode::BackTab => {
-            if let Mode::Palette(palette) = &mut app.mode {
-                palette.select_previous();
+            match &mut app.mode {
+                Mode::Palette(palette) => palette.select_previous(),
+                Mode::Picker(picker) => picker.select_previous(),
+                _ => {}
             }
             Effect::None
         }
@@ -252,13 +255,15 @@ fn handle_overlay(app: &mut App, key: KeyEvent) -> Effect {
             Effect::None
         }
         KeyCode::Down | KeyCode::Tab => {
-            if let Mode::Palette(palette) = &mut app.mode {
-                palette.select_next();
+            match &mut app.mode {
+                Mode::Palette(palette) => palette.select_next(),
+                Mode::Picker(picker) => picker.select_next(),
+                _ => {}
             }
             Effect::None
         }
         _ => {
-            let refresh = matches!(app.mode, Mode::Palette(_));
+            let refresh = matches!(app.mode, Mode::Palette(_) | Mode::Picker(_));
             let Some(prompt) = prompt_mut(app) else {
                 return Effect::None;
             };
@@ -282,6 +287,7 @@ fn handle_overlay(app: &mut App, key: KeyEvent) -> Effect {
                 if let Mode::Palette(palette) = &mut app.mode {
                     palette.refresh();
                 }
+                app.refresh_picker();
             }
             Effect::None
         }
@@ -293,6 +299,7 @@ fn prompt_mut(app: &mut App) -> Option<&mut crate::app::mode::Prompt> {
     match &mut app.mode {
         Mode::Prompt(prompt) => Some(prompt),
         Mode::Palette(palette) => Some(palette.prompt_mut()),
+        Mode::Picker(picker) => Some(picker.prompt_mut()),
         Mode::Normal => None,
     }
 }
@@ -349,6 +356,9 @@ fn handle_syscalls(app: &mut App, key: KeyEvent) -> Effect {
 /// Handles a key with the breakpoint list focused.
 fn handle_breakpoints(app: &mut App, key: KeyEvent) -> Effect {
     let count = app.breakpoints.len();
+    if key.code == KeyCode::Char('w') {
+        return app.apply(&Command::AddWatchpoint);
+    }
     if count == 0 {
         return Effect::None;
     }
@@ -367,6 +377,8 @@ fn handle_breakpoints(app: &mut App, key: KeyEvent) -> Effect {
                 .min(app.breakpoints.len().saturating_sub(1));
             return Effect::SyncBreakpoints;
         }
+        KeyCode::Char('c') => return app.apply(&Command::SetBreakpointCondition),
+        KeyCode::Char('w') => return app.apply(&Command::AddWatchpoint),
         KeyCode::Char(' ') => {
             let index = app.breakpoint_selected;
             let enabled = app

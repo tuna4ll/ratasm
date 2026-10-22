@@ -10,18 +10,28 @@ use crate::debugger::memory::MemoryBlock;
 use crate::debugger::registers::{Format, RegisterFile};
 use crate::debugger::state::{DebuggerState, StateMachine, Transition};
 use crate::disassembler::{DisassemblyLine, Syntax};
-use crate::editor::Workspace;
+use crate::editor::{SymbolKind, Workspace};
 use crate::instruction::Database as InstructionDatabase;
 use crate::process::ProcessOutput;
 use crate::project::Project;
 use crate::syscall::Database as SyscallDatabase;
 use crate::ui::Theme;
 
-use super::mode::{Mode, Palette, Prompt, PromptKind};
+use super::mode::{Mode, Palette, PickItem, Picker, PickerKind, Prompt, PromptKind};
 use super::page::Page;
 use super::panel::Panel;
 use super::scroll::ScrollState;
 use super::terminal::TerminalScreen;
+
+fn watch_expression(text: &str) -> String {
+    let text = text.trim();
+    let register = text.to_ascii_lowercase();
+    if crate::instruction::registers::is_register(&register) {
+        format!("${register}")
+    } else {
+        text.to_owned()
+    }
+}
 
 /// Work the run loop must perform on the application's behalf.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -68,6 +78,17 @@ pub enum Effect {
     OpenFile(PathBuf),
     /// Assemble and run the scratchpad snippet.
     RunScratchpad,
+    /// Move a file on disk.
+    RenameFile {
+        /// The file now.
+        from: PathBuf,
+        /// Where it goes.
+        to: PathBuf,
+    },
+    /// Remove a file from disk.
+    DeleteFile(PathBuf),
+    /// Assign a register of the paused program, as `$rax = 16`.
+    SetRegister(String),
 }
 
 /// How far a step goes.
@@ -435,6 +456,29 @@ impl App {
                 Effect::None
             }
             Command::GoToAddress => self.open_prompt(PromptKind::GoToAddress),
+            Command::GoToSymbol => self.open_picker(PickerKind::Symbols),
+            Command::SearchFiles => self.open_picker(PickerKind::Search),
+            Command::RenameFile => match self.workspace.active().path() {
+                Some(path) => {
+                    let text = crate::editor::workspace::display_path(path);
+                    self.open_prompt(PromptKind::RenameFile);
+                    if let Mode::Prompt(prompt) = &mut self.mode {
+                        prompt.set_text(text);
+                    }
+                    Effect::None
+                }
+                None => {
+                    self.status = Status::warning("The buffer has no file to rename");
+                    Effect::None
+                }
+            },
+            Command::DeleteFile => {
+                if self.workspace.active().path().is_none() {
+                    self.status = Status::warning("The buffer has no file to delete");
+                    return Effect::None;
+                }
+                self.open_prompt(PromptKind::DeleteFile)
+            }
             Command::GoToFirstError => {
                 self.go_to_first_error();
                 Effect::None
@@ -492,6 +536,25 @@ impl App {
                 }
                 let line = self.workspace.active().cursor() + 1;
                 self.toggle_breakpoint(line)
+            }
+            Command::AddWatchpoint => self.open_prompt(PromptKind::Watch),
+            Command::SetBreakpointCondition => {
+                let Some(breakpoint) = self.breakpoints.all().get(self.breakpoint_selected) else {
+                    self.status = Status::warning("Select a breakpoint in the Breakpoints panel");
+                    return Effect::None;
+                };
+                let condition = breakpoint.condition.clone().unwrap_or_default();
+                self.open_prompt(PromptKind::BreakpointCondition);
+                if let Mode::Prompt(prompt) = &mut self.mode {
+                    prompt.set_text(condition);
+                }
+                Effect::None
+            }
+            Command::SetRegister => {
+                if !self.debugger.state().can_step() {
+                    return self.require_paused(Effect::None);
+                }
+                self.open_prompt(PromptKind::SetRegister)
             }
             Command::ClearBreakpoints => {
                 self.breakpoints.clear();
@@ -651,6 +714,87 @@ impl App {
                 self.cancel_overlay();
                 Effect::OpenFile(PathBuf::from(text))
             }
+            PromptKind::RenameFile => {
+                let Some(from) = self.workspace.active().path().map(Path::to_path_buf) else {
+                    self.cancel_overlay();
+                    return Effect::None;
+                };
+                if text.is_empty() {
+                    self.status = Status::error("Enter a file name");
+                    return Effect::None;
+                }
+                self.cancel_overlay();
+                let to = self.project.resolve(Path::new(&text));
+                if crate::editor::workspace::same_target(&from, &to) {
+                    return Effect::None;
+                }
+                Effect::RenameFile { from, to }
+            }
+            PromptKind::DeleteFile => {
+                self.cancel_overlay();
+                match (
+                    text.eq_ignore_ascii_case("yes"),
+                    self.workspace.active().path(),
+                ) {
+                    (true, Some(path)) => Effect::DeleteFile(path.to_path_buf()),
+                    _ => {
+                        self.status = Status::info("Nothing was deleted");
+                        Effect::None
+                    }
+                }
+            }
+            PromptKind::Watch => {
+                self.cancel_overlay();
+                if text.is_empty() {
+                    return Effect::None;
+                }
+                if !self.debugger.state().can_edit_breakpoints() {
+                    self.status =
+                        Status::warning("Cannot change breakpoints while the program runs");
+                    return Effect::None;
+                }
+                let expression = watch_expression(&text);
+                if self.breakpoints.add_watch(&expression) {
+                    self.status = Status::info(format!("Watching {expression}"));
+                    Effect::SyncBreakpoints
+                } else {
+                    self.status = Status::info(format!("{expression} is already watched"));
+                    Effect::None
+                }
+            }
+            PromptKind::BreakpointCondition => {
+                self.cancel_overlay();
+                if !self.debugger.state().can_edit_breakpoints() {
+                    self.status =
+                        Status::warning("Cannot change breakpoints while the program runs");
+                    return Effect::None;
+                }
+                let condition = (!text.is_empty()).then(|| watch_expression(&text));
+                self.breakpoints
+                    .set_condition(self.breakpoint_selected, condition.clone());
+                self.status = Status::info(match condition {
+                    Some(condition) => format!("Stops only if {condition}"),
+                    None => "Condition removed".to_owned(),
+                });
+                Effect::SyncBreakpoints
+            }
+            PromptKind::SetRegister => {
+                let Some((name, value)) = text.split_once('=') else {
+                    self.status = Status::error("Write it as rax=0x10");
+                    return Effect::None;
+                };
+                let name = name.trim().to_ascii_lowercase();
+                if !crate::instruction::registers::is_register(&name) {
+                    self.status = Status::error(format!("'{name}' is not a register"));
+                    return Effect::None;
+                }
+                let Some(value) = crate::learning::parse_answer(value.trim()) else {
+                    self.status = Status::error(format!("'{}' is not a number", value.trim()));
+                    return Effect::None;
+                };
+                self.cancel_overlay();
+                Effect::SetRegister(format!("${name} = {value}"))
+            }
             PromptKind::NewFile => {
                 if text.is_empty() {
                     self.status = Status::error("Enter a file name");
@@ -662,6 +806,121 @@ impl App {
                     line: 1,
                 }
             }
+        }
+    }
+
+    fn open_picker(&mut self, kind: PickerKind) -> Effect {
+        self.mode = Mode::Picker(Picker::new(kind));
+        self.refresh_picker();
+        Effect::None
+    }
+
+    /// Recomputes the open picker's matches for its query.
+    pub fn refresh_picker(&mut self) {
+        let Mode::Picker(picker) = &self.mode else {
+            return;
+        };
+        let query = picker.prompt().text().trim().to_owned();
+        let items = match picker.kind() {
+            PickerKind::Symbols => self.symbol_items(&query),
+            PickerKind::Search => self.search_items(&query),
+        };
+        if let Mode::Picker(picker) = &mut self.mode {
+            picker.set_items(items);
+        }
+    }
+
+    fn project_texts(&self) -> Vec<(PathBuf, String)> {
+        self.project_files
+            .iter()
+            .filter_map(|path| {
+                let text = match self.index_of_document(path) {
+                    Some(index) => self.workspace.documents()[index].buffer().to_text(),
+                    None => std::fs::read_to_string(path).ok()?,
+                };
+                Some((path.clone(), text))
+            })
+            .collect()
+    }
+
+    fn symbol_items(&self, query: &str) -> Vec<PickItem> {
+        let mut items = Vec::new();
+        for (path, text) in self.project_texts() {
+            let buffer = crate::editor::TextBuffer::from_text(&text);
+            for symbol in crate::editor::symbols::extract(&buffer) {
+                if !symbol.kind.is_definition() && symbol.kind != SymbolKind::Section {
+                    continue;
+                }
+                items.push(PickItem {
+                    label: symbol.qualified_name.clone(),
+                    detail: format!(
+                        "{} {}:{}",
+                        symbol.kind.description(),
+                        crate::editor::workspace::display_path(&path),
+                        symbol.position.line + 1
+                    ),
+                    path: path.clone(),
+                    line: symbol.position.line + 1,
+                });
+            }
+        }
+        let ranked =
+            crate::command::palette::rank(query, items.iter().map(|item| item.label.as_str()));
+        ranked
+            .into_iter()
+            .filter_map(|(index, _)| items.get(index).cloned())
+            .collect()
+    }
+
+    fn search_items(&self, query: &str) -> Vec<PickItem> {
+        const LIMIT: usize = 500;
+        if query.chars().count() < 2 {
+            return Vec::new();
+        }
+        let needle = query.to_lowercase();
+        let mut items = Vec::new();
+        for (path, text) in self.project_texts() {
+            for (index, line) in text.lines().enumerate() {
+                if line.to_lowercase().contains(&needle) {
+                    items.push(PickItem {
+                        label: line.trim().to_owned(),
+                        detail: format!(
+                            "{}:{}",
+                            crate::editor::workspace::display_path(&path),
+                            index + 1
+                        ),
+                        path: path.clone(),
+                        line: index + 1,
+                    });
+                    if items.len() == LIMIT {
+                        return items;
+                    }
+                }
+            }
+        }
+        items
+    }
+
+    /// Jumps to the picker's highlighted match.
+    pub fn accept_picker(&mut self) -> Effect {
+        let Mode::Picker(picker) = &self.mode else {
+            return Effect::None;
+        };
+        let Some(item) = picker.selected_item().cloned() else {
+            self.cancel_overlay();
+            return Effect::None;
+        };
+        self.cancel_overlay();
+        if self.show_file(&item.path) {
+            self.workspace.active_mut().reveal(item.line - 1);
+        }
+        self.focus_panel(Panel::Editor);
+        if self.debugger.state().is_session_active() {
+            return Effect::None;
+        }
+        Effect::Edit {
+            path: item.path,
+            line: item.line,
         }
     }
 
@@ -1515,6 +1774,67 @@ mod tests {
         assert_eq!(
             app.apply(&Command::ToggleBreakpoint),
             Effect::BreakpointAtEditorCursor
+        );
+    }
+
+    #[test]
+    fn the_pickers_find_symbols_and_text_across_the_project() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        std::fs::write(dir.path().join("a.asm"), "_start:\n    call helper\n").expect("write");
+        std::fs::write(dir.path().join("b.asm"), "nop\nhelper:\n    ret\n").expect("write");
+        let mut app = App::new(
+            Project::for_file(&dir.path().join("a.asm")),
+            Settings::default(),
+        )
+        .expect("app");
+        app.refresh_project_files();
+
+        app.apply(&Command::GoToSymbol);
+        if let Mode::Picker(picker) = &mut app.mode {
+            picker.prompt_mut().set_text("helpr");
+        }
+        app.refresh_picker();
+        let Mode::Picker(picker) = &app.mode else {
+            panic!("picker open");
+        };
+        let item = picker.selected_item().expect("a match").clone();
+        assert_eq!((item.label.as_str(), item.line), ("helper", 2));
+        assert!(item.path.ends_with("b.asm"));
+        assert_eq!(
+            app.accept_picker(),
+            Effect::Edit {
+                path: item.path,
+                line: 2
+            }
+        );
+
+        app.apply(&Command::SearchFiles);
+        if let Mode::Picker(picker) = &mut app.mode {
+            picker.prompt_mut().set_text("HELPER");
+        }
+        app.refresh_picker();
+        let Mode::Picker(picker) = &app.mode else {
+            panic!("picker open");
+        };
+        assert_eq!(picker.items().len(), 2);
+    }
+
+    #[test]
+    fn deleting_asks_for_yes() {
+        let mut app = app();
+        app.workspace.active_mut().set_path("/tmp/x.asm");
+        app.apply(&Command::DeleteFile);
+        if let Mode::Prompt(prompt) = &mut app.mode {
+            prompt.set_text("no");
+        }
+        assert_eq!(app.accept_prompt(), Effect::None);
+        app.apply(&Command::DeleteFile);
+        if let Mode::Prompt(prompt) = &mut app.mode {
+            prompt.set_text("YES");
+        }
+        assert_eq!(
+            app.accept_prompt(),
+            Effect::DeleteFile(PathBuf::from("/tmp/x.asm"))
         );
     }
 

@@ -284,6 +284,50 @@ impl Project {
         Ok(true)
     }
 
+    /// Points the project's entry or source naming `from` at `to` instead.
+    pub fn rename_source(&mut self, from: &Path, to: &Path) -> Result<bool, ProjectError> {
+        let (Some(from), Some(to)) = (self.relative(from), self.relative_target(to)) else {
+            return Err(ProjectError::OutsideRoot {
+                path: to.to_path_buf(),
+                root: self.root.clone(),
+            });
+        };
+        let project = &mut self.config.project;
+        let mut changed = false;
+        if project.entry == from {
+            project.entry.clone_from(&to);
+            changed = true;
+        }
+        for source in &mut project.sources {
+            if *source == from {
+                source.clone_from(&to);
+                changed = true;
+            }
+        }
+        Ok(changed)
+    }
+
+    /// Drops `path` from the extra sources; the entry cannot be dropped.
+    pub fn remove_source(&mut self, path: &Path) -> bool {
+        let Some(relative) = self.relative(path) else {
+            return false;
+        };
+        let before = self.config.project.sources.len();
+        self.config
+            .project
+            .sources
+            .retain(|source| *source != relative);
+        before != self.config.project.sources.len()
+    }
+
+    fn relative_target(&self, path: &Path) -> Option<PathBuf> {
+        let parent = path
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())?;
+        let name = path.file_name()?;
+        self.relative(parent).map(|parent| parent.join(name))
+    }
+
     /// The absolute paths of every source file.
     pub fn source_paths(&self) -> Vec<PathBuf> {
         self.config
@@ -406,6 +450,21 @@ fn absolute(path: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn renaming_a_source_follows_it_in_the_configuration() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let mut project = Project::create(dir.path(), "demo").expect("create");
+        let entry = project.entry_path();
+        let moved = entry.with_file_name("start.asm");
+        assert!(project.rename_source(&entry, &moved).expect("inside"));
+        assert_eq!(project.config().project.entry, Path::new("src/start.asm"));
+        let extra = dir.path().join("src/util.asm");
+        std::fs::write(&extra, "").expect("write");
+        project.add_source(&extra).expect("add");
+        assert!(project.remove_source(&extra));
+        assert!(!project.remove_source(&moved), "the entry stays");
+    }
 
     fn temp_dir() -> tempfile::TempDir {
         tempfile::tempdir().expect("temp dir")

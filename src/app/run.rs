@@ -302,6 +302,8 @@ fn terminal_escape(key: KeyEvent) -> Option<Command> {
         KeyCode::Char('o') => Command::OpenFile,
         KeyCode::Char('n') => Command::NewFile,
         KeyCode::Char('q') => Command::Quit,
+        KeyCode::Char('t') => Command::GoToSymbol,
+        KeyCode::Char('f') => Command::SearchFiles,
         KeyCode::Right => Command::NextPanel,
         KeyCode::Left => Command::PreviousPanel,
         _ => return None,
@@ -626,6 +628,28 @@ async fn perform(
 
         Effect::ReadMemory(address) => read_memory(app, session, address).await,
 
+        Effect::RenameFile { from, to } => {
+            rename_file(app, runtimes, &from, &to);
+            sync_breakpoints(app, session).await;
+        }
+        Effect::DeleteFile(path) => {
+            delete_file(app, &path);
+            sync_breakpoints(app, session).await;
+        }
+        Effect::SetRegister(expression) => match session.as_mut() {
+            Some(active) => match active
+                .execute(&mi::data_evaluate_expression(&expression))
+                .await
+            {
+                Ok(_) => {
+                    refresh_state(app, session).await;
+                    app.status = Status::success(format!("Set {expression}"));
+                }
+                Err(error) => app.status = Status::error(error.to_string()),
+            },
+            None => app.status = Status::warning("No debug session"),
+        },
+
         Effect::RunScratchpad => {
             if runtimes.background.is_busy() || runtimes.debugger.is_busy() {
                 app.status = Status::warning("Something is already running");
@@ -747,6 +771,82 @@ fn finish_editor_event(app: &mut App, runtimes: &mut Runtimes, event: PtyEvent) 
         }
         PtyEvent::Closed => {}
     }
+}
+
+fn editing_now(app: &App, path: &Path) -> bool {
+    app.editor_screen.is_some()
+        && app
+            .editing
+            .as_deref()
+            .is_some_and(|editing| workspace::same_target(editing, path))
+}
+
+fn rename_file(app: &mut App, runtimes: &Runtimes, from: &Path, to: &Path) {
+    let program = editor::resolve(&app.settings.editor);
+    if editing_now(app, from) && runtimes.remote.is_none() {
+        app.status = Status::warning(format!("Quit {} before renaming the file", program.name()));
+        return;
+    }
+    if to.exists() {
+        app.status = Status::error(format!("{} already exists", workspace::display_path(to)));
+        return;
+    }
+    if let Some(parent) = to.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    if let Err(error) = std::fs::rename(from, to) {
+        app.status = Status::error(format!("cannot rename: {error}"));
+        return;
+    }
+    if let Some(index) = app.index_of_document(from) {
+        app.workspace.set_active(index);
+        app.workspace.active_mut().set_path(to);
+    }
+    if editing_now(app, from) {
+        app.editing = Some(to.to_path_buf());
+    }
+    app.breakpoints.move_file(from, Some(to));
+    let mut status = Status::success(format!("Renamed to {}", workspace::display_path(to)));
+    match app.project.rename_source(from, to) {
+        Ok(true) => {
+            if let Err(error) = app.project.save() {
+                status = Status::error(error.to_string());
+            }
+        }
+        Ok(false) => {}
+        Err(error) => status = Status::warning(error.to_string()),
+    }
+    app.status = status;
+    app.refresh_project_files();
+}
+
+fn delete_file(app: &mut App, path: &Path) {
+    let program = editor::resolve(&app.settings.editor);
+    if editing_now(app, path) {
+        app.status = Status::warning(format!("Quit {} before deleting the file", program.name()));
+        return;
+    }
+    if workspace::same_target(path, &app.project.entry_path()) {
+        app.status =
+            Status::warning("The entry file cannot be deleted; change project.entry first");
+        return;
+    }
+    if let Err(error) = std::fs::remove_file(path) {
+        app.status = Status::error(format!("cannot delete: {error}"));
+        return;
+    }
+    if let Some(index) = app.index_of_document(path) {
+        let _ = app.workspace.close(index);
+    }
+    app.breakpoints.move_file(path, None);
+    let mut status = Status::warning(format!("Deleted {}", workspace::display_path(path)));
+    if app.project.remove_source(path) {
+        if let Err(error) = app.project.save() {
+            status = Status::error(error.to_string());
+        }
+    }
+    app.status = status;
+    app.refresh_project_files();
 }
 
 /// Sends breakpoint and error marks to a driven editor when they change.
@@ -1068,25 +1168,11 @@ async fn start_session(
     }
 
     app.breakpoints.detach();
-    let mut placed = Vec::new();
-    for location in app.pending_breakpoints() {
-        match active
-            .execute(&mi::break_insert(&location.to_gdb_location()))
-            .await
-        {
-            Ok(record) => {
-                if let Some(bkpt) = record.get("bkpt") {
-                    placed.push((location, bkpt.clone()));
-                }
-            }
-            Err(error) => {
-                tracing::warn!(%error, "breakpoint rejected");
-            }
-        }
-    }
-    for (location, record) in placed {
-        app.breakpoints.adopt(&location, &record);
-    }
+    let mut holder = Some(active);
+    sync_breakpoints(app, &mut holder).await;
+    let Some(mut active) = holder else {
+        return;
+    };
 
     match disassembler::ElfImage::load(&executable) {
         Ok(image) => {
@@ -1380,19 +1466,58 @@ async fn sync_breakpoints(app: &mut App, session: &mut Option<GdbSession>) {
         return;
     };
 
+    for number in app.breakpoints.take_removed() {
+        let _ = active.execute(&mi::break_delete(number)).await;
+    }
     let mut placed = Vec::new();
-    for location in app.pending_breakpoints() {
-        if let Ok(record) = active
-            .execute(&mi::break_insert(&location.to_gdb_location()))
-            .await
-        {
-            if let Some(bkpt) = record.get("bkpt") {
-                placed.push((location, bkpt.clone()));
+    let mut rejected = None;
+    for breakpoint in app.breakpoints.pending() {
+        let location = breakpoint.location.clone();
+        let command = match &location {
+            crate::debugger::breakpoints::Location::Watch(expression) => {
+                mi::break_watch(expression)
+            }
+            _ => mi::break_insert_with(
+                &location.to_gdb_location(),
+                breakpoint.enabled,
+                breakpoint.condition.as_deref(),
+            ),
+        };
+        let watch = matches!(location, crate::debugger::breakpoints::Location::Watch(_));
+        match active.execute(&command).await {
+            Ok(record) => {
+                if let Some(bkpt) = record.get("bkpt").or_else(|| record.get("wpt")) {
+                    placed.push((location, bkpt.clone(), watch));
+                }
+            }
+            Err(error) => rejected = Some(format!("{}: {error}", location.display())),
+        }
+    }
+    for (location, record, watch) in placed {
+        app.breakpoints.adopt(&location, &record);
+        if watch {
+            if let Some(number) = record.get_int("number").and_then(|n| u32::try_from(n).ok()) {
+                app.breakpoints.mark_synced(number, true, None);
             }
         }
     }
-    for (location, record) in placed {
-        app.breakpoints.adopt(&location, &record);
+    for (number, enabled, condition) in app.breakpoints.out_of_sync() {
+        let toggled = if enabled {
+            mi::break_enable(number)
+        } else {
+            mi::break_disable(number)
+        };
+        let applied = active.execute(&toggled).await.is_ok()
+            && active
+                .execute(&mi::break_condition(number, condition.as_deref()))
+                .await
+                .is_ok();
+        if applied {
+            app.breakpoints.mark_synced(number, enabled, condition);
+        }
+    }
+    if let Some(message) = rejected {
+        app.status = Status::error(message);
     }
 }
 
@@ -1977,6 +2102,56 @@ mod tests {
             "the message should name the setting: {}",
             app.status.text
         );
+    }
+
+    #[tokio::test]
+    async fn breakpoint_edits_and_register_writes_reach_gdb() {
+        for tool in ["nasm", "ld", "gdb"] {
+            if !crate::process::is_available(Path::new(tool)) {
+                eprintln!("skipping: {tool} not installed");
+                return;
+            }
+        }
+        let dir = tempfile::tempdir().expect("temp dir");
+        let mut app = app_for(dir.path());
+        app.settings.debugger.record = false;
+        let entry = app.project.entry_path();
+        std::fs::write(
+            &entry,
+            "global _start\n_start:\n    mov rcx, 5\nagain:\n    dec rcx\n    jnz again\n    \
+             mov eax, 60\n    mov rdi, rbx\n    syscall\n",
+        )
+        .expect("write");
+        app.workspace.open(&entry).expect("open");
+        app.toggle_breakpoint_in(&entry, 5);
+        app.breakpoints
+            .set_condition(0, Some("$rcx == 2".to_owned()));
+
+        let mut session = None;
+        let (mut terminal, _events) = start_test_session(&mut app, &mut session).await;
+        assert!(session.is_some(), "{}", app.status.text);
+        settle(&mut app, &mut session, Effect::DebugContinue).await;
+        assert_eq!(
+            app.registers.value_of("rcx"),
+            Some(2),
+            "{}",
+            app.status.text
+        );
+
+        settle(
+            &mut app,
+            &mut session,
+            Effect::SetRegister("$rbx = 9".into()),
+        )
+        .await;
+        assert_eq!(app.registers.value_of("rbx"), Some(9));
+
+        app.breakpoints.toggle_line(&entry, 5);
+        settle(&mut app, &mut session, Effect::SyncBreakpoints).await;
+        settle(&mut app, &mut session, Effect::DebugContinue).await;
+        assert!(session.is_none(), "{}", app.status.text);
+        assert!(app.status.text.contains('9'), "{}", app.status.text);
+        terminal.abort();
     }
 
     #[tokio::test]

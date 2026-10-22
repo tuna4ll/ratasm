@@ -239,6 +239,32 @@ pub fn break_insert(location: &str) -> Command {
     Command::new("-break-insert").arg(location)
 }
 
+/// Sets a breakpoint that may start disabled or carry a condition.
+pub fn break_insert_with(location: &str, enabled: bool, condition: Option<&str>) -> Command {
+    let mut command = Command::new("-break-insert");
+    if !enabled {
+        command = command.arg("-d");
+    }
+    if let Some(condition) = condition {
+        command = command.arg("-c").arg(condition);
+    }
+    command.arg(location)
+}
+
+/// Sets a watchpoint that stops when `expression` changes.
+pub fn break_watch(expression: &str) -> Command {
+    Command::new("-break-watch").arg(expression)
+}
+
+/// Sets or, with `None`, clears a breakpoint's condition.
+pub fn break_condition(number: u32, condition: Option<&str>) -> Command {
+    let command = Command::new("-break-condition").arg(number.to_string());
+    match condition {
+        Some(condition) => command.arg(condition),
+        None => command,
+    }
+}
+
 /// Sets a breakpoint at a file and line.
 pub fn break_insert_at_line(file: &str, line: usize) -> Command {
     Command::new("-break-insert").arg(format!("{file}:{line}"))

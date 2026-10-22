@@ -629,7 +629,88 @@ pub fn draw_overlay(frame: &mut Frame, app: &App, area: Rect) {
         Mode::Normal => {}
         Mode::Prompt(prompt) => draw_prompt(frame, app, area, prompt),
         Mode::Palette(palette) => draw_palette(frame, app, area, palette),
+        Mode::Picker(picker) => draw_picker(frame, app, area, picker),
     }
+}
+
+fn draw_picker(frame: &mut Frame, app: &App, area: Rect, picker: &crate::app::mode::Picker) {
+    let theme = &app.theme;
+    let symbols = theme.symbols();
+    if area.width < 30 || area.height < 8 {
+        return;
+    }
+    let width = area.width.saturating_sub(8).min(110);
+    let height = area.height.saturating_sub(6).min(24);
+    let rect = Rect::new(area.x + (area.width - width) / 2, area.y + 2, width, height);
+    frame.render_widget(Clear, rect);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(theme.border(true))
+        .title(Span::styled(
+            format!(" {} ", picker.kind().title()),
+            theme.title(true),
+        ));
+    let inner = block.inner(rect);
+    frame.render_widget(block, rect);
+    if inner.height < 2 {
+        return;
+    }
+    let rows = RatatuiLayout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(1), Constraint::Min(1)])
+        .split(inner);
+
+    let query = if picker.prompt().is_empty() {
+        Span::styled(picker.kind().hint(), theme.dim())
+    } else {
+        Span::styled(picker.prompt().text().to_owned(), theme.base())
+    };
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![Span::styled("> ", theme.accent()), query])),
+        rows[0],
+    );
+    let x = rows[0].x + 2 + picker.prompt().cursor() as u16;
+    if x < rows[0].x + rows[0].width {
+        frame.set_cursor_position((x, rows[0].y));
+    }
+
+    if picker.items().is_empty() {
+        let text = if picker.prompt().is_empty() {
+            ""
+        } else {
+            "No matches."
+        };
+        frame.render_widget(Paragraph::new(Span::styled(text, theme.dim())), rows[1]);
+        return;
+    }
+
+    let height = usize::from(rows[1].height);
+    let selected = picker.selected();
+    let first = selected
+        .saturating_sub(height / 2)
+        .min(picker.items().len().saturating_sub(height));
+    let lines: Vec<Line> = picker
+        .items()
+        .iter()
+        .enumerate()
+        .skip(first)
+        .take(height)
+        .map(|(index, item)| {
+            let active = index == selected;
+            let marker = if active { symbols.selection } else { " " };
+            let style = if active {
+                theme.selection()
+            } else {
+                theme.base()
+            };
+            Line::from(vec![
+                Span::styled(format!("{marker} {}", item.label), style),
+                Span::styled(format!("  {}", item.detail), theme.dim()),
+            ])
+        })
+        .collect();
+    frame.render_widget(Paragraph::new(lines), rows[1]);
 }
 
 /// Draws a single-line prompt near the bottom of the screen.

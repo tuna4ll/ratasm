@@ -67,6 +67,10 @@ pub enum Command {
     OpenFile,
     /// Close the active buffer.
     CloseFile,
+    /// Rename file.
+    RenameFile,
+    /// Delete file.
+    DeleteFile,
     /// Add the active buffer's file to the project's sources.
     AddToProject,
     /// Leave the application.
@@ -104,6 +108,10 @@ pub enum Command {
     GoToAddress,
     /// Jump to the first error from the last build.
     GoToFirstError,
+    /// Go to symbol.
+    GoToSymbol,
+    /// Search in files.
+    SearchFiles,
 
     /// Assemble and link.
     Build,
@@ -140,6 +148,12 @@ pub enum Command {
     ToggleBreakpoint,
     /// Remove every breakpoint.
     ClearBreakpoints,
+    /// Watch an expression.
+    AddWatchpoint,
+    /// Set breakpoint condition.
+    SetBreakpointCondition,
+    /// Set a register.
+    SetRegister,
 
     /// Change how register values are displayed.
     CycleRegisterFormat,
@@ -171,6 +185,8 @@ impl Command {
             Command::OpenFile,
             Command::AddToProject,
             Command::CloseFile,
+            Command::RenameFile,
+            Command::DeleteFile,
             Command::Quit,
             Command::NextPanel,
             Command::PreviousPanel,
@@ -184,6 +200,8 @@ impl Command {
             Command::ScrollToEnd,
             Command::GoToAddress,
             Command::GoToFirstError,
+            Command::GoToSymbol,
+            Command::SearchFiles,
             Command::Build,
             Command::BuildWithDebugInfo,
             Command::Run,
@@ -201,6 +219,9 @@ impl Command {
             Command::DebugStop,
             Command::ToggleBreakpoint,
             Command::ClearBreakpoints,
+            Command::AddWatchpoint,
+            Command::SetBreakpointCondition,
+            Command::SetRegister,
             Command::CycleRegisterFormat,
             Command::ToggleDisassemblySyntax,
             Command::CycleTheme,
@@ -224,6 +245,8 @@ impl Command {
             Command::OpenFile => "file.open".into(),
             Command::AddToProject => "file.add-to-project".into(),
             Command::CloseFile => "file.close".into(),
+            Command::RenameFile => "file.rename".into(),
+            Command::DeleteFile => "file.delete".into(),
             Command::Quit => "app.quit".into(),
 
             Command::GoToPage(page) => format!("navigate.page.{}", page.id()),
@@ -242,6 +265,8 @@ impl Command {
             Command::ScrollToEnd => "navigate.scroll-to-end".into(),
             Command::GoToAddress => "navigate.go-to-address".into(),
             Command::GoToFirstError => "navigate.go-to-first-error".into(),
+            Command::GoToSymbol => "navigate.go-to-symbol".into(),
+            Command::SearchFiles => "navigate.search".into(),
 
             Command::Build => "build.build".into(),
             Command::BuildWithDebugInfo => "build.build-debug".into(),
@@ -261,6 +286,9 @@ impl Command {
             Command::DebugStop => "debug.stop".into(),
             Command::ToggleBreakpoint => "debug.toggle-breakpoint".into(),
             Command::ClearBreakpoints => "debug.clear-breakpoints".into(),
+            Command::AddWatchpoint => "debug.watch".into(),
+            Command::SetBreakpointCondition => "debug.condition".into(),
+            Command::SetRegister => "debug.set-register".into(),
 
             Command::CycleRegisterFormat => "view.cycle-register-format".into(),
             Command::ToggleDisassemblySyntax => "view.toggle-disassembly-syntax".into(),
@@ -283,6 +311,8 @@ impl Command {
             Command::OpenFile => "Open file".into(),
             Command::AddToProject => "Add to project".into(),
             Command::CloseFile => "Close file".into(),
+            Command::RenameFile => "Rename file".into(),
+            Command::DeleteFile => "Delete file".into(),
             Command::Quit => "Quit".into(),
 
             Command::GoToPage(page) => format!("{} page", page.title()),
@@ -301,6 +331,8 @@ impl Command {
             Command::PreviousDocument => "Previous document".into(),
             Command::GoToAddress => "Go to address".into(),
             Command::GoToFirstError => "Go to first error".into(),
+            Command::GoToSymbol => "Go to symbol".into(),
+            Command::SearchFiles => "Search in files".into(),
 
             Command::Build => "Build".into(),
             Command::BuildWithDebugInfo => "Build with debug info".into(),
@@ -320,6 +352,9 @@ impl Command {
             Command::DebugStop => "Stop debugging".into(),
             Command::ToggleBreakpoint => "Toggle breakpoint".into(),
             Command::ClearBreakpoints => "Clear all breakpoints".into(),
+            Command::AddWatchpoint => "Watch an expression".into(),
+            Command::SetBreakpointCondition => "Set breakpoint condition".into(),
+            Command::SetRegister => "Set a register".into(),
 
             Command::CycleRegisterFormat => "Change register format".into(),
             Command::ToggleDisassemblySyntax => "Toggle Intel/AT&T syntax".into(),
@@ -359,6 +394,10 @@ impl Command {
             Command::ToggleBreakpoint => "Add or remove a breakpoint on a line you name".into(),
             Command::GoToAddress => "Show an address in the memory panel; accepts rsp-0x20".into(),
             Command::GoToFirstError => "Show the first error from the last build".into(),
+            Command::GoToSymbol => {
+                "Jump to a label, constant or macro anywhere in the project".into()
+            }
+            Command::SearchFiles => "Find text in every source file of the project".into(),
             Command::CycleRegisterFormat => "Hexadecimal, decimal, signed, binary or ASCII".into(),
             Command::ToggleDisassemblySyntax => {
                 "Intel puts the destination first; AT&T puts the source first".into()
@@ -381,7 +420,9 @@ impl Command {
             | Command::EditFile
             | Command::OpenFile
             | Command::AddToProject
-            | Command::CloseFile => Category::File,
+            | Command::CloseFile
+            | Command::RenameFile
+            | Command::DeleteFile => Category::File,
 
             Command::GoToPage(_)
             | Command::NextPage
@@ -393,6 +434,8 @@ impl Command {
             | Command::PreviousDocument
             | Command::GoToAddress
             | Command::GoToFirstError
+            | Command::GoToSymbol
+            | Command::SearchFiles
             | Command::ScrollUp
             | Command::ScrollDown
             | Command::ScrollPageUp
@@ -416,7 +459,10 @@ impl Command {
             | Command::ReverseContinue
             | Command::DebugStop
             | Command::ToggleBreakpoint
-            | Command::ClearBreakpoints => Category::Debug,
+            | Command::ClearBreakpoints
+            | Command::AddWatchpoint
+            | Command::SetBreakpointCondition
+            | Command::SetRegister => Category::Debug,
 
             Command::CycleRegisterFormat
             | Command::ToggleDisassemblySyntax
@@ -436,7 +482,16 @@ impl Command {
     pub fn prompts_for_input(&self) -> bool {
         matches!(
             self,
-            Command::OpenFile | Command::NewFile | Command::GoToAddress | Command::ToggleBreakpoint
+            Command::OpenFile
+                | Command::NewFile
+                | Command::GoToAddress
+                | Command::RenameFile
+                | Command::DeleteFile
+                | Command::GoToSymbol
+                | Command::SearchFiles
+                | Command::AddWatchpoint
+                | Command::SetBreakpointCondition
+                | Command::SetRegister
         )
     }
 
@@ -573,7 +628,8 @@ mod tests {
 
     #[test]
     fn commands_that_ask_for_a_value_are_marked() {
-        assert!(Command::ToggleBreakpoint.prompts_for_input());
+        assert!(!Command::ToggleBreakpoint.prompts_for_input());
+        assert!(Command::AddWatchpoint.prompts_for_input());
         assert!(Command::GoToAddress.prompts_for_input());
         assert!(Command::OpenFile.prompts_for_input());
         assert!(!Command::EditFile.prompts_for_input());

@@ -13,6 +13,16 @@ pub enum PromptKind {
     BreakpointLine,
     /// An address expression.
     GoToAddress,
+    /// The new name of the active file.
+    RenameFile,
+    /// Confirmation that the active file should be deleted.
+    DeleteFile,
+    /// An expression to watch.
+    Watch,
+    /// The selected breakpoint's condition.
+    BreakpointCondition,
+    /// A register assignment.
+    SetRegister,
 }
 
 impl PromptKind {
@@ -23,6 +33,11 @@ impl PromptKind {
             PromptKind::NewFile => "New file",
             PromptKind::BreakpointLine => "Toggle breakpoint at line",
             PromptKind::GoToAddress => "Go to address",
+            PromptKind::RenameFile => "Rename to",
+            PromptKind::DeleteFile => "Delete the file? Type yes",
+            PromptKind::Watch => "Watch",
+            PromptKind::BreakpointCondition => "Stop only if",
+            PromptKind::SetRegister => "Set register",
         }
     }
 
@@ -33,12 +48,20 @@ impl PromptKind {
             PromptKind::NewFile => "path of the file to create",
             PromptKind::BreakpointLine => "line number",
             PromptKind::GoToAddress => "0x4000b0, rsp-0x20, rbp+8",
+            PromptKind::RenameFile => "new path",
+            PromptKind::DeleteFile => "yes",
+            PromptKind::Watch => "$rax, (int)counter, *(long *)0x402000",
+            PromptKind::BreakpointCondition => "$rcx == 3; empty removes it",
+            PromptKind::SetRegister => "rax=0x10",
         }
     }
 
     /// Whether Tab should complete the input against the filesystem.
     pub const fn completes_paths(self) -> bool {
-        matches!(self, PromptKind::OpenFile | PromptKind::NewFile)
+        matches!(
+            self,
+            PromptKind::OpenFile | PromptKind::NewFile | PromptKind::RenameFile
+        )
     }
 }
 
@@ -231,6 +254,117 @@ impl Palette {
     }
 }
 
+/// What a picker lists.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PickerKind {
+    /// Symbols defined anywhere in the project.
+    Symbols,
+    /// Lines containing the query in any project file.
+    Search,
+}
+
+impl PickerKind {
+    /// The title of the picker.
+    pub const fn title(self) -> &'static str {
+        match self {
+            PickerKind::Symbols => "Go to symbol",
+            PickerKind::Search => "Search in files",
+        }
+    }
+
+    /// A hint shown when the query is empty.
+    pub const fn hint(self) -> &'static str {
+        match self {
+            PickerKind::Symbols => "type part of a label, constant or macro",
+            PickerKind::Search => "type at least two characters",
+        }
+    }
+}
+
+/// A place a picker can jump to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PickItem {
+    /// The main text.
+    pub label: String,
+    /// Where it is, shown dimmed.
+    pub detail: String,
+    /// The file.
+    pub path: std::path::PathBuf,
+    /// The one-based line.
+    pub line: usize,
+}
+
+/// A query and the places that match it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Picker {
+    kind: PickerKind,
+    prompt: Prompt,
+    items: Vec<PickItem>,
+    selected: usize,
+}
+
+impl Picker {
+    /// An empty picker of `kind`.
+    pub fn new(kind: PickerKind) -> Self {
+        Self {
+            kind,
+            prompt: Prompt::default(),
+            items: Vec::new(),
+            selected: 0,
+        }
+    }
+
+    /// What it lists.
+    pub fn kind(&self) -> PickerKind {
+        self.kind
+    }
+
+    /// The query prompt.
+    pub fn prompt(&self) -> &Prompt {
+        &self.prompt
+    }
+
+    /// The query prompt, mutably.
+    pub fn prompt_mut(&mut self) -> &mut Prompt {
+        &mut self.prompt
+    }
+
+    /// The matches, best first.
+    pub fn items(&self) -> &[PickItem] {
+        &self.items
+    }
+
+    /// Replaces the matches, highlighting the first.
+    pub fn set_items(&mut self, items: Vec<PickItem>) {
+        self.items = items;
+        self.selected = 0;
+    }
+
+    /// The index of the highlighted match.
+    pub fn selected(&self) -> usize {
+        self.selected
+    }
+
+    /// The highlighted match.
+    pub fn selected_item(&self) -> Option<&PickItem> {
+        self.items.get(self.selected)
+    }
+
+    /// Highlights the next match, wrapping around.
+    pub fn select_next(&mut self) {
+        if !self.items.is_empty() {
+            self.selected = (self.selected + 1) % self.items.len();
+        }
+    }
+
+    /// Highlights the previous match, wrapping around.
+    pub fn select_previous(&mut self) {
+        if !self.items.is_empty() {
+            self.selected = (self.selected + self.items.len() - 1) % self.items.len();
+        }
+    }
+}
+
 /// What the interface is doing.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum Mode {
@@ -241,6 +375,8 @@ pub enum Mode {
     Palette(Palette),
     /// A prompt is open, and what to do with the answer.
     Prompt(Prompt),
+    /// A picker is open.
+    Picker(Picker),
 }
 
 impl Mode {
@@ -254,6 +390,7 @@ impl Mode {
         match self {
             Mode::Prompt(prompt) => Some(prompt),
             Mode::Palette(palette) => Some(palette.prompt()),
+            Mode::Picker(picker) => Some(picker.prompt()),
             Mode::Normal => None,
         }
     }
