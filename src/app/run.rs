@@ -1319,7 +1319,12 @@ async fn refresh_state(app: &mut App, session: &mut Option<GdbSession>) {
         }
     }
 
-    if let Some(rip) = app.registers.rip() {
+    let listed = |rip: u64| {
+        app.disassembly
+            .iter()
+            .any(|line| line.instruction.address == rip)
+    };
+    if let Some(rip) = app.registers.rip().filter(|rip| !listed(*rip)) {
         let window = 128u64;
         if let Ok(record) = active
             .execute(&mi::data_read_memory_bytes(rip, window as usize))
@@ -1908,7 +1913,7 @@ mod tests {
         assert_eq!(explanation.mnemonic, "add");
         assert_eq!(
             explanation.concrete.as_deref(),
-            Some("0x1 ← 0x1 + 0x2"),
+            Some("RAX ← 0x1 + 0x2"),
             "the explainer should be reading live registers"
         );
 
