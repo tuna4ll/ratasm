@@ -286,7 +286,10 @@ impl Explanation {
     /// to resolve — showing `[rbx+8]` unchanged is honest, whereas printing a
     /// guessed address would not be.
     pub fn with_values(mut self, values: &dyn RegisterValues) -> Self {
-        let mut concrete = self.effect.clone();
+        let (written, mut concrete) = match self.effect.split_once(" ← ") {
+            Some((written, read)) => (Some(written.to_owned()), read.to_owned()),
+            None => (None, self.effect.clone()),
+        };
         let mut substituted = false;
 
         // Longest names first, so replacing RAX never corrupts a preceding
@@ -306,6 +309,9 @@ impl Explanation {
             substituted = true;
         }
 
+        if let Some(written) = written {
+            concrete = format!("{written} ← {concrete}");
+        }
         self.concrete = (substituted && concrete != self.effect).then_some(concrete);
         self
     }
@@ -605,7 +611,6 @@ mod tests {
 
     #[test]
     fn live_values_replace_register_names() {
-        // The whole point: RAX ← RAX + RBX becomes RAX ← 0x1 + 0x2.
         let values = Values(vec![("rax", 1), ("rbx", 2)]);
         let explanation = explain("add rax, rbx").with_values(&values);
 
@@ -613,16 +618,14 @@ mod tests {
             explanation.effect, "RAX ← RAX + RBX",
             "symbolic form is kept"
         );
-        assert_eq!(explanation.concrete.as_deref(), Some("0x1 ← 0x1 + 0x2"));
+        assert_eq!(explanation.concrete.as_deref(), Some("RAX ← 0x1 + 0x2"));
     }
 
     #[test]
     fn a_register_with_no_known_value_is_left_symbolic() {
-        // Half the operands known is still worth showing; inventing the other
-        // half would not be.
         let values = Values(vec![("rax", 1)]);
         let explanation = explain("add rax, rbx").with_values(&values);
-        assert_eq!(explanation.concrete.as_deref(), Some("0x1 ← 0x1 + RBX"));
+        assert_eq!(explanation.concrete.as_deref(), Some("RAX ← 0x1 + RBX"));
     }
 
     #[test]
@@ -633,36 +636,29 @@ mod tests {
 
     #[test]
     fn substituting_a_short_name_does_not_corrupt_a_longer_one() {
-        // Replacing AX inside RAX would produce nonsense; the boundary check
-        // is what prevents it.
         let values = Values(vec![("rax", 0x1122)]);
         let explanation = explain("mov rax, rax").with_values(&values);
-        let concrete = explanation.concrete.expect("a concrete form");
-        assert_eq!(concrete, "0x1122 ← 0x1122");
-        assert!(
-            !concrete.contains('R'),
-            "no register name survived: {concrete}"
-        );
+        assert_eq!(explanation.concrete.as_deref(), Some("RAX ← 0x1122"));
     }
 
     #[test]
-    fn an_immediate_operand_is_left_as_written() {
+    fn the_written_register_keeps_its_name() {
         let values = Values(vec![("rax", 5)]);
-        let explanation = explain("mov rax, 60").with_values(&values);
-        assert_eq!(explanation.concrete.as_deref(), Some("0x5 ← 60"));
+        assert!(explain("mov rax, 60")
+            .with_values(&values)
+            .concrete
+            .is_none());
+        let explanation = explain("lea rsi, [rel message]").with_values(&values);
+        assert!(explanation.concrete.is_none(), "{:?}", explanation.concrete);
     }
 
     #[test]
     fn a_memory_operand_is_not_guessed_at() {
-        // Resolving [rbx+8] would need a memory read; printing an address we
-        // did not read would be a fabrication.
         let values = Values(vec![("rax", 1), ("rbx", 0x7fff)]);
         let explanation = explain("mov rax, [rbx+8]").with_values(&values);
-        let concrete = explanation.concrete.expect("a concrete form");
-        assert!(
-            concrete.contains("[rbx+8]"),
-            "memory operand changed: {concrete}"
-        );
+        assert!(explanation
+            .concrete
+            .is_none_or(|concrete| concrete.contains("[rbx+8]")));
     }
 
     #[test]
