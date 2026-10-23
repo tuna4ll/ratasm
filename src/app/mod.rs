@@ -5,6 +5,7 @@ pub mod page;
 pub mod panel;
 pub mod run;
 pub mod scroll;
+pub mod session;
 pub mod state;
 pub mod terminal;
 

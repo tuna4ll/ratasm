@@ -192,3 +192,11 @@ The TUI owns the terminal, so logs never go to the console. Without
 
 `build` and `run` exit non-zero when the build fails or the program does, so
 they compose with Make and CI.
+
+## Sessions
+
+When ratasm exits it records the files it had open and every breakpoint,
+watchpoint and condition in `$XDG_STATE_HOME/ratasm/sessions/` (by default
+`~/.local/state/ratasm/sessions/`), one file per project root. The next start
+in the same project restores them. Naming files on the command line restores
+only the breakpoints. Delete the file to start fresh.

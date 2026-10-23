@@ -270,6 +270,9 @@ async fn open_interface(paths: &[PathBuf]) -> Result<ExitCode> {
     }
 
     app.workspace.set_active(0);
+    if let Some(path) = ratasm::app::session::path_for(app.project.root()) {
+        ratasm::app::session::restore(&mut app, &path, files.is_empty());
+    }
     app.refresh_project_files();
 
     let mut guard = ratasm::ui::TerminalGuard::new()

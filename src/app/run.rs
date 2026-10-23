@@ -235,6 +235,14 @@ pub async fn run(mut app: App, terminal: &mut Tui) -> Result<()> {
     runtimes.background.abort();
     runtimes.debugger.abort();
     runtimes.editor.abort();
+    if let Some(remote) = runtimes.remote.take() {
+        remote.close();
+    }
+    if let Some(path) = super::session::path_for(app.project.root()) {
+        if let Err(error) = super::session::save(&app, &path) {
+            tracing::warn!(%error, "cannot save the session");
+        }
+    }
 
     if let Some(session) = session {
         session.shutdown().await;
