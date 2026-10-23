@@ -252,10 +252,7 @@ pub async fn run(mut app: App, terminal: &mut Tui) -> Result<()> {
 
 /// Applies one key event.
 fn handle_key_event(app: &mut App, runtimes: &Runtimes, key: KeyEvent) -> Effect {
-    let in_terminal = !app.mode.is_overlay()
-        && ((app.shows_editor() && app.focus == super::Panel::Editor)
-            || (app.terminal.is_some() && app.focus == super::Panel::Output));
-    if in_terminal && key.kind != KeyEventKind::Release {
+    if !app.mode.is_overlay() && key.kind != KeyEventKind::Release {
         if let Some(command) = terminal_escape(key) {
             return app.apply(&command);
         }

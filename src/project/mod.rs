@@ -264,7 +264,11 @@ impl Project {
     /// Expresses `path` relative to the project root, if it is inside it.
     pub fn relative(&self, path: &Path) -> Option<PathBuf> {
         if path.is_relative() {
-            return Some(path.to_path_buf());
+            return Some(
+                path.components()
+                    .filter(|part| !matches!(part, std::path::Component::CurDir))
+                    .collect(),
+            );
         }
         let root = self
             .root
@@ -464,6 +468,14 @@ fn absolute(path: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_dot_prefixed_source_is_still_built() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let project = Project::create(dir.path(), "demo").expect("create");
+        assert!(project.builds(Path::new("./src/main.asm")));
+        assert!(project.builds(Path::new("src/main.asm")));
+    }
 
     #[test]
     fn renaming_a_source_follows_it_in_the_configuration() {

@@ -177,7 +177,8 @@ running, debugging and changing page still work.
 | <kbd>Alt</kbd>+<kbd>T</kbd> / <kbd>Alt</kbd>+<kbd>F</kbd> | Go to symbol / search in files |
 | <kbd>Alt</kbd>+<kbd>Q</kbd> | Quit |
 
-The same chords work while a program owns the Output terminal.
+The same chords work everywhere else too, including while a program owns the
+Output terminal.
 
 The command goes through `sh -c`, so a value such as `emacsclient -t` works.
 Editors known to take `+LINE` (vim, neovim, nano, emacs, micro, kakoune and a
