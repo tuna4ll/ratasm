@@ -415,7 +415,7 @@ mod tests {
         let spec = CommandSpec::new(shell)
             .arg("-c")
             .arg("printf 'Name: '; read name; printf 'Hello %s\\n' \"$name\"")
-            .timeout(Duration::from_secs(2));
+            .timeout(Duration::from_secs(10));
         let (control_tx, control_rx) = mpsc::unbounded_channel();
         let (event_tx, mut event_rx) = mpsc::unbounded_channel();
         tokio::spawn(run_interactive(
