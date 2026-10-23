@@ -43,6 +43,9 @@ enum Command {
         /// Directory to create the project in.
         #[arg(value_name = "NAME")]
         name: String,
+        /// Start from a `main` that calls printf, linked with libc by gcc.
+        #[arg(long)]
+        libc: bool,
     },
     /// Assemble and link the project, then exit.
     Build {
@@ -92,7 +95,7 @@ fn run(cli: Cli) -> Result<ExitCode> {
         .context("cannot start the async runtime")?;
 
     match cli.command {
-        Some(Command::New { name }) => runtime.block_on(async { new_project(&name) }),
+        Some(Command::New { name, libc }) => runtime.block_on(async { new_project(&name, libc) }),
         Some(Command::Build { path, debug }) => {
             runtime.block_on(build_project(path.as_deref(), debug))
         }
@@ -103,14 +106,19 @@ fn run(cli: Cli) -> Result<ExitCode> {
 }
 
 /// Creates a project directory and reports what was written.
-fn new_project(name: &str) -> Result<ExitCode> {
+fn new_project(name: &str, libc: bool) -> Result<ExitCode> {
     let root = PathBuf::from(name);
     if root.exists() && root.read_dir().is_ok_and(|mut dir| dir.next().is_some()) {
         anyhow::bail!("{} already exists and is not empty", root.display());
     }
 
-    let project = Project::create(&root, name)
-        .with_context(|| format!("cannot create a project in {}", root.display()))?;
+    let created = if libc {
+        Project::create_with_libc(&root, name)
+    } else {
+        Project::create(&root, name)
+    };
+    let project =
+        created.with_context(|| format!("cannot create a project in {}", root.display()))?;
 
     println!("Created {}", root.display());
     println!("  {}", project.entry_path().display());
@@ -191,10 +199,16 @@ async fn run_project(path: Option<&Path>) -> Result<ExitCode> {
 fn doctor() -> ExitCode {
     use ratasm::process::is_available;
 
-    let checks: [(&str, &str, bool); 3] = [
+    let checks: [(&str, &str, bool); 5] = [
         ("nasm", "assembling", true),
         ("ld", "linking", true),
         ("gdb", "debugging", false),
+        ("gcc", "linking with libc (ratasm new --libc)", false),
+        (
+            "nvim",
+            "editing with breakpoints and errors in the editor",
+            false,
+        ),
     ];
 
     let mut missing_required = false;
@@ -211,7 +225,7 @@ fn doctor() -> ExitCode {
         } else {
             "missing (optional)"
         };
-        println!("  {tool:<6} {mark:<20} {purpose}");
+        println!("  {tool:<5} {mark:<20} {purpose}");
     }
 
     if missing_required {
@@ -320,7 +334,9 @@ mod tests {
     #[test]
     fn subcommands_parse_with_their_arguments() {
         let cli = Cli::try_parse_from(["ratasm", "new", "hello"]).expect("parse");
-        assert!(matches!(cli.command, Some(Command::New { name }) if name == "hello"));
+        assert!(matches!(cli.command, Some(Command::New { name, libc: false }) if name == "hello"));
+        let cli = Cli::try_parse_from(["ratasm", "new", "--libc", "c"]).expect("parse");
+        assert!(matches!(cli.command, Some(Command::New { libc: true, .. })));
 
         let cli = Cli::try_parse_from(["ratasm", "build", "--debug"]).expect("parse");
         assert!(matches!(
@@ -394,7 +410,7 @@ mod tests {
         std::fs::create_dir("taken").expect("mkdir");
         std::fs::write("taken/file.txt", "keep me").expect("write");
 
-        let result = new_project("taken");
+        let result = new_project("taken", false);
         std::env::set_current_dir(previous).expect("restore cwd");
 
         assert!(result.is_err(), "must not overwrite an occupied directory");

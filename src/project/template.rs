@@ -63,6 +63,37 @@ _start:
     syscall
 "#;
 
+/// A program that calls `printf`, linked against the C library by `gcc`.
+pub const LIBC_HELLO: &str = r#"; printf from assembly, linked with the C library.
+;
+; gcc links this with libc and its start-up code, which calls main like any
+; C function. Arguments go in RDI, RSI, RDX, RCX, R8, R9; the stack must be
+; 16-byte aligned at each call; and a variadic function such as printf wants
+; in AL the number of vector registers holding arguments.
+
+    extern printf
+
+section .rodata
+    format: db "Hello from %s! 6 * 7 = %d", 10, 0
+    name:   db "libc", 0
+
+section .text
+    global main
+
+main:
+    push    rbp                     ; the call pushed 8 bytes; this realigns to 16
+    lea     rdi, [rel format]       ; first argument: the format string
+    lea     rsi, [rel name]         ; second: the %s
+    mov     edx, 6 * 7              ; third: the %d
+    xor     eax, eax                ; no vector registers used
+    call    printf wrt ..plt
+    xor     eax, eax                ; main returns 0
+    pop     rbp
+    ret
+
+section .note.GNU-stack noalloc noexec nowrite progbits
+"#;
+
 /// The `.gitignore` written into a new project.
 pub const GITIGNORE: &str = "build/\n*.o\n";
 
@@ -71,6 +102,15 @@ pub const GITIGNORE: &str = "build/\n*.o\n";
 /// Written by hand rather than serialised so the file a user first opens has
 /// comments explaining each field, which a round-tripped struct cannot carry.
 pub fn project_file(name: &str) -> String {
+    project_file_linked(name, "ld", "# linker_args = [\"-n\"]")
+}
+
+/// Renders the `.ratasm.toml` for a project linked against libc by `gcc`.
+pub fn libc_project_file(name: &str) -> String {
+    project_file_linked(name, "gcc", "linker_args = [\"-no-pie\"]")
+}
+
+fn project_file_linked(name: &str, linker: &str, linker_args: &str) -> String {
     format!(
         r#"# ratasm project file.
 # Every field here has a default; delete anything you do not need to change.
@@ -90,8 +130,8 @@ syntax = "nasm"
 [build]
 assembler = "nasm"
 assembler_args = ["-f", "elf64"]
-linker = "ld"
-# linker_args = ["-n"]
+linker = "{linker}"
+{linker_args}
 output_directory = "build"
 
 [run]
@@ -113,6 +153,14 @@ mod tests {
             .expect("template must parse");
         assert_eq!(config.project.name, "demo");
         config.validate().expect("template must validate");
+    }
+
+    #[test]
+    fn the_libc_project_file_links_with_gcc() {
+        let config = crate::project::ProjectConfig::from_toml(&libc_project_file("demo"))
+            .expect("template must parse");
+        assert_eq!(config.build.linker, "gcc");
+        assert_eq!(config.build.linker_args, ["-no-pie"]);
     }
 
     #[test]

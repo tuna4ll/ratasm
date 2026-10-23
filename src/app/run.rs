@@ -1184,8 +1184,13 @@ async fn start_session(
 
     match disassembler::ElfImage::load(&executable) {
         Ok(image) => {
+            let start = image
+                .symbols
+                .iter()
+                .find(|symbol| symbol.name == "main")
+                .map_or(image.entry, |symbol| symbol.address);
             let _ = active
-                .try_execute(&mi::break_insert_temporary_at_address(image.entry))
+                .try_execute(&mi::break_insert_temporary_at_address(start))
                 .await;
         }
         Err(_) => {
@@ -2110,6 +2115,29 @@ mod tests {
             "the message should name the setting: {}",
             app.status.text
         );
+    }
+
+    #[tokio::test]
+    async fn a_libc_program_is_debugged_from_main() {
+        for tool in ["nasm", "gcc", "gdb"] {
+            if !crate::process::is_available(Path::new(tool)) {
+                eprintln!("skipping: {tool} not installed");
+                return;
+            }
+        }
+        let dir = tempfile::tempdir().expect("temp dir");
+        let project = crate::project::Project::create_with_libc(dir.path(), "c").expect("create");
+        let mut app = App::new(project, crate::config::Settings::default()).expect("app");
+        app.settings.debugger.record = false;
+        let mut session = None;
+        let (mut terminal, _events) = start_test_session(&mut app, &mut session).await;
+        assert!(session.is_some(), "{}", app.status.text);
+        let (file, line) = app.current_line.clone().expect("stopped in the source");
+        assert!(file.ends_with("main.asm"), "{}", file.display());
+        assert_eq!(line, 18, "the first instruction of main");
+        settle(&mut app, &mut session, Effect::DebugContinue).await;
+        assert!(session.is_none(), "{}", app.status.text);
+        terminal.abort();
     }
 
     #[test]

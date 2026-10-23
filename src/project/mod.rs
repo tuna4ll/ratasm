@@ -179,6 +179,15 @@ impl Project {
 
     /// Creates a new project directory with a working hello-world program.
     pub fn create(root: &Path, name: &str) -> Result<Self, ProjectError> {
+        Self::create_from(root, name, false)
+    }
+
+    /// Creates a project whose program calls the C library, linked by `gcc`.
+    pub fn create_with_libc(root: &Path, name: &str) -> Result<Self, ProjectError> {
+        Self::create_from(root, name, true)
+    }
+
+    fn create_from(root: &Path, name: &str, libc: bool) -> Result<Self, ProjectError> {
         let config_path = root.join(Self::FILE_NAME);
         if config_path.exists() {
             return Err(ProjectError::AlreadyExists { path: config_path });
@@ -191,8 +200,13 @@ impl Project {
         };
 
         let source_directory = root.join("src");
-        write_new(&source_directory.join("main.asm"), template::HELLO_WORLD)?;
-        write_new(&config_path, &template::project_file(name))?;
+        let (source, config) = if libc {
+            (template::LIBC_HELLO, template::libc_project_file(name))
+        } else {
+            (template::HELLO_WORLD, template::project_file(name))
+        };
+        write_new(&source_directory.join("main.asm"), source)?;
+        write_new(&config_path, &config)?;
         write_new(&root.join(".gitignore"), template::GITIGNORE)?;
 
         Self::load(&config_path)

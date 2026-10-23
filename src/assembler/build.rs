@@ -434,6 +434,30 @@ mod tests {
         assert!(outcome.executable.is_some_and(|path| path.is_file()));
     }
 
+    #[tokio::test]
+    async fn a_libc_project_links_with_gcc_and_prints_through_printf() {
+        for tool in ["nasm", "gcc"] {
+            if !crate::process::is_available(Path::new(tool)) {
+                eprintln!("skipping: {tool} not installed");
+                return;
+            }
+        }
+        let dir = tempfile::tempdir().expect("temp dir");
+        let project = Project::create_with_libc(dir.path(), "libc").expect("create");
+        let outcome = build(&project, BuildOptions::debug())
+            .await
+            .expect("the build runs");
+        assert!(outcome.success, "{}", outcome.raw_output());
+        assert!(
+            !outcome.raw_output().contains("warning"),
+            "{}",
+            outcome.raw_output()
+        );
+        let executable = outcome.executable.expect("an executable");
+        let result = run_executable(&project, &executable).await.expect("runs");
+        assert_eq!(result.stdout, "Hello from libc! 6 * 7 = 42\n");
+    }
+
     #[test]
     fn tool_paths_are_written_relative_to_the_root() {
         let dir = tempfile::tempdir().expect("temp dir");

@@ -70,6 +70,9 @@ Running opens a real terminal in the Output panel. Programs can prompt, read
 input, move the cursor and use ANSI colour; the same terminal is attached when
 the program runs under GDB. <kbd>Ctrl</kbd>+<kbd>F5</kbd> stops it.
 
+`ratasm new --libc hello` starts from a `main` that calls `printf` instead,
+linked against the C library by `gcc`; debugging stops at `main`.
+
 `ratasm file.asm` opens single files, several at once if you name several.
 
 ## Pages
