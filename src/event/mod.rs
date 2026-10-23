@@ -88,6 +88,21 @@ fn handle_explorer(app: &mut App, key: KeyEvent) -> Effect {
             Effect::None
         }
         KeyCode::Enter => app.open_selected_file(),
+        KeyCode::Char('n') => app.apply(&Command::NewFile),
+        KeyCode::Char('m') | KeyCode::Char('d') | KeyCode::Delete | KeyCode::Char('a') => {
+            let Some(path) = app.project_files.get(app.explorer_selected).cloned() else {
+                return Effect::None;
+            };
+            if !app.show_file(&path) {
+                app.status = Status::error(format!("cannot open {}", path.display()));
+                return Effect::None;
+            }
+            app.apply(match key.code {
+                KeyCode::Char('m') => &Command::RenameFile,
+                KeyCode::Char('a') => &Command::AddToProject,
+                _ => &Command::DeleteFile,
+            })
+        }
         KeyCode::Char('r') => {
             app.refresh_project_files();
             app.status = Status::info("File list refreshed");
@@ -926,6 +941,21 @@ mod tests {
                 let _ = handle_key(&mut app, press(code));
             }
         }
+    }
+
+    #[test]
+    fn explorer_keys_act_on_the_selected_file() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("x.asm");
+        std::fs::write(&path, "nop\n").expect("write");
+        let mut app = app();
+        app.project_files = vec![path.clone()];
+        app.focus_panel(Panel::Explorer);
+        handle_key(&mut app, press(KeyCode::Char('d')));
+        assert_eq!(app.workspace.active().path(), Some(path.as_path()));
+        assert!(
+            matches!(&app.mode, Mode::Prompt(prompt) if prompt.kind() == Some(crate::app::PromptKind::DeleteFile))
+        );
     }
 
     #[test]

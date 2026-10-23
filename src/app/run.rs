@@ -2112,6 +2112,34 @@ mod tests {
         );
     }
 
+    #[test]
+    fn renaming_and_deleting_keep_the_project_in_step() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let project = crate::project::Project::create(dir.path(), "demo").expect("create");
+        let mut app = App::new(project, crate::config::Settings::default()).expect("app");
+        let util = dir.path().join("src/util.asm");
+        std::fs::write(&util, "ret\n").expect("write");
+        app.project.add_source(&util).expect("add");
+        app.workspace.open(&util).expect("open");
+        app.toggle_breakpoint_in(&util, 1);
+
+        let moved = dir.path().join("lib/helpers.asm");
+        rename_file(&mut app, &Runtimes::default(), &util, &moved);
+        assert!(moved.is_file() && !util.exists(), "{}", app.status.text);
+        assert!(app.breakpoints.is_set_at(&moved, 1));
+        let saved = std::fs::read_to_string(dir.path().join(".ratasm.toml")).expect("read");
+        assert!(saved.contains("lib/helpers.asm"), "{saved}");
+
+        delete_file(&mut app, &moved);
+        assert!(!moved.exists());
+        assert!(app.breakpoints.is_empty());
+        assert!(!app.project.builds(&moved));
+
+        let entry = app.project.entry_path();
+        delete_file(&mut app, &entry);
+        assert!(app.project.entry_path().exists(), "the entry is kept");
+    }
+
     #[tokio::test]
     async fn breakpoint_edits_and_register_writes_reach_gdb() {
         for tool in ["nasm", "ld", "gdb"] {

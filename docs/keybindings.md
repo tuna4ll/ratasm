@@ -130,7 +130,14 @@ program exits.
 | --- | --- |
 | <kbd>↑</kbd> / <kbd>↓</kbd> | Move between the project's files |
 | <kbd>Enter</kbd> | Open the selected file |
+| <kbd>N</kbd> | Create a file |
+| <kbd>M</kbd> | Rename or move the selected file |
+| <kbd>D</kbd> / <kbd>Delete</kbd> | Delete the selected file, after typing `yes` |
+| <kbd>A</kbd> | Add the selected file to the project's sources |
 | <kbd>R</kbd> | Re-read the file list from disk |
+
+Renaming or deleting a source listed in `.ratasm.toml` updates the project file
+too, and breakpoints in the file follow it.
 
 The list is the project's sources plus any other assembly file under the root,
 so a file that exists but is not in the build is visible rather than something
