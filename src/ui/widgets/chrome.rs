@@ -690,6 +690,13 @@ fn draw_picker(frame: &mut Frame, app: &App, area: Rect, picker: &crate::app::mo
     let first = selected
         .saturating_sub(height / 2)
         .min(picker.items().len().saturating_sub(height));
+    let column = picker
+        .items()
+        .iter()
+        .map(|item| item.label.chars().count())
+        .max()
+        .unwrap_or(0)
+        .min(usize::from(rows[1].width) * 3 / 5);
     let lines: Vec<Line> = picker
         .items()
         .iter()
@@ -704,8 +711,9 @@ fn draw_picker(frame: &mut Frame, app: &App, area: Rect, picker: &crate::app::mo
             } else {
                 theme.base()
             };
+            let label: String = item.label.chars().take(column).collect();
             Line::from(vec![
-                Span::styled(format!("{marker} {}", item.label), style),
+                Span::styled(format!("{marker} {label:<column$}"), style),
                 Span::styled(format!("  {}", item.detail), theme.dim()),
             ])
         })

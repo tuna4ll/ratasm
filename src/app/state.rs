@@ -883,7 +883,7 @@ impl App {
             for (index, line) in text.lines().enumerate() {
                 if line.to_lowercase().contains(&needle) {
                     items.push(PickItem {
-                        label: line.trim().to_owned(),
+                        label: line.split_whitespace().collect::<Vec<_>>().join(" "),
                         detail: format!(
                             "{}:{}",
                             crate::editor::workspace::display_path(&path),
