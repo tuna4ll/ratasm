@@ -108,15 +108,31 @@ pub fn disassembly_lines<'a>(app: &App, width: usize) -> Vec<Line<'a>> {
             }
             spans.push(Span::styled(instruction.text(), text_style));
 
-            if let Some(target) = instruction.branch_target {
+            if let Some(name) = instruction
+                .branch_target
+                .and_then(|target| target_name(app, target))
+            {
                 spans.push(Span::styled(
-                    format!("  {} 0x{target:x}", symbols.stack_pointer),
+                    format!("  {} {name}", symbols.stack_pointer),
                     theme.dim(),
                 ));
             }
             Line::from(spans)
         })
         .collect()
+}
+
+fn target_name(app: &App, target: u64) -> Option<String> {
+    let line = app
+        .disassembly
+        .iter()
+        .find(|line| line.instruction.address == target)?;
+    let (name, offset) = line.symbol.as_ref()?;
+    Some(if *offset == 0 {
+        name.clone()
+    } else {
+        format!("{name}+{offset:#x}")
+    })
 }
 
 /// Draws the instruction explanation panel.
@@ -335,6 +351,22 @@ mod tests {
     fn decoded(address: u64, bytes: Vec<u8>) -> crate::disassembler::DisassemblyLine {
         let mut decoded = crate::disassembler::decode(&bytes, address, Default::default());
         crate::disassembler::DisassemblyLine::bare(decoded.pop().expect("one instruction"))
+    }
+
+    #[test]
+    fn a_branch_names_its_target_by_symbol() {
+        let mut app = app();
+        let mut jump = decoded(0x1000, vec![0xeb, 0x00]);
+        assert_eq!(jump.instruction.text(), "jmp 0x1002");
+        jump.symbol = Some(("start".into(), 0));
+        let mut target = decoded(0x1002, vec![0x90]);
+        target.symbol = Some(("start".into(), 2));
+        app.disassembly = vec![jump, target];
+        assert_eq!(
+            super::target_name(&app, 0x1002).as_deref(),
+            Some("start+0x2")
+        );
+        assert_eq!(super::target_name(&app, 0x9999), None);
     }
 
     #[test]

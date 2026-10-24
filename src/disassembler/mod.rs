@@ -191,6 +191,8 @@ fn make_formatter(syntax: Syntax) -> Box<dyn Formatter> {
             options.set_hex_prefix("0x");
             options.set_hex_suffix("");
             options.set_space_after_operand_separator(true);
+            options.set_branch_leading_zeros(false);
+            options.set_show_branch_size(false);
             Box::new(formatter)
         }
         Syntax::Att => {
@@ -199,6 +201,8 @@ fn make_formatter(syntax: Syntax) -> Box<dyn Formatter> {
             options.set_uppercase_all(false);
             options.set_uppercase_hex(false);
             options.set_space_after_operand_separator(true);
+            options.set_branch_leading_zeros(false);
+            options.set_show_branch_size(false);
             Box::new(formatter)
         }
     }
