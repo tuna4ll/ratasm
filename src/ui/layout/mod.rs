@@ -266,7 +266,7 @@ fn wide_debug(body: Rect, focus: Panel) -> Layout {
             Constraint::Length((body.height / 5).max(Panel::Output.minimum_height())),
         ])
         .split(body);
-    let halves = columns(split[0], &[58, 42]);
+    let halves = columns(split[0], &[55, 45]);
 
     let (left, mut left_out) = stack(
         halves[0],

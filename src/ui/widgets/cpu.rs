@@ -68,7 +68,7 @@ pub fn register_lines<'a>(app: &App, width: usize) -> Vec<Line<'a>> {
         _ => 20,
     };
     let column_width = 1 + NAME_WIDTH + value_width + 2;
-    let columns = (width.max(1) / column_width.max(1)).clamp(1, 3);
+    let columns = ((width + 2) / column_width.max(1)).clamp(1, 3);
 
     let mut lines: Vec<Line> = Vec::new();
     let mut row: Vec<Span> = Vec::new();
