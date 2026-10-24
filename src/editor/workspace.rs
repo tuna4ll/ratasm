@@ -43,6 +43,7 @@ pub fn read_file(path: &Path) -> Result<String, FileError> {
 
 /// Renders a path for a message, preferring the file name when it is long.
 pub fn display_path(path: &Path) -> String {
+    let path = path.strip_prefix(".").unwrap_or(path);
     let full = path.display().to_string();
     if full.chars().count() <= 60 {
         return full;
@@ -464,6 +465,12 @@ mod tests {
         workspace.close(2).expect("close");
         assert_eq!(workspace.active_index(), 1);
         assert_eq!(workspace.len(), 2);
+    }
+
+    #[test]
+    fn a_leading_dot_is_not_shown() {
+        assert_eq!(display_path(Path::new("./src/main.asm")), "src/main.asm");
+        assert_eq!(display_path(Path::new("../x.asm")), "../x.asm");
     }
 
     #[test]
