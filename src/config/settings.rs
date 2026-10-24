@@ -7,24 +7,30 @@ use serde::{Deserialize, Serialize};
 
 use crate::ui::theme::ThemeKind;
 
-/// Source view preferences.
+/// Editor preferences.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct EditorSettings {
+    /// Spaces inserted by one indent.
+    pub indent_width: usize,
     /// Whether to show line numbers.
     pub line_numbers: bool,
-    /// The editor to run, overriding `$VISUAL` and `$EDITOR`.
-    pub command: Option<String>,
-    /// How the editor takes a line: `+{line}`, or `{file}:{line}` to replace the file.
-    pub line_argument: Option<String>,
+    /// Whether to highlight the line the cursor is on.
+    pub highlight_current_line: bool,
+    /// Whether to show a marker on the matching bracket.
+    pub match_brackets: bool,
+    /// Whether typing an opening bracket or quote inserts its partner.
+    pub auto_close_pairs: bool,
 }
 
 impl Default for EditorSettings {
     fn default() -> Self {
         Self {
+            indent_width: 4,
             line_numbers: true,
-            command: None,
-            line_argument: None,
+            highlight_current_line: true,
+            match_brackets: true,
+            auto_close_pairs: true,
         }
     }
 }
@@ -163,6 +169,11 @@ impl Settings {
         })
     }
 
+    /// The indent width, clamped to something usable.
+    pub fn indent_width(&self) -> usize {
+        self.editor.indent_width.clamp(1, 16)
+    }
+
     /// The debugger command timeout.
     pub fn debugger_timeout(&self) -> std::time::Duration {
         let millis = if self.debugger.timeout_ms == 0 {
@@ -221,7 +232,7 @@ mod tests {
         let settings = parse("").expect("parses");
         assert_eq!(settings, Settings::default());
         assert_eq!(settings.appearance.theme, ThemeKind::Dark);
-        assert!(settings.editor.line_numbers);
+        assert_eq!(settings.editor.indent_width, 4);
         assert_eq!(settings.debugger.gdb, "gdb");
     }
 
@@ -229,7 +240,7 @@ mod tests {
     fn a_partial_file_keeps_the_other_defaults() {
         let settings = parse("[appearance]\ntheme = \"light\"\n").expect("parses");
         assert_eq!(settings.appearance.theme, ThemeKind::Light);
-        assert!(settings.editor.line_numbers, "untouched field");
+        assert_eq!(settings.editor.indent_width, 4, "untouched field");
     }
 
     #[test]
@@ -241,6 +252,7 @@ theme = "colorblind"
 unicode = false
 
 [editor]
+indent_width = 8
 line_numbers = false
 
 [debugger]
@@ -256,6 +268,7 @@ stack_depth = 32
 
         assert_eq!(settings.appearance.theme, ThemeKind::Colorblind);
         assert_eq!(settings.appearance.unicode, Some(false));
+        assert_eq!(settings.editor.indent_width, 8);
         assert!(!settings.editor.line_numbers);
         assert_eq!(settings.debugger.gdb, "gdb-multiarch");
         assert_eq!(settings.debugger.stack_depth, 32);
@@ -267,7 +280,7 @@ stack_depth = 32
 
     #[test]
     fn a_misspelled_field_is_rejected_rather_than_ignored() {
-        let error = parse("[editor]\nline_number = false\n").expect_err("must fail");
+        let error = parse("[editor]\nindent_with = 8\n").expect_err("must fail");
         assert!(matches!(error, SettingsError::Parse { .. }));
     }
 
@@ -303,7 +316,7 @@ stack_depth = 32
 
         let mut settings = Settings::default();
         settings.appearance.theme = ThemeKind::Light;
-        settings.editor.line_numbers = false;
+        settings.editor.indent_width = 2;
         settings
             .keys
             .insert("ctrl+b".to_owned(), "build.build".to_owned());
@@ -315,9 +328,12 @@ stack_depth = 32
 
     #[test]
     fn out_of_range_values_are_clamped_rather_than_rejected() {
-        let settings =
-            parse("[debugger]\nmemory_window = 1\nstack_depth = 9999\n").expect("parses");
+        let settings = parse(
+            "[editor]\nindent_width = 0\n\n[debugger]\nmemory_window = 1\nstack_depth = 9999\n",
+        )
+        .expect("parses");
 
+        assert_eq!(settings.indent_width(), 1);
         assert_eq!(settings.memory_window(), 16);
         assert_eq!(settings.stack_depth(), 128);
     }

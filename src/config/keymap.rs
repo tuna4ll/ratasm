@@ -258,7 +258,14 @@ impl Keymap {
             Command::DebugStop,
         );
 
-        bind(KeyBinding::ctrl(KeyCode::Char('e')), Command::EditFile);
+        bind(KeyBinding::ctrl(KeyCode::Char('s')), Command::SaveFile);
+        bind(
+            KeyBinding::new(
+                KeyCode::Char('s'),
+                KeyModifiers::CONTROL | KeyModifiers::ALT,
+            ),
+            Command::SaveAll,
+        );
         bind(KeyBinding::ctrl(KeyCode::Char('o')), Command::OpenFile);
         bind(
             KeyBinding::new(
@@ -271,13 +278,28 @@ impl Keymap {
         bind(KeyBinding::ctrl(KeyCode::Char('w')), Command::CloseFile);
         bind(KeyBinding::ctrl(KeyCode::Char('q')), Command::Quit);
 
+        bind(KeyBinding::ctrl(KeyCode::Char('z')), Command::Undo);
+        bind(KeyBinding::ctrl(KeyCode::Char('y')), Command::Redo);
+        bind(KeyBinding::ctrl(KeyCode::Char('a')), Command::SelectAll);
+        bind(KeyBinding::ctrl(KeyCode::Char('c')), Command::Copy);
+        bind(KeyBinding::ctrl(KeyCode::Char('x')), Command::Cut);
+        bind(KeyBinding::ctrl(KeyCode::Char('v')), Command::Paste);
+
         bind(KeyBinding::ctrl(KeyCode::Char('p')), Command::OpenPalette);
-        bind(KeyBinding::ctrl(KeyCode::Char('g')), Command::GoToAddress);
+        bind(KeyBinding::ctrl(KeyCode::Char('f')), Command::Search);
+        bind(KeyBinding::ctrl(KeyCode::Char('g')), Command::GoToLine);
         bind(KeyBinding::ctrl(KeyCode::Char('t')), Command::GoToSymbol);
-        bind(KeyBinding::ctrl(KeyCode::Char('f')), Command::SearchFiles);
+        bind(
+            KeyBinding::new(KeyCode::Char('f'), KeyModifiers::ALT),
+            Command::SearchFiles,
+        );
         bind(
             KeyBinding::ctrl(KeyCode::Char('k')),
             Command::OpenSyscallFinder,
+        );
+        bind(
+            KeyBinding::ctrl(KeyCode::Char('d')),
+            Command::GoToDefinition,
         );
         bind(
             KeyBinding::plain(KeyCode::F(1)),
@@ -557,9 +579,11 @@ mod tests {
             ("ctrl+F5", Command::Stop),
             ("shift+F7", Command::StepBack),
             ("shift+F8", Command::StepBackOver),
-            ("ctrl+e", Command::EditFile),
+            ("ctrl+s", Command::SaveFile),
             ("ctrl+o", Command::OpenFile),
             ("ctrl+p", Command::OpenPalette),
+            ("ctrl+f", Command::Search),
+            ("ctrl+g", Command::GoToLine),
             ("ctrl+k", Command::OpenSyscallFinder),
             ("ctrl+q", Command::Quit),
             ("tab", Command::NextPanel),
@@ -589,8 +613,8 @@ mod tests {
         let event = KeyEvent::new(KeyCode::F(5), KeyModifiers::NONE);
         assert_eq!(keymap.command_for_event(event), Some(&Command::Run));
 
-        let event = KeyEvent::new(KeyCode::Char('e'), KeyModifiers::CONTROL);
-        assert_eq!(keymap.command_for_event(event), Some(&Command::EditFile));
+        let event = KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL);
+        assert_eq!(keymap.command_for_event(event), Some(&Command::SaveFile));
     }
 
     #[test]
@@ -618,12 +642,12 @@ mod tests {
     #[test]
     fn control_shortcuts_ignore_the_case_of_the_character() {
         let keymap = Keymap::defaults();
-        for ch in ['e', 'E'] {
+        for ch in ['s', 'S'] {
             let event = KeyEvent::new(KeyCode::Char(ch), KeyModifiers::CONTROL);
             assert_eq!(
                 keymap.command_for_event(event),
-                Some(&Command::EditFile),
-                "ctrl+{ch} should open the editor"
+                Some(&Command::SaveFile),
+                "ctrl+{ch} should save"
             );
         }
     }
@@ -640,9 +664,9 @@ mod tests {
         let keymap = Keymap::defaults();
         assert_eq!(
             keymap
-                .binding_for(&Command::EditFile)
+                .binding_for(&Command::SaveFile)
                 .map(|b| b.to_string()),
-            Some("ctrl+e".to_owned())
+            Some("ctrl+s".to_owned())
         );
         assert_eq!(keymap.binding_for(&Command::ClearBreakpoints), None);
     }

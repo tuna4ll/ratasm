@@ -281,7 +281,7 @@ mod tests {
 
         for (query, expected) in [
             ("toggle break", "debug.toggle-breakpoint"),
-            ("edit in", "file.edit"),
+            ("save as", "file.save-as"),
             ("syscall", "app.syscalls"),
             ("go to address", "navigate.go-to-address"),
             ("theme", "view.cycle-theme"),

@@ -15,8 +15,8 @@ use crate::debugger::session::GdbSession;
 use crate::debugger::state::Transition;
 use crate::disassembler;
 use crate::editor::workspace;
-use crate::process::editor;
 use crate::process::pty::{PtyControl, PtyEvent, PtySize};
+use crate::ui::clipboard;
 use crate::ui::render;
 use crate::ui::Tui;
 
@@ -107,18 +107,11 @@ impl Running {
     }
 }
 
-/// The ordinary background task, the debugger inferior's terminal transport
-/// and `$EDITOR` in the Editor panel.
+/// The ordinary background task and the debugger inferior's terminal transport.
 #[derive(Default)]
 struct Runtimes {
     background: Running,
     debugger: Running,
-    editor: Running,
-    /// Where the editor's PTY reports, kept apart from the Output terminal's.
-    editor_events: Option<tokio::sync::mpsc::UnboundedSender<PtyEvent>>,
-    remote: Option<editor::Remote>,
-    signs: Vec<editor::Sign>,
-    queued_edit: Option<(std::path::PathBuf, usize)>,
 }
 
 impl Runtimes {
@@ -146,21 +139,11 @@ pub async fn run(mut app: App, terminal: &mut Tui) -> Result<()> {
     let mut session: Option<GdbSession> = None;
     let (finished_tx, mut finished_rx) = tokio::sync::mpsc::unbounded_channel::<Background>();
     let (pty_tx, mut pty_rx) = tokio::sync::mpsc::unbounded_channel::<PtyEvent>();
-    let (editor_tx, mut editor_rx) = tokio::sync::mpsc::unbounded_channel::<PtyEvent>();
-    let mut runtimes = Runtimes {
-        editor_events: Some(editor_tx),
-        ..Runtimes::default()
-    };
-
-    let size = terminal.size().context("cannot read the terminal size")?;
-    if let Some(path) = app.workspace.active().path().map(Path::to_path_buf) {
-        start_editor(&mut app, &mut runtimes, (size.width, size.height), path, 1).await;
-    }
+    let mut runtimes = Runtimes::default();
 
     loop {
         let size = terminal.size().context("cannot read the terminal size")?;
         sync_terminal_size(&mut app, &runtimes, size.width, size.height);
-        sync_editor_size(&mut app, &runtimes, size.width, size.height);
         render::sync_scroll(&mut app, size.width, size.height);
         terminal
             .draw(|frame| render::draw(frame, &app))
@@ -174,7 +157,7 @@ pub async fn run(mut app: App, terminal: &mut Tui) -> Result<()> {
             event = events.next() => match event {
                 Some(Ok(Event::Key(key))) => handle_key_event(&mut app, &runtimes, key),
                 Some(Ok(Event::Paste(text))) => {
-                    handle_paste(&app, &runtimes, text);
+                    handle_terminal_paste(&app, &runtimes, text);
                     Effect::None
                 }
                 Some(Ok(Event::Mouse(mouse))) => {
@@ -194,10 +177,6 @@ pub async fn run(mut app: App, terminal: &mut Tui) -> Result<()> {
                 finish_pty_event(&mut app, &mut runtimes, event);
                 Effect::None
             },
-            Some(event) = editor_rx.recv() => {
-                finish_editor_event(&mut app, &mut runtimes, event);
-                Effect::None
-            },
             () = tokio::time::sleep(TICK) => Effect::None,
         };
 
@@ -212,21 +191,6 @@ pub async fn run(mut app: App, terminal: &mut Tui) -> Result<()> {
         )
         .await;
         drain_debugger_events(&mut app, &mut session).await;
-        if app.editor_screen.is_none() {
-            if let Some((path, line)) = runtimes.queued_edit.take() {
-                app.show_file(&path);
-                app.focus_panel(super::Panel::Editor);
-                start_editor(
-                    &mut app,
-                    &mut runtimes,
-                    (size.width, size.height),
-                    path,
-                    line,
-                )
-                .await;
-            }
-        }
-        sync_signs(&app, &mut runtimes).await;
         if runtimes.inferior_orphaned(session.is_some()) {
             let _ = runtimes.debugger.request_stop();
         }
@@ -234,10 +198,6 @@ pub async fn run(mut app: App, terminal: &mut Tui) -> Result<()> {
 
     runtimes.background.abort();
     runtimes.debugger.abort();
-    runtimes.editor.abort();
-    if let Some(remote) = runtimes.remote.take() {
-        remote.close();
-    }
     if let Some(path) = super::session::path_for(app.project.root()) {
         if let Err(error) = super::session::save(&app, &path) {
             tracing::warn!(%error, "cannot save the session");
@@ -257,21 +217,6 @@ fn handle_key_event(app: &mut App, runtimes: &Runtimes, key: KeyEvent) -> Effect
             return app.apply(&command);
         }
     }
-    if app.shows_editor() && app.focus == super::Panel::Editor && !app.mode.is_overlay() {
-        if editor_reserved_key(&app.keymap, key) {
-            if let Some(command) = app.keymap.command_for_event(key).cloned() {
-                return app.apply(&command);
-            }
-        }
-        let application_cursor = app
-            .editor_screen
-            .as_ref()
-            .is_some_and(|screen| screen.screen().application_cursor());
-        if let Some(bytes) = terminal_key_bytes(key, application_cursor) {
-            let _ = runtimes.editor.input(bytes);
-        }
-        return Effect::None;
-    }
     if app.terminal.is_some() && app.focus == super::Panel::Output && !app.mode.is_overlay() {
         if let Some(command) = app.keymap.command_for_event(key).cloned() {
             if terminal_reserved_command(&command) {
@@ -290,25 +235,11 @@ fn handle_key_event(app: &mut App, runtimes: &Runtimes, key: KeyEvent) -> Effect
     crate::event::handle_key(app, key)
 }
 
-/// Keys ratasm keeps while `$EDITOR` has focus: function keys and Alt plus a
-/// digit, which build, run, debug and change page. Everything else, Tab and
-/// every Ctrl chord included, belongs to the editor.
-fn editor_reserved_key(keymap: &crate::config::Keymap, key: KeyEvent) -> bool {
-    matches!(key.code, KeyCode::F(_))
-        || (key.modifiers.contains(KeyModifiers::ALT) && keymap.command_for_event(key).is_some())
-}
-
 fn terminal_escape(key: KeyEvent) -> Option<Command> {
     if key.modifiers != KeyModifiers::ALT {
         return None;
     }
     Some(match key.code {
-        KeyCode::Char('p') => Command::OpenPalette,
-        KeyCode::Char('o') => Command::OpenFile,
-        KeyCode::Char('n') => Command::NewFile,
-        KeyCode::Char('q') => Command::Quit,
-        KeyCode::Char('t') => Command::GoToSymbol,
-        KeyCode::Char('f') => Command::SearchFiles,
         KeyCode::Right => Command::NextPanel,
         KeyCode::Left => Command::PreviousPanel,
         _ => return None,
@@ -405,27 +336,20 @@ fn function_key(number: u8) -> Option<&'static [u8]> {
     })
 }
 
-/// Sends pasted text to whichever embedded terminal has focus.
-fn handle_paste(app: &App, runtimes: &Runtimes, text: String) {
-    if app.mode.is_overlay() {
+fn handle_terminal_paste(app: &App, runtimes: &Runtimes, text: String) {
+    if app.terminal.is_none() || app.focus != super::Panel::Output || app.mode.is_overlay() {
         return;
     }
-    let (screen, running) = match app.focus {
-        super::Panel::Output => (app.terminal.as_ref(), runtimes.terminal()),
-        super::Panel::Editor if app.shows_editor() => {
-            (app.editor_screen.as_ref(), &runtimes.editor)
-        }
-        _ => return,
-    };
-    let Some(screen) = screen else {
-        return;
-    };
-    let bytes = if screen.screen().bracketed_paste() {
+    let bracketed = app
+        .terminal
+        .as_ref()
+        .is_some_and(|terminal| terminal.screen().bracketed_paste());
+    let bytes = if bracketed {
         format!("\x1b[200~{text}\x1b[201~").into_bytes()
     } else {
         text.into_bytes()
     };
-    let _ = running.input(bytes);
+    let _ = runtimes.terminal().input(bytes);
 }
 
 /// Keeps both the parser and the kernel PTY aligned with the visible Output panel.
@@ -445,31 +369,13 @@ fn sync_terminal_size(app: &mut App, runtimes: &Runtimes, width: u16, height: u1
     }
 }
 
-/// Keeps `$EDITOR`'s screen and PTY the size of the Editor panel, when it is shown.
-fn sync_editor_size(app: &mut App, runtimes: &Runtimes, width: u16, height: u16) {
-    let Some(size) = panel_terminal_size(app, super::Panel::Editor, width, height) else {
-        return;
-    };
-    if let Some(screen) = &mut app.editor_screen {
-        if screen.size() != size {
-            screen.resize(size);
-            runtimes.editor.resize(size);
-        }
-    }
-}
-
 fn output_terminal_size(app: &App, width: u16, height: u16) -> Option<PtySize> {
-    panel_terminal_size(app, super::Panel::Output, width, height)
-}
-
-/// The cells inside `panel`'s border on the current page, if the page shows it.
-fn panel_terminal_size(app: &App, panel: super::Panel, width: u16, height: u16) -> Option<PtySize> {
     let layout = crate::ui::layout::compute(
         ratatui::layout::Rect::new(0, 0, width, height),
         app.page,
         app.focus,
     );
-    let area = layout.area_of(panel)?;
+    let area = layout.area_of(super::Panel::Output)?;
     Some(PtySize::new(
         area.width.saturating_sub(2),
         area.height.saturating_sub(2),
@@ -489,16 +395,14 @@ async fn perform(
     match effect {
         Effect::None | Effect::Quit => {}
 
-        Effect::Edit { path, line } => start_editor(app, runtimes, viewport, path, line).await,
-
         Effect::Build { debug } => {
-            build(app, runtimes, debug).await;
+            build(app, debug).await;
         }
 
         Effect::Run => {
             if runtimes.background.is_busy() || runtimes.debugger.is_busy() {
                 app.status = Status::warning("Something is already running");
-            } else if build(app, runtimes, false).await {
+            } else if build(app, false).await {
                 start_program(
                     app,
                     pty_events,
@@ -528,6 +432,22 @@ async fn perform(
             }
         }
 
+        Effect::SaveFile(path) => match app.workspace.save_active_as(&path) {
+            Ok(path) => {
+                app.status = Status::success(format!("Saved {}", path.display()));
+                app.refresh_project_files();
+            }
+            Err(error) => app.status = Status::error(error.to_string()),
+        },
+
+        Effect::SaveAndClose(path) => match app.workspace.save_active_as(&path) {
+            Ok(_) => {
+                app.close_active_document();
+                app.refresh_project_files();
+            }
+            Err(error) => app.status = Status::error(error.to_string()),
+        },
+
         Effect::SaveProject => match app.project.save() {
             Ok(path) => {
                 app.status = Status::success(format!(
@@ -539,12 +459,21 @@ async fn perform(
             Err(error) => app.status = Status::error(error.to_string()),
         },
 
+        Effect::SaveAll => {
+            app.status = match save_everything(app) {
+                Ok(status) => status,
+                Err(error) => Status::error(error.to_string()),
+            };
+        }
+
         Effect::OpenFile(path) => match app.workspace.open(&path) {
             Ok(_) => {
+                app.workspace
+                    .active_mut()
+                    .set_indent_width(app.settings.indent_width());
                 app.status = Status::success(format!("Opened {}", path.display()));
                 app.focus = super::Panel::Editor;
                 app.refresh_project_files();
-                start_editor(app, runtimes, viewport, path, 1).await;
             }
             Err(error) => app.status = Status::error(error.to_string()),
         },
@@ -613,28 +542,12 @@ async fn perform(
 
         Effect::SyncBreakpoints => sync_breakpoints(app, session).await,
 
-        Effect::BreakpointAtEditorCursor => {
-            let cursor = match &runtimes.remote {
-                Some(remote) => Some(remote.cursor().await),
-                None => None,
-            };
-            match cursor {
-                Some(Ok((path, line))) => {
-                    if app.toggle_breakpoint_in(&path, line) == Effect::SyncBreakpoints {
-                        sync_breakpoints(app, session).await;
-                    }
-                }
-                Some(Err(error)) => app.status = Status::error(error),
-                None => {
-                    let _ = app.ask_breakpoint_line();
-                }
-            }
-        }
-
         Effect::ReadMemory(address) => read_memory(app, session, address).await,
 
+        Effect::CreateFile(path) => create_file(app, &path),
+
         Effect::RenameFile { from, to } => {
-            rename_file(app, runtimes, &from, &to);
+            rename_file(app, &from, &to);
             sync_breakpoints(app, session).await;
         }
         Effect::DeleteFile(path) => {
@@ -662,136 +575,50 @@ async fn perform(
                 start_snippet(app, finished, &mut runtimes.background);
             }
         }
-    }
-}
 
-/// Starts `$EDITOR` on `path` inside the Editor panel, or shows `path` in
-/// the one already running.
-async fn start_editor(
-    app: &mut App,
-    runtimes: &mut Runtimes,
-    viewport: (u16, u16),
-    path: std::path::PathBuf,
-    line: usize,
-) {
-    if app.editor_screen.is_some() {
-        app.focus_panel(super::Panel::Editor);
-        if app.editing.as_deref() == Some(path.as_path()) && runtimes.remote.is_none() {
-            return;
-        }
-        reveal_in_editor(app, runtimes, path, line).await;
-        return;
-    }
-    let Some(events) = runtimes.editor_events.clone() else {
-        return;
-    };
-
-    app.focus_panel(super::Panel::Editor);
-    let size = panel_terminal_size(app, super::Panel::Editor, viewport.0, viewport.1)
-        .unwrap_or(PtySize::new(80, 24));
-    let program = editor::resolve(&app.settings.editor);
-    let remote = editor::Remote::for_editor(&program);
-    app.editor_screen = Some(super::terminal::TerminalScreen::new(size));
-    app.editing = Some(path.clone());
-    app.status = Status::info(format!(
-        "{} is editing {}; F-keys and Alt chords stay with ratasm",
-        program.name(),
-        workspace::display_path(&path)
-    ));
-
-    let spec = program.spec(&path, line, remote.as_ref().map(editor::Remote::socket));
-    runtimes.remote = remote;
-    runtimes.signs.clear();
-    let (control_tx, control_rx) = tokio::sync::mpsc::unbounded_channel();
-    runtimes.editor.control = Some(control_tx);
-    runtimes.editor.handle = Some(tokio::spawn(async move {
-        crate::process::pty::run_interactive(spec, size, control_rx, events).await;
-    }));
-}
-
-/// Moves the running editor to `path` at `line`, or, when it cannot be
-/// driven, opens `path` once the user leaves it.
-async fn reveal_in_editor(
-    app: &mut App,
-    runtimes: &mut Runtimes,
-    path: std::path::PathBuf,
-    line: usize,
-) {
-    let name = workspace::display_path(&path);
-    match &runtimes.remote {
-        Some(remote) => match remote.open(&path, line).await {
-            Ok(()) => {
-                app.editing = Some(path);
-                runtimes.signs.clear();
-            }
-            Err(error) => app.status = Status::error(format!("cannot open {name}: {error}")),
-        },
-        None => {
-            let program = editor::resolve(&app.settings.editor);
-            app.status = Status::warning(format!(
-                "{} is still open; {name} opens when you quit it",
-                program.name()
-            ));
-            runtimes.queued_edit = Some((path, line));
-        }
-    }
-}
-
-/// Folds output from `$EDITOR` into its screen, and reads the file back when it exits.
-fn finish_editor_event(app: &mut App, runtimes: &mut Runtimes, event: PtyEvent) {
-    match event {
-        PtyEvent::Output(bytes) => {
-            if let Some(screen) = &mut app.editor_screen {
-                let replies = screen.process(&bytes);
-                if !replies.is_empty() {
-                    let _ = runtimes.editor.input(replies);
+        Effect::SetSystemClipboard(text) => match clipboard::set_sequence(&text) {
+            Some(sequence) => {
+                use std::io::Write as _;
+                let mut out = std::io::stdout();
+                if write!(out, "{sequence}")
+                    .and_then(|()| out.flush())
+                    .is_err()
+                {
+                    tracing::debug!("could not write the clipboard sequence");
                 }
             }
-        }
-        PtyEvent::Finished(result) => {
-            runtimes.editor.handle = None;
-            runtimes.editor.control = None;
-            if let Some(remote) = runtimes.remote.take() {
-                remote.close();
+            None => {
+                app.status = Status::warning(format!(
+                    "Copied within ratasm; too large for the terminal clipboard (over {} KiB)",
+                    clipboard::MAX_BYTES / 1024
+                ));
             }
-            let last_screen = app.editor_screen.take();
-            let program = editor::resolve(&app.settings.editor);
-            let program = program.name();
-            let failed = !matches!(&result, Ok(output) if output.outcome.is_success());
-            if let (true, Some(screen)) = (failed, last_screen) {
-                app.output = screen.into_lines();
-            }
-            app.status = match result {
-                Ok(output) if output.outcome.is_success() => Status::default(),
-                Ok(output) => Status::warning(match output.outcome.exit_code() {
-                    Some(127) => format!("{program} was not found; set $EDITOR"),
-                    Some(code) => format!("{program} exited with status {code}"),
-                    None => format!("{program} was stopped"),
-                }),
-                Err(error) => Status::error(format!("cannot start {program}: {error}")),
-            };
-            if let Some(path) = app.editing.take() {
-                app.finish_edit(&path);
-            }
-        }
-        PtyEvent::Closed => {}
+        },
     }
 }
 
-fn editing_now(app: &App, path: &Path) -> bool {
-    app.editor_screen.is_some()
-        && app
-            .editing
-            .as_deref()
-            .is_some_and(|editing| workspace::same_target(editing, path))
+fn create_file(app: &mut App, path: &Path) {
+    if !path.exists() {
+        let written = path
+            .parent()
+            .map_or(Ok(()), std::fs::create_dir_all)
+            .and_then(|()| std::fs::write(path, ""));
+        if let Err(error) = written {
+            app.status = Status::error(format!("cannot create {}: {error}", path.display()));
+            return;
+        }
+    }
+    match app.workspace.open(path) {
+        Ok(_) => {
+            app.focus_panel(super::Panel::Editor);
+            app.status = Status::success(format!("Created {}", workspace::display_path(path)));
+        }
+        Err(error) => app.status = Status::error(error.to_string()),
+    }
+    app.refresh_project_files();
 }
 
-fn rename_file(app: &mut App, runtimes: &Runtimes, from: &Path, to: &Path) {
-    let program = editor::resolve(&app.settings.editor);
-    if editing_now(app, from) && runtimes.remote.is_none() {
-        app.status = Status::warning(format!("Quit {} before renaming the file", program.name()));
-        return;
-    }
+fn rename_file(app: &mut App, from: &Path, to: &Path) {
     if to.exists() {
         app.status = Status::error(format!("{} already exists", workspace::display_path(to)));
         return;
@@ -806,9 +633,6 @@ fn rename_file(app: &mut App, runtimes: &Runtimes, from: &Path, to: &Path) {
     if let Some(index) = app.index_of_document(from) {
         app.workspace.set_active(index);
         app.workspace.active_mut().set_path(to);
-    }
-    if editing_now(app, from) {
-        app.editing = Some(to.to_path_buf());
     }
     app.breakpoints.move_file(from, Some(to));
     let mut status = Status::success(format!("Renamed to {}", workspace::display_path(to)));
@@ -826,11 +650,6 @@ fn rename_file(app: &mut App, runtimes: &Runtimes, from: &Path, to: &Path) {
 }
 
 fn delete_file(app: &mut App, path: &Path) {
-    let program = editor::resolve(&app.settings.editor);
-    if editing_now(app, path) {
-        app.status = Status::warning(format!("Quit {} before deleting the file", program.name()));
-        return;
-    }
     if workspace::same_target(path, &app.project.entry_path()) {
         app.status =
             Status::warning("The entry file cannot be deleted; change project.entry first");
@@ -854,59 +673,20 @@ fn delete_file(app: &mut App, path: &Path) {
     app.refresh_project_files();
 }
 
-/// Sends breakpoint and error marks to a driven editor when they change.
-async fn sync_signs(app: &App, runtimes: &mut Runtimes) {
-    let Some(remote) = &runtimes.remote else {
-        return;
-    };
-    let signs = editor_signs(app);
-    if signs == runtimes.signs {
-        return;
-    }
-    if remote.place_signs(&signs).await.is_ok() {
-        runtimes.signs = signs;
-    }
-}
-
-fn editor_signs(app: &App) -> Vec<editor::Sign> {
-    let absolute = |path: &Path| std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
-    let mut signs: Vec<editor::Sign> = app
-        .breakpoints
-        .all()
-        .iter()
-        .filter_map(|breakpoint| match &breakpoint.location {
-            crate::debugger::breakpoints::Location::Line { file, line } => Some(editor::Sign {
-                path: absolute(file),
-                line: *line,
-                kind: editor::SignKind::Breakpoint,
-            }),
-            _ => None,
-        })
-        .collect();
-    for diagnostic in &app.diagnostics {
-        if let (Some(file), Some(line)) = (&diagnostic.file, diagnostic.line) {
-            signs.push(editor::Sign {
-                path: absolute(&app.resolve_reported_path(file)),
-                line,
-                kind: match diagnostic.severity {
-                    crate::assembler::Severity::Error => editor::SignKind::Error,
-                    _ => editor::SignKind::Warning,
-                },
-            });
-        }
-    }
-    signs.sort();
-    signs.dedup();
-    signs
-}
-
 /// Builds the project, reporting the outcome.
-async fn build(app: &mut App, runtimes: &mut Runtimes, debug: bool) -> bool {
-    let unsaved = match &runtimes.remote {
-        Some(remote) => remote.save_all().await.is_err(),
-        None => app.editor_screen.is_some(),
-    };
-    if let Err(error) = app.workspace.reload() {
+fn save_everything(app: &mut App) -> Result<Status, crate::editor::workspace::FileError> {
+    let (written, skipped) = app.workspace.save_all()?;
+    Ok(match (written, skipped) {
+        (0, 0) => Status::info("Nothing to save"),
+        (_, 0) => Status::success(format!("Saved {written} file(s)")),
+        (_, _) => Status::warning(format!(
+            "Saved {written} file(s); {skipped} buffer(s) have no file name yet"
+        )),
+    })
+}
+
+async fn build(app: &mut App, debug: bool) -> bool {
+    if let Err(error) = app.workspace.save_all() {
         app.fail_build(error.to_string());
         return false;
     }
@@ -927,17 +707,6 @@ async fn build(app: &mut App, runtimes: &mut Runtimes, debug: bool) -> bool {
             app.finish_build(outcome);
             if let Some(path) = &executable {
                 load_static_disassembly(app, path);
-                if unsaved {
-                    app.status = Status::success(format!(
-                        "{}; changes not yet saved in the editor were not included",
-                        app.status.text
-                    ));
-                }
-            } else if let Some((path, line)) = first_error_location(app) {
-                if runtimes.remote.is_some() {
-                    reveal_in_editor(app, runtimes, path, line).await;
-                    app.focus_panel(super::Panel::Editor);
-                }
             }
             executable.is_some()
         }
@@ -946,12 +715,6 @@ async fn build(app: &mut App, runtimes: &mut Runtimes, debug: bool) -> bool {
             false
         }
     }
-}
-
-fn first_error_location(app: &App) -> Option<(std::path::PathBuf, usize)> {
-    let diagnostic = crate::assembler::diagnostics::first_navigable(&app.diagnostics)?;
-    let file = diagnostic.file.as_deref()?;
-    Some((app.resolve_reported_path(file), diagnostic.line?))
 }
 
 /// Starts the built program on its own task.
@@ -1042,10 +805,7 @@ fn finish_pty_event(app: &mut App, runtimes: &mut Runtimes, event: PtyEvent) {
     match event {
         PtyEvent::Output(bytes) => {
             if let Some(terminal) = &mut app.terminal {
-                let replies = terminal.process(&bytes);
-                if !replies.is_empty() {
-                    let _ = runtimes.terminal().input(replies);
-                }
+                terminal.process(&bytes);
             }
         }
         PtyEvent::Finished(result) => {
@@ -1091,7 +851,7 @@ async fn start_session(
     terminal_events: &tokio::sync::mpsc::UnboundedSender<PtyEvent>,
     terminal_size: PtySize,
 ) {
-    if !build(app, runtimes, true).await {
+    if !build(app, true).await {
         return;
     }
     let terminal_runtime = &mut runtimes.debugger;
@@ -1575,7 +1335,11 @@ pub fn open_initial_file(app: &mut App, path: &Path) {
         return;
     }
     match app.workspace.open(path) {
-        Ok(_) => {}
+        Ok(_) => {
+            app.workspace
+                .active_mut()
+                .set_indent_width(app.settings.indent_width());
+        }
         Err(error) => app.status = Status::error(error.to_string()),
     }
 }
@@ -1627,133 +1391,6 @@ mod tests {
 
         open_project_entry(&mut app);
         assert_eq!(app.status.severity, crate::app::Severity::Warning);
-    }
-
-    #[test]
-    fn only_function_keys_and_bound_alt_chords_leave_the_editor() {
-        let keymap = crate::config::Keymap::defaults();
-        let key = |code, modifiers| KeyEvent::new(code, modifiers);
-        for left in [
-            key(KeyCode::F(6), KeyModifiers::NONE),
-            key(KeyCode::Char('2'), KeyModifiers::ALT),
-        ] {
-            assert!(editor_reserved_key(&keymap, left), "{left:?}");
-        }
-        assert_eq!(
-            terminal_escape(key(KeyCode::Char('p'), KeyModifiers::ALT)),
-            Some(Command::OpenPalette)
-        );
-        assert_eq!(
-            terminal_escape(key(KeyCode::Right, KeyModifiers::ALT)),
-            Some(Command::NextPanel)
-        );
-        assert_eq!(
-            terminal_escape(key(KeyCode::Char('x'), KeyModifiers::ALT)),
-            None
-        );
-        for kept in [
-            key(KeyCode::Tab, KeyModifiers::NONE),
-            key(KeyCode::Char('s'), KeyModifiers::CONTROL),
-            key(KeyCode::Char('q'), KeyModifiers::CONTROL),
-            key(KeyCode::Char('p'), KeyModifiers::CONTROL),
-            key(KeyCode::Char('x'), KeyModifiers::ALT),
-            key(KeyCode::Esc, KeyModifiers::NONE),
-        ] {
-            assert!(
-                !editor_reserved_key(&keymap, kept),
-                "{kept:?} belongs to the editor"
-            );
-        }
-    }
-
-    #[test]
-    fn keys_reach_the_editor_instead_of_the_keymap() {
-        let dir = tempfile::tempdir().expect("temp dir");
-        let mut app = app_for(dir.path());
-        app.editor_screen = Some(super::super::terminal::TerminalScreen::new(PtySize::new(
-            80, 24,
-        )));
-        let (control_tx, mut control_rx) = tokio::sync::mpsc::unbounded_channel();
-        let runtimes = Runtimes {
-            editor: Running {
-                control: Some(control_tx),
-                ..Running::default()
-            },
-            ..Runtimes::default()
-        };
-
-        let ctrl_q = KeyEvent::new(KeyCode::Char('q'), KeyModifiers::CONTROL);
-        assert_eq!(handle_key_event(&mut app, &runtimes, ctrl_q), Effect::None);
-        assert!(!app.should_quit);
-        assert!(matches!(
-            control_rx.try_recv(),
-            Ok(PtyControl::Input(bytes)) if bytes == [0x11]
-        ));
-
-        let build = KeyEvent::new(KeyCode::F(6), KeyModifiers::NONE);
-        assert_eq!(
-            handle_key_event(&mut app, &runtimes, build),
-            Effect::Build { debug: false }
-        );
-        assert!(control_rx.try_recv().is_err(), "F6 stays with ratasm");
-    }
-
-    #[tokio::test]
-    async fn the_editor_runs_in_the_panel_and_its_file_is_read_back() {
-        let dir = tempfile::tempdir().expect("temp dir");
-        let mut app = app_for(dir.path());
-        let path = dir.path().join("main.asm");
-        std::fs::write(&path, "ret\n").expect("write");
-        app.workspace.open(&path).expect("open");
-
-        let script = dir.path().join("fake-editor");
-        std::fs::write(
-            &script,
-            "#!/bin/sh\nprintf 'EDITING %s' \"$1\"\nprintf 'nop\\nret\\n' > \"$1\"\n",
-        )
-        .expect("write");
-        std::fs::set_permissions(&script, std::os::unix::fs::PermissionsExt::from_mode(0o755))
-            .expect("chmod");
-
-        let (events_tx, mut events_rx) = tokio::sync::mpsc::unbounded_channel();
-        let mut runtimes = Runtimes {
-            editor_events: Some(events_tx),
-            ..Runtimes::default()
-        };
-        let program = script.display().to_string();
-        app.editing = Some(path.clone());
-        app.editor_screen = Some(super::super::terminal::TerminalScreen::new(PtySize::new(
-            80, 24,
-        )));
-        let spec = crate::process::editor::Editor::new(program).spec(&path, 1, None);
-        let (control_tx, control_rx) = tokio::sync::mpsc::unbounded_channel();
-        runtimes.editor.control = Some(control_tx);
-        let events = runtimes.editor_events.clone().expect("sender");
-        tokio::spawn(crate::process::pty::run_interactive(
-            spec,
-            PtySize::new(80, 24),
-            control_rx,
-            events,
-        ));
-
-        let mut seen = String::new();
-        while app.editor_screen.is_some() {
-            let event = tokio::time::timeout(Duration::from_secs(5), events_rx.recv())
-                .await
-                .expect("the editor finishes")
-                .expect("an event");
-            if let PtyEvent::Output(bytes) = &event {
-                seen.push_str(&String::from_utf8_lossy(bytes));
-            }
-            finish_editor_event(&mut app, &mut runtimes, event);
-        }
-
-        assert!(
-            seen.contains("EDITING"),
-            "the editor drew into the panel: {seen:?}"
-        );
-        assert!(app.editing.is_none());
-        assert_eq!(app.workspace.active().buffer().to_text(), "nop\nret\n");
     }
 
     #[test]
@@ -1824,7 +1461,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn building_reads_what_the_editor_wrote_first() {
+    async fn building_writes_every_edited_buffer_first() {
         if !crate::process::is_available(Path::new("nasm"))
             || !crate::process::is_available(Path::new("ld"))
         {
@@ -1837,21 +1474,34 @@ mod tests {
         let entry = app.project.entry_path();
 
         open_initial_file(&mut app, &entry);
-        let edited = format!(
-            "; edited\n{}",
-            std::fs::read_to_string(&entry).expect("read")
-        );
-        std::fs::write(&entry, &edited).expect("write");
+        app.workspace.active_mut().insert("; edited\n");
+        assert!(app.workspace.has_unsaved_changes());
 
+        assert!(build(&mut app, false).await, "the build should succeed");
         assert!(
-            build(&mut app, &mut Runtimes::default(), false).await,
-            "the build should succeed"
+            !app.workspace.has_unsaved_changes(),
+            "an unsaved buffer would have been assembled from its old contents"
         );
-        assert_eq!(
-            app.workspace.active().buffer().to_text(),
-            edited,
-            "the view must show the source that was assembled"
-        );
+        assert!(std::fs::read_to_string(&entry)
+            .expect("read")
+            .contains("; edited"));
+    }
+
+    #[tokio::test]
+    async fn saving_everything_reports_what_it_wrote() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let mut app = app_for(dir.path());
+        let mut session = None;
+
+        settle(&mut app, &mut session, Effect::SaveAll).await;
+        assert_eq!(app.status.severity, crate::app::Severity::Info);
+
+        let entry = app.project.entry_path();
+        open_initial_file(&mut app, &entry);
+        app.workspace.active_mut().insert("x");
+        settle(&mut app, &mut session, Effect::SaveAll).await;
+        assert_eq!(app.status.severity, crate::app::Severity::Success);
+        assert!(!app.workspace.has_unsaved_changes());
     }
 
     #[tokio::test]
@@ -1866,10 +1516,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("temp dir");
         let mut app = app_for(dir.path());
 
-        assert!(
-            build(&mut app, &mut Runtimes::default(), false).await,
-            "the build should succeed"
-        );
+        assert!(build(&mut app, false).await, "the build should succeed");
         assert_eq!(app.status.severity, crate::app::Severity::Success);
         assert!(
             !app.disassembly.is_empty(),
@@ -1889,7 +1536,7 @@ mod tests {
         let mut app = app_for(dir.path());
         std::fs::write(app.project.entry_path(), "    this is not assembly\n").expect("write");
 
-        assert!(!build(&mut app, &mut Runtimes::default(), false).await);
+        assert!(!build(&mut app, false).await);
         assert_eq!(app.status.severity, crate::app::Severity::Error);
         assert!(app.disassembly.is_empty());
         assert!(!app.diagnostics.is_empty(), "the error should be recorded");
@@ -2014,6 +1661,20 @@ mod tests {
 
         settle(&mut app, &mut session, Effect::StopProgram).await;
         assert_eq!(app.status.severity, crate::app::Severity::Info);
+    }
+
+    #[tokio::test]
+    async fn saving_through_an_effect_writes_the_file() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let mut app = app_for(dir.path());
+        let mut session = None;
+
+        app.workspace.active_mut().insert("ret\n");
+        let path = dir.path().join("written.asm");
+        settle(&mut app, &mut session, Effect::SaveFile(path.clone())).await;
+
+        assert_eq!(std::fs::read_to_string(&path).expect("read"), "ret\n");
+        assert_eq!(app.status.severity, crate::app::Severity::Success);
     }
 
     #[tokio::test]
@@ -2182,7 +1843,7 @@ mod tests {
         app.toggle_breakpoint_in(&util, 1);
 
         let moved = dir.path().join("lib/helpers.asm");
-        rename_file(&mut app, &Runtimes::default(), &util, &moved);
+        rename_file(&mut app, &util, &moved);
         assert!(moved.is_file() && !util.exists(), "{}", app.status.text);
         assert!(app.breakpoints.is_set_at(&moved, 1));
         let saved = std::fs::read_to_string(dir.path().join(".ratasm.toml")).expect("read");

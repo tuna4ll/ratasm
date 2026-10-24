@@ -250,13 +250,23 @@ code, so a command missing here is a build failure rather than a surprise.
 | Identifier | Command |
 | --- | --- |
 | `file.new` | New file |
-| `file.edit` | Edit in $EDITOR |
 | `file.open` | Open file |
+| `file.save` | Save |
+| `file.save-as` | Save as |
+| `file.save-all` | Save all |
 | `file.add-to-project` | Add to project |
 | `file.close` | Close file |
 | `file.rename` | Rename file |
 | `file.delete` | Delete file |
 | `app.quit` | Quit |
+| `edit.undo` | Undo |
+| `edit.redo` | Redo |
+| `edit.select-all` | Select all |
+| `edit.copy` | Copy |
+| `edit.cut` | Cut |
+| `edit.paste` | Paste |
+| `edit.indent` | Indent |
+| `edit.dedent` | Dedent |
 | `navigate.next-panel` | Next panel |
 | `navigate.previous-panel` | Previous panel |
 | `navigate.next-document` | Next document |
@@ -267,10 +277,16 @@ code, so a command missing here is a build failure rather than a surprise.
 | `navigate.scroll-page-down` | Scroll down a page |
 | `navigate.scroll-to-top` | Scroll to the top |
 | `navigate.scroll-to-end` | Scroll to the end |
+| `navigate.go-to-line` | Go to line |
 | `navigate.go-to-address` | Go to address |
+| `navigate.go-to-definition` | Go to definition |
 | `navigate.go-to-first-error` | Go to first error |
 | `navigate.go-to-symbol` | Go to symbol |
 | `navigate.search` | Search in files |
+| `search.find` | Find |
+| `search.next` | Find next |
+| `search.previous` | Find previous |
+| `search.replace` | Replace |
 | `build.build` | Build |
 | `build.build-debug` | Build with debug info |
 | `build.run` | Run |
