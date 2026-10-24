@@ -686,6 +686,7 @@ fn save_everything(app: &mut App) -> Result<Status, crate::editor::workspace::Fi
 }
 
 async fn build(app: &mut App, debug: bool) -> bool {
+    app.project.rescan();
     if let Err(error) = app.workspace.save_all() {
         app.fail_build(error.to_string());
         return false;
@@ -1349,11 +1350,13 @@ pub fn open_project_entry(app: &mut App) {
     let entry = app.project.entry_path();
     if entry.is_file() {
         open_initial_file(app, &entry);
-    } else {
+    } else if app.project.is_explicit() {
         app.status = Status::warning(format!(
             "{} does not exist yet",
             workspace::display_path(&entry)
         ));
+    } else {
+        app.status = Status::info("No assembly files here yet; Ctrl+N creates one");
     }
 }
 

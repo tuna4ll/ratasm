@@ -133,11 +133,14 @@ fn new_project(name: &str, libc: bool) -> Result<ExitCode> {
 /// Resolves the project a path refers to.
 fn resolve_project(path: Option<&Path>) -> Result<Project> {
     let path = path.map_or_else(|| PathBuf::from("."), Path::to_path_buf);
-
-    if path.is_file() {
-        return Ok(Project::for_file_or_discover(&path));
+    let project = Project::open(&path)?;
+    if project.is_empty() && !project.is_explicit() {
+        anyhow::bail!(
+            "no assembly source in {}; add a .asm file or run `ratasm new`",
+            project.root().display()
+        );
     }
-    Project::discover(&path).map_err(Into::into)
+    Ok(project)
 }
 
 /// Builds a project and prints the tool output.
@@ -247,10 +250,13 @@ async fn open_interface(paths: &[PathBuf]) -> Result<ExitCode> {
         ratasm::config::Settings::default()
     });
 
-    let project = match paths.first() {
-        Some(path) => Project::for_file_or_discover(path),
-        None => Project::discover(Path::new("."))
-            .unwrap_or_else(|_| Project::for_file(Path::new("main.asm"))),
+    let start = paths.first().map_or(Path::new("."), PathBuf::as_path);
+    let project = match Project::open(start) {
+        Ok(project) => project,
+        Err(error) => {
+            eprintln!("ratasm: {error}");
+            Project::open(Path::new(".")).context("cannot open the current directory")?
+        }
     };
 
     let mut app =
@@ -399,10 +405,14 @@ mod tests {
     }
 
     #[test]
-    fn resolving_a_directory_without_a_project_file_reports_why() {
+    fn a_folder_of_sources_is_a_project_and_an_empty_one_is_explained() {
         let dir = tempfile::tempdir().expect("temp dir");
-        let error = resolve_project(Some(dir.path())).expect_err("must fail");
-        assert!(error.to_string().contains(".ratasm.toml"));
+        let error = resolve_project(Some(dir.path())).expect_err("nothing to build");
+        assert!(error.to_string().contains("no assembly source"), "{error}");
+
+        std::fs::write(dir.path().join("prog.asm"), "global _start\n_start:\n").expect("write");
+        let project = resolve_project(Some(dir.path())).expect("resolve");
+        assert!(project.entry_path().ends_with("prog.asm"));
     }
 
     #[test]

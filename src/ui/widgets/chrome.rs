@@ -354,23 +354,34 @@ pub fn explorer_lines<'a>(app: &App, width: usize) -> Vec<Line<'a>> {
             None => " ",
         };
 
-        let name = app
+        let relative = app
             .project
             .relative(path)
-            .unwrap_or_else(|| path.to_path_buf())
-            .display()
-            .to_string();
+            .unwrap_or_else(|| path.to_path_buf());
+        let folder = relative
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+            .map(|parent| format!("{}/", parent.display()))
+            .unwrap_or_default();
+        let name = relative
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_default();
 
         let style = if selected {
             theme.selection()
         } else if document.is_some() {
-            theme.base()
+            theme.bright()
         } else {
-            theme.dim()
+            theme.base()
         };
 
-        let mut spans = vec![Span::styled(format!("{marker}{state} {name}"), style)];
-        if !app.project.builds(path) {
+        let mut spans = vec![
+            Span::styled(format!("{marker}{state} "), style),
+            Span::styled(folder, if selected { style } else { theme.dim() }),
+            Span::styled(name, style),
+        ];
+        if crate::project::is_assembly(path) && !app.project.builds(path) {
             spans.push(Span::styled("  not built", theme.warning()));
         }
         lines.push(Line::from(spans));

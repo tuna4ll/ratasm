@@ -1313,10 +1313,10 @@ impl App {
 
     /// Re-reads the project's files for the explorer.
     pub fn refresh_project_files(&mut self) {
-        let mut files = crate::project::source_files_under(
+        self.project.rescan();
+        let mut files = crate::project::project_files_under(
             self.project.root(),
             &self.project.output_directory(),
-            3,
         );
 
         for path in self.project.source_paths() {

@@ -177,6 +177,104 @@ impl Project {
         Self::discover(source).unwrap_or_else(|_| Self::for_file(source))
     }
 
+    /// Opens the project `path` is in: the nearest `.ratasm.toml` above it,
+    /// or else the folder itself, with every assembly file in it as a source.
+    pub fn open(path: &Path) -> Result<Self, ProjectError> {
+        match Self::discover(path) {
+            Err(ProjectError::NotFound { .. }) => {}
+            found => return found,
+        }
+        let directory = if path.is_dir() {
+            path.to_path_buf()
+        } else {
+            path.parent()
+                .filter(|parent| !parent.as_os_str().is_empty())
+                .unwrap_or(Path::new("."))
+                .to_path_buf()
+        };
+        let directory = directory
+            .canonicalize()
+            .map_err(|source| ProjectError::Io {
+                path: directory.clone(),
+                source,
+            })?;
+        let root = directory
+            .ancestors()
+            .find(|candidate| {
+                candidate.join(".git").exists()
+                    || PROJECT_NAMES
+                        .iter()
+                        .any(|name| candidate.join(name).is_file())
+            })
+            .unwrap_or(&directory)
+            .to_path_buf();
+        let mut config = ProjectConfig::default();
+        config.project.name = root
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "project".to_owned());
+        let mut project = Self {
+            root,
+            config,
+            config_path: None,
+        };
+        project.rescan();
+        Ok(project)
+    }
+
+    /// For a folder without a project file, finds its sources and entry
+    /// again, so files added since are built too.
+    pub fn rescan(&mut self) {
+        if self.config_path.is_some() {
+            return;
+        }
+        let sources: Vec<PathBuf> = assembly_files_under(&self.root, &self.output_directory())
+            .into_iter()
+            .filter_map(|path| path.strip_prefix(&self.root).ok().map(Path::to_path_buf))
+            .collect();
+        let read =
+            |source: &PathBuf| std::fs::read_to_string(self.root.join(source)).unwrap_or_default();
+        let defines = |source: &PathBuf, symbol: &str| {
+            read(source).lines().any(|line| {
+                let mut words = line
+                    .split(';')
+                    .next()
+                    .unwrap_or_default()
+                    .split_whitespace();
+                words
+                    .next()
+                    .is_some_and(|word| word.eq_ignore_ascii_case("global"))
+                    && words.any(|word| word.trim_end_matches(',') == symbol)
+            })
+        };
+        let start = sources.iter().find(|source| defines(source, "_start"));
+        let main = sources.iter().find(|source| defines(source, "main"));
+        let entry = start
+            .or(main)
+            .or_else(|| sources.iter().find(|source| source.ends_with("main.asm")))
+            .or_else(|| sources.first())
+            .cloned()
+            .unwrap_or_else(|| PathBuf::from("main.asm"));
+        let build = &mut self.config.build;
+        if start.is_none() && main.is_some() {
+            build.linker = "gcc".to_owned();
+            build.linker_args = vec!["-no-pie".to_owned()];
+        } else {
+            build.linker = "ld".to_owned();
+            build.linker_args.clear();
+        }
+        self.config.project.sources = sources
+            .into_iter()
+            .filter(|source| *source != entry)
+            .collect();
+        self.config.project.entry = entry;
+    }
+
+    /// Whether the project has no assembly source at all.
+    pub fn is_empty(&self) -> bool {
+        !self.root.join(&self.config.project.entry).is_file()
+    }
+
     /// Creates a new project directory with a working hello-world program.
     pub fn create(root: &Path, name: &str) -> Result<Self, ProjectError> {
         Self::create_from(root, name, false)
@@ -423,9 +521,49 @@ fn write_new(path: &Path, contents: &str) -> Result<(), ProjectError> {
     })
 }
 
-/// Assembly sources found under `root`, for the file list.
-pub fn source_files_under(root: &Path, skip: &Path, depth: usize) -> Vec<PathBuf> {
-    fn walk(directory: &Path, skip: &Path, depth: usize, found: &mut Vec<PathBuf>) {
+const PROJECT_EXTENSIONS: [&str; 15] = [
+    "asm", "inc", "s", "S", "nasm", "mac", "c", "h", "ld", "lds", "mk", "md", "txt", "toml", "gdb",
+];
+const PROJECT_NAMES: [&str; 3] = ["Makefile", "makefile", "GNUmakefile"];
+const SKIPPED_DIRECTORIES: [&str; 3] = ["target", "node_modules", "__pycache__"];
+
+/// Every file worth showing in a project: sources, includes, Makefiles and
+/// notes, skipping hidden entries and the build output.
+pub fn project_files_under(root: &Path, skip: &Path) -> Vec<PathBuf> {
+    walk_files(root, skip, &|path| {
+        let name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default();
+        PROJECT_NAMES.contains(&name)
+            || path
+                .extension()
+                .and_then(|extension| extension.to_str())
+                .is_some_and(|extension| PROJECT_EXTENSIONS.contains(&extension))
+    })
+}
+
+/// The assembly sources under `root`, skipping the build output.
+pub fn assembly_files_under(root: &Path, skip: &Path) -> Vec<PathBuf> {
+    walk_files(root, skip, &|path| is_assembly(path))
+}
+
+/// Whether `path` is an assembly source the build assembles, not an include.
+pub fn is_assembly(path: &Path) -> bool {
+    matches!(
+        path.extension().and_then(|extension| extension.to_str()),
+        Some("asm" | "s" | "nasm")
+    )
+}
+
+fn walk_files(root: &Path, skip: &Path, keep: &dyn Fn(&Path) -> bool) -> Vec<PathBuf> {
+    fn walk(
+        directory: &Path,
+        skip: &Path,
+        depth: usize,
+        keep: &dyn Fn(&Path) -> bool,
+        found: &mut Vec<PathBuf>,
+    ) {
         let Ok(entries) = std::fs::read_dir(directory) else {
             return;
         };
@@ -433,26 +571,27 @@ pub fn source_files_under(root: &Path, skip: &Path, depth: usize) -> Vec<PathBuf
             let path = entry.path();
             let name = entry.file_name();
             let name = name.to_string_lossy();
-            if name.starts_with('.') || path == skip {
+            if name.starts_with('.') || same_place(&path, skip) {
                 continue;
             }
             if path.is_dir() {
-                if depth > 0 {
-                    walk(&path, skip, depth - 1, found);
+                if depth > 0 && !SKIPPED_DIRECTORIES.contains(&name.as_ref()) {
+                    walk(&path, skip, depth - 1, keep, found);
                 }
-            } else if matches!(
-                path.extension().and_then(|e| e.to_str()),
-                Some("asm" | "inc" | "s" | "nasm")
-            ) {
+            } else if keep(&path) {
                 found.push(path);
             }
         }
     }
 
     let mut found = Vec::new();
-    walk(root, skip, depth, &mut found);
+    walk(root, skip, 8, keep, &mut found);
     found.sort();
     found
+}
+
+fn same_place(a: &Path, b: &Path) -> bool {
+    a == b || matches!((a.canonicalize(), b.canonicalize()), (Ok(a), Ok(b)) if a == b)
 }
 
 /// Makes `path` absolute against the current directory.
@@ -468,6 +607,60 @@ fn absolute(path: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_folder_without_a_project_file_is_a_project() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        std::fs::create_dir_all(dir.path().join("src/lib")).expect("mkdir");
+        std::fs::write(
+            dir.path().join("src/lib/util.asm"),
+            "global helper\nhelper: ret\n",
+        )
+        .expect("write");
+        std::fs::write(
+            dir.path().join("src/start.asm"),
+            "  GLOBAL _start ; entry\n_start:\n",
+        )
+        .expect("write");
+        std::fs::write(dir.path().join("src/macros.inc"), "").expect("write");
+        std::fs::create_dir_all(dir.path().join("build")).expect("mkdir");
+        std::fs::write(dir.path().join("build/old.asm"), "").expect("write");
+        std::fs::create_dir(dir.path().join(".git")).expect("mkdir");
+
+        let mut project = Project::open(&dir.path().join("src/lib/util.asm")).expect("open");
+        assert!(!project.is_explicit());
+        assert_eq!(project.config().project.entry, Path::new("src/start.asm"));
+        assert_eq!(
+            project.config().project.sources,
+            [Path::new("src/lib/util.asm")]
+        );
+        assert_eq!(project.config().build.linker, "ld");
+
+        std::fs::write(dir.path().join("src/extra.asm"), "nop\n").expect("write");
+        project.rescan();
+        assert_eq!(project.config().project.sources.len(), 2);
+
+        let files = project_files_under(project.root(), &project.output_directory());
+        assert!(files.iter().any(|file| file.ends_with("macros.inc")));
+        assert!(!files.iter().any(|file| file.ends_with("old.asm")));
+    }
+
+    #[test]
+    fn a_folder_with_only_main_links_with_gcc() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        std::fs::write(dir.path().join("prog.asm"), "global main\nmain: ret\n").expect("write");
+        let project = Project::open(dir.path()).expect("open");
+        assert_eq!(project.config().project.entry, Path::new("prog.asm"));
+        assert_eq!(project.config().build.linker, "gcc");
+    }
+
+    #[test]
+    fn a_project_file_above_wins() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        Project::create(dir.path(), "demo").expect("create");
+        let project = Project::open(&dir.path().join("src")).expect("open");
+        assert!(project.is_explicit());
+    }
 
     #[test]
     fn a_dot_prefixed_source_is_still_built() {
