@@ -145,6 +145,8 @@ pub struct BuildSection {
     /// When absent the executable is named after the entry file and placed in
     /// [`BuildSection::output_directory`].
     pub executable: Option<PathBuf>,
+    /// Whether to build with the project's Makefile; unset uses it when there is one.
+    pub make: Option<bool>,
 }
 
 impl Default for BuildSection {
@@ -157,6 +159,7 @@ impl Default for BuildSection {
             objects: Vec::new(),
             output_directory: PathBuf::from("build"),
             executable: None,
+            make: None,
         }
     }
 }

@@ -296,6 +296,8 @@ pub enum PickerKind {
     Symbols,
     /// Lines containing the query in any project file.
     Search,
+    /// Targets of the project's Makefile.
+    MakeTargets,
 }
 
 impl PickerKind {
@@ -304,6 +306,7 @@ impl PickerKind {
         match self {
             PickerKind::Symbols => "Go to symbol",
             PickerKind::Search => "Search in files",
+            PickerKind::MakeTargets => "Run a make target",
         }
     }
 
@@ -312,6 +315,7 @@ impl PickerKind {
         match self {
             PickerKind::Symbols => "type part of a label, constant or macro",
             PickerKind::Search => "type at least two characters",
+            PickerKind::MakeTargets => "type to filter the targets",
         }
     }
 }

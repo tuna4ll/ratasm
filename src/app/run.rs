@@ -546,6 +546,24 @@ async fn perform(
 
         Effect::CreateFile(path) => create_file(app, &path),
 
+        Effect::Make(target) => {
+            if let Err(error) = save_everything(app) {
+                app.fail_build(error.to_string());
+            } else {
+                match assembler::make::build(&app.project, Some(&target)).await {
+                    Ok(outcome) => {
+                        let finished = outcome.success.then_some(outcome.duration.as_millis());
+                        app.finish_build(outcome);
+                        if let Some(millis) = finished {
+                            app.status =
+                                Status::success(format!("make {target} finished in {millis} ms"));
+                        }
+                    }
+                    Err(error) => app.fail_build(error.to_string()),
+                }
+            }
+        }
+
         Effect::RenameFile { from, to } => {
             rename_file(app, &from, &to);
             sync_breakpoints(app, session).await;
@@ -731,6 +749,9 @@ fn start_program(
         .as_ref()
         .and_then(|outcome| outcome.executable.clone())
     else {
+        app.status = Status::warning(
+            "The build produced no program to run; set build.executable in .ratasm.toml",
+        );
         return;
     };
 
@@ -861,6 +882,9 @@ async fn start_session(
         .as_ref()
         .and_then(|outcome| outcome.executable.clone())
     else {
+        app.status = Status::warning(
+            "The build produced no program to debug; set build.executable in .ratasm.toml",
+        );
         return;
     };
 

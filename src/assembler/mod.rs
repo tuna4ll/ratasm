@@ -6,6 +6,7 @@
 
 pub mod build;
 pub mod diagnostics;
+pub mod make;
 
 pub use build::{
     build, run_command, run_executable, BuildError, BuildOptions, BuildOutcome, BuildStep,

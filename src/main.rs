@@ -44,8 +44,11 @@ enum Command {
         #[arg(value_name = "NAME")]
         name: String,
         /// Start from a `main` that calls printf, linked with libc by gcc.
-        #[arg(long)]
+        #[arg(long, conflicts_with = "make")]
         libc: bool,
+        /// Build with a Makefile instead of a .ratasm.toml.
+        #[arg(long)]
+        make: bool,
     },
     /// Assemble and link the project, then exit.
     Build {
@@ -95,7 +98,9 @@ fn run(cli: Cli) -> Result<ExitCode> {
         .context("cannot start the async runtime")?;
 
     match cli.command {
-        Some(Command::New { name, libc }) => runtime.block_on(async { new_project(&name, libc) }),
+        Some(Command::New { name, libc, make }) => {
+            runtime.block_on(async { new_project(&name, libc, make) })
+        }
         Some(Command::Build { path, debug }) => {
             runtime.block_on(build_project(path.as_deref(), debug))
         }
@@ -106,23 +111,25 @@ fn run(cli: Cli) -> Result<ExitCode> {
 }
 
 /// Creates a project directory and reports what was written.
-fn new_project(name: &str, libc: bool) -> Result<ExitCode> {
+fn new_project(name: &str, libc: bool, make: bool) -> Result<ExitCode> {
     let root = PathBuf::from(name);
     if root.exists() && root.read_dir().is_ok_and(|mut dir| dir.next().is_some()) {
         anyhow::bail!("{} already exists and is not empty", root.display());
     }
 
-    let created = if libc {
+    let created = if make {
+        Project::create_with_make(&root, name)
+    } else if libc {
         Project::create_with_libc(&root, name)
     } else {
         Project::create(&root, name)
     };
-    let project =
-        created.with_context(|| format!("cannot create a project in {}", root.display()))?;
+    created.with_context(|| format!("cannot create a project in {}", root.display()))?;
 
     println!("Created {}", root.display());
-    println!("  {}", project.entry_path().display());
-    println!("  {}", root.join(Project::FILE_NAME).display());
+    println!("  {}", root.join("src").join("main.asm").display());
+    let described = if make { "Makefile" } else { Project::FILE_NAME };
+    println!("  {}", root.join(described).display());
     println!();
     println!("Next:");
     println!("  cd {name}");
@@ -345,7 +352,12 @@ mod tests {
     #[test]
     fn subcommands_parse_with_their_arguments() {
         let cli = Cli::try_parse_from(["ratasm", "new", "hello"]).expect("parse");
-        assert!(matches!(cli.command, Some(Command::New { name, libc: false }) if name == "hello"));
+        assert!(
+            matches!(cli.command, Some(Command::New { name, libc: false, make: false }) if name == "hello")
+        );
+        let cli = Cli::try_parse_from(["ratasm", "new", "--make", "m"]).expect("parse");
+        assert!(matches!(cli.command, Some(Command::New { make: true, .. })));
+        assert!(Cli::try_parse_from(["ratasm", "new", "--make", "--libc", "m"]).is_err());
         let cli = Cli::try_parse_from(["ratasm", "new", "--libc", "c"]).expect("parse");
         assert!(matches!(cli.command, Some(Command::New { libc: true, .. })));
 
@@ -425,7 +437,7 @@ mod tests {
         std::fs::create_dir("taken").expect("mkdir");
         std::fs::write("taken/file.txt", "keep me").expect("write");
 
-        let result = new_project("taken", false);
+        let result = new_project("taken", false, false);
         std::env::set_current_dir(previous).expect("restore cwd");
 
         assert!(result.is_err(), "must not overwrite an occupied directory");

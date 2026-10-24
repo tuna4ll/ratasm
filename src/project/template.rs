@@ -94,6 +94,38 @@ main:
 section .note.GNU-stack noalloc noexec nowrite progbits
 "#;
 
+/// The Makefile of a new `ratasm new --make` project named `name`.
+pub fn makefile(name: &str) -> String {
+    format!(
+        "ASM     := nasm
+ASFLAGS := -f elf64 -g -F dwarf
+LD      := ld
+SOURCES := $(wildcard src/*.asm)
+OBJECTS := $(SOURCES:src/%.asm=build/%.o)
+PROGRAM := build/{name}
+
+all: $(PROGRAM)
+
+$(PROGRAM): $(OBJECTS)
+\t$(LD) $^ -o $@
+
+build/%.o: src/%.asm | build
+\t$(ASM) $(ASFLAGS) $< -o $@
+
+build:
+\tmkdir -p $@
+
+run: $(PROGRAM)
+\t./$(PROGRAM)
+
+clean:
+\trm -rf build
+
+.PHONY: all run clean
+"
+    )
+}
+
 /// The `.gitignore` written into a new project.
 pub const GITIGNORE: &str = "build/\n*.o\n";
 

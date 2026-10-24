@@ -163,6 +163,8 @@ pub enum Command {
     Run,
     /// Stop the running program.
     Stop,
+    /// Run one target of the project's Makefile.
+    MakeTarget,
 
     /// Start a debug session.
     DebugStart,
@@ -264,6 +266,7 @@ impl Command {
             Command::BuildWithDebugInfo,
             Command::Run,
             Command::Stop,
+            Command::MakeTarget,
             Command::DebugStart,
             Command::DebugContinue,
             Command::DebugInterrupt,
@@ -348,6 +351,7 @@ impl Command {
             Command::BuildWithDebugInfo => "build.build-debug".into(),
             Command::Run => "build.run".into(),
             Command::Stop => "build.stop".into(),
+            Command::MakeTarget => "build.make-target".into(),
 
             Command::DebugStart => "debug.start".into(),
             Command::DebugContinue => "debug.continue".into(),
@@ -432,6 +436,7 @@ impl Command {
             Command::BuildWithDebugInfo => "Build with debug info".into(),
             Command::Run => "Run".into(),
             Command::Stop => "Stop the program".into(),
+            Command::MakeTarget => "Run a make target".into(),
 
             Command::DebugStart => "Start debugging".into(),
             Command::DebugContinue => "Continue".into(),
@@ -557,9 +562,11 @@ impl Command {
                 Category::Search
             }
 
-            Command::Build | Command::BuildWithDebugInfo | Command::Run | Command::Stop => {
-                Category::Build
-            }
+            Command::Build
+            | Command::BuildWithDebugInfo
+            | Command::Run
+            | Command::Stop
+            | Command::MakeTarget => Category::Build,
 
             Command::DebugStart
             | Command::DebugContinue
@@ -607,6 +614,7 @@ impl Command {
                 | Command::DeleteFile
                 | Command::GoToSymbol
                 | Command::SearchFiles
+                | Command::MakeTarget
                 | Command::AddWatchpoint
                 | Command::SetBreakpointCondition
                 | Command::SetRegister

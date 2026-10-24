@@ -285,6 +285,25 @@ impl Project {
         Self::create_from(root, name, true)
     }
 
+    /// Creates a project built by a Makefile, with no `.ratasm.toml`.
+    pub fn create_with_make(root: &Path, name: &str) -> Result<Self, ProjectError> {
+        let makefile = root.join("Makefile");
+        if makefile.exists() {
+            return Err(ProjectError::AlreadyExists { path: makefile });
+        }
+        let name = match name.trim() {
+            "" => "program",
+            name => Path::new(name)
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("program"),
+        };
+        write_new(&root.join("src").join("main.asm"), template::HELLO_WORLD)?;
+        write_new(&makefile, &template::makefile(name))?;
+        write_new(&root.join(".gitignore"), template::GITIGNORE)?;
+        Self::open(root)
+    }
+
     fn create_from(root: &Path, name: &str, libc: bool) -> Result<Self, ProjectError> {
         let config_path = root.join(Self::FILE_NAME);
         if config_path.exists() {

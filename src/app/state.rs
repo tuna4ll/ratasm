@@ -75,6 +75,8 @@ pub enum Effect {
     OpenFile(PathBuf),
     /// Assemble and run the scratchpad snippet.
     RunScratchpad,
+    /// Run one target of the project's Makefile.
+    Make(String),
     /// Create an empty file on disk, if it does not exist, and open it.
     CreateFile(PathBuf),
     /// Move a file on disk.
@@ -562,6 +564,13 @@ impl App {
                 Effect::Run
             }
             Command::Stop => Effect::StopProgram,
+            Command::MakeTarget => {
+                if crate::assembler::make::makefile(&self.project).is_none() {
+                    self.status = Status::warning("This project has no Makefile");
+                    return Effect::None;
+                }
+                self.open_picker(PickerKind::MakeTargets)
+            }
 
             Command::DebugStart => {
                 if self.debugger.state().can_launch() || self.debugger.state().can_build() {
@@ -946,6 +955,7 @@ impl App {
         let items = match picker.kind() {
             PickerKind::Symbols => self.symbol_items(&query),
             PickerKind::Search => self.search_items(&query),
+            PickerKind::MakeTargets => self.make_target_items(&query),
         };
         if let Mode::Picker(picker) = &mut self.mode {
             picker.set_items(items);
@@ -994,6 +1004,26 @@ impl App {
             .collect()
     }
 
+    fn make_target_items(&self, query: &str) -> Vec<PickItem> {
+        let Some(makefile) = crate::assembler::make::makefile(&self.project) else {
+            return Vec::new();
+        };
+        let text = std::fs::read_to_string(&makefile).unwrap_or_default();
+        let items: Vec<PickItem> = crate::assembler::make::targets(&text)
+            .into_iter()
+            .map(|(name, line)| PickItem {
+                detail: format!("Makefile:{line}"),
+                label: name,
+                path: makefile.clone(),
+                line,
+            })
+            .collect();
+        crate::command::palette::rank(query, items.iter().map(|item| item.label.as_str()))
+            .into_iter()
+            .filter_map(|(index, _)| items.get(index).cloned())
+            .collect()
+    }
+
     fn search_items(&self, query: &str) -> Vec<PickItem> {
         const LIMIT: usize = 500;
         if query.chars().count() < 2 {
@@ -1028,11 +1058,15 @@ impl App {
         let Mode::Picker(picker) = &self.mode else {
             return Effect::None;
         };
+        let kind = picker.kind();
         let Some(item) = picker.selected_item().cloned() else {
             self.cancel_overlay();
             return Effect::None;
         };
         self.cancel_overlay();
+        if kind == PickerKind::MakeTargets {
+            return self.start_make_target(item.label);
+        }
         if self.show_file(&item.path) {
             self.workspace.active_mut().reveal(item.line - 1);
         }
@@ -1060,6 +1094,16 @@ impl App {
         };
         self.cancel_overlay();
         self.apply(&command)
+    }
+
+    fn start_make_target(&mut self, target: String) -> Effect {
+        if !self.debugger.state().can_build() {
+            self.status = Status::warning("Stop the debug session before running make");
+            return Effect::None;
+        }
+        let _ = self.debugger.apply(Transition::BuildStarted);
+        self.status = Status::info(format!("make {target}…"));
+        Effect::Make(target)
     }
 
     /// Starts a build, refusing while a session holds the executable.

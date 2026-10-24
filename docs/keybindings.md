@@ -291,6 +291,7 @@ code, so a command missing here is a build failure rather than a surprise.
 | `build.build-debug` | Build with debug info |
 | `build.run` | Run |
 | `build.stop` | Stop the program |
+| `build.make-target` | Run a make target |
 | `debug.start` | Start debugging |
 | `debug.continue` | Continue |
 | `debug.interrupt` | Interrupt |

@@ -142,6 +142,9 @@ impl BuildOutcome {
 
 /// Assembles and links a project.
 pub async fn build(project: &Project, options: BuildOptions) -> Result<BuildOutcome, BuildError> {
+    if super::make::makefile(project).is_some() {
+        return super::make::build(project, None).await;
+    }
     let started = std::time::Instant::now();
     let config = project.config();
 
