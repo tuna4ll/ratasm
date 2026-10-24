@@ -1439,9 +1439,26 @@ async fn refresh_state(app: &mut App, session: &mut Option<GdbSession>) {
         }
     }
 
+    reveal_current_instruction(app);
+
     if let Some(address) = app.memory_address {
         read_memory(app, session, address).await;
     }
+}
+
+fn reveal_current_instruction(app: &mut App) {
+    let Some(row) = app.current_address.and_then(|address| {
+        app.disassembly
+            .iter()
+            .position(|line| line.instruction.address == address)
+    }) else {
+        return;
+    };
+    let last = app.disassembly.len().saturating_sub(1);
+    app.scroll
+        .reveal(super::Panel::Disassembly, (row + 4).min(last));
+    app.scroll
+        .reveal(super::Panel::Disassembly, row.saturating_sub(2));
 }
 
 /// Reads memory into the memory panel.
@@ -2135,6 +2152,22 @@ mod tests {
         settle(&mut app, &mut session, Effect::DebugContinue).await;
         assert!(session.is_none(), "{}", app.status.text);
         terminal.abort();
+    }
+
+    #[test]
+    fn the_disassembly_scrolls_to_the_instruction_being_executed() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let mut app = app_for(dir.path());
+        let bytes = [0x90u8; 64];
+        app.disassembly = disassembler::decode(&bytes, 0x1000, app.disassembly_syntax)
+            .into_iter()
+            .map(disassembler::DisassemblyLine::bare)
+            .collect();
+        app.scroll.fit(super::super::Panel::Disassembly, 64, 10);
+        app.current_address = Some(0x1000 + 40);
+        reveal_current_instruction(&mut app);
+        let offset = app.scroll.offset(super::super::Panel::Disassembly);
+        assert!((31..=38).contains(&offset), "{offset}");
     }
 
     #[test]
