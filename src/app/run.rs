@@ -26,6 +26,9 @@ use super::{App, Status};
 /// How long to wait for the program to stop after a step.
 const STOP_TIMEOUT: Duration = Duration::from_secs(15);
 
+/// How often open files are compared with what is on disk.
+const DISK_CHECK: Duration = Duration::from_secs(1);
+
 /// How often to redraw when nothing has happened.
 const TICK: Duration = Duration::from_millis(250);
 
@@ -140,6 +143,7 @@ pub async fn run(mut app: App, terminal: &mut Tui) -> Result<()> {
     let (finished_tx, mut finished_rx) = tokio::sync::mpsc::unbounded_channel::<Background>();
     let (pty_tx, mut pty_rx) = tokio::sync::mpsc::unbounded_channel::<PtyEvent>();
     let mut runtimes = Runtimes::default();
+    let mut last_disk_check = std::time::Instant::now();
 
     loop {
         let size = terminal.size().context("cannot read the terminal size")?;
@@ -191,6 +195,11 @@ pub async fn run(mut app: App, terminal: &mut Tui) -> Result<()> {
         )
         .await;
         drain_debugger_events(&mut app, &mut session).await;
+        if last_disk_check.elapsed() >= DISK_CHECK {
+            last_disk_check = std::time::Instant::now();
+            report_disk_changes(&mut app);
+            app.refresh_project_files();
+        }
         if runtimes.inferior_orphaned(session.is_some()) {
             let _ = runtimes.debugger.request_stop();
         }
@@ -689,6 +698,28 @@ fn delete_file(app: &mut App, path: &Path) {
     }
     app.status = status;
     app.refresh_project_files();
+}
+
+fn report_disk_changes(app: &mut App) {
+    let changes = app.workspace.check_disk();
+    let Some(last) = changes.last() else {
+        return;
+    };
+    use crate::editor::DiskChange;
+    app.status = match last {
+        DiskChange::Reloaded(path) => Status::info(format!(
+            "{} changed on disk and was reloaded",
+            workspace::display_path(path)
+        )),
+        DiskChange::Conflict(path) => Status::warning(format!(
+            "{} changed on disk; your unsaved edits were kept, saving overwrites it",
+            workspace::display_path(path)
+        )),
+        DiskChange::Deleted(path) => Status::warning(format!(
+            "{} was deleted on disk; save to write it again",
+            workspace::display_path(path)
+        )),
+    };
 }
 
 /// Builds the project, reporting the outcome.

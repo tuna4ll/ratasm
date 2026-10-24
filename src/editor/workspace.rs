@@ -179,6 +179,25 @@ pub struct Workspace {
     documents: Vec<Document>,
     active: usize,
     recent_files: Vec<PathBuf>,
+    stamps: std::collections::HashMap<PathBuf, Stamp>,
+}
+
+type Stamp = (std::time::SystemTime, u64);
+
+fn stamp(path: &Path) -> Option<Stamp> {
+    let meta = std::fs::metadata(path).ok()?;
+    Some((meta.modified().ok()?, meta.len()))
+}
+
+/// A file that changed on disk behind the editor's back.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DiskChange {
+    /// It had no unsaved changes, so the new text was loaded.
+    Reloaded(PathBuf),
+    /// It has unsaved changes, so the buffer was kept.
+    Conflict(PathBuf),
+    /// It no longer exists.
+    Deleted(PathBuf),
 }
 
 impl Workspace {
@@ -191,6 +210,7 @@ impl Workspace {
             documents: vec![Document::new()],
             active: 0,
             recent_files: Vec::new(),
+            stamps: std::collections::HashMap::new(),
         }
     }
 
@@ -271,6 +291,7 @@ impl Workspace {
 
         let contents = read_file(path)?;
         let document = Document::from_file_contents(path, &contents);
+        self.record(path);
 
         let index = if self.documents.len() == 1
             && self.documents[0].path().is_none()
@@ -287,6 +308,47 @@ impl Workspace {
         self.active = index;
         self.remember(path);
         Ok(index)
+    }
+
+    fn record(&mut self, path: &Path) {
+        if let Some(stamp) = stamp(path) {
+            self.stamps.insert(path.to_path_buf(), stamp);
+        }
+    }
+
+    /// Finds open files that changed on disk, reloading those without
+    /// unsaved changes. Each change is reported once.
+    pub fn check_disk(&mut self) -> Vec<DiskChange> {
+        let mut changes = Vec::new();
+        for document in &mut self.documents {
+            let Some(path) = document.path().map(Path::to_path_buf) else {
+                continue;
+            };
+            let Some(known) = self.stamps.get(&path).copied() else {
+                continue;
+            };
+            let Some(now) = stamp(&path) else {
+                self.stamps.remove(&path);
+                changes.push(DiskChange::Deleted(path));
+                continue;
+            };
+            if now == known {
+                continue;
+            }
+            self.stamps.insert(path.clone(), now);
+            if document.is_modified() {
+                changes.push(DiskChange::Conflict(path));
+                continue;
+            }
+            match read_file(&path) {
+                Ok(text) if text != document.buffer().to_text() => {
+                    document.reload(&text);
+                    changes.push(DiskChange::Reloaded(path));
+                }
+                _ => {}
+            }
+        }
+        changes
     }
 
     /// Adds an empty untitled document and activates it.
@@ -317,6 +379,7 @@ impl Workspace {
     pub fn save_active_as(&mut self, path: &Path) -> Result<PathBuf, FileError> {
         let contents = self.active().buffer().to_text();
         write_file_atomically(path, &contents)?;
+        self.record(path);
 
         let document = self.active_mut();
         document.set_path(path);
@@ -339,6 +402,7 @@ impl Workspace {
                 continue;
             };
             write_file_atomically(&path, &self.documents[index].buffer().to_text())?;
+            self.record(&path);
             self.documents[index].mark_saved();
             written += 1;
         }
@@ -710,6 +774,43 @@ mod tests {
     fn a_leading_dot_is_not_shown() {
         assert_eq!(display_path(Path::new("./src/main.asm")), "src/main.asm");
         assert_eq!(display_path(Path::new("../x.asm")), "../x.asm");
+    }
+
+    #[test]
+    fn changes_on_disk_are_reloaded_or_reported() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let clean = dir.path().join("clean.asm");
+        let edited = dir.path().join("edited.asm");
+        std::fs::write(&clean, "nop\n").expect("write");
+        std::fs::write(&edited, "nop\n").expect("write");
+        let mut workspace = Workspace::new();
+        workspace.open(&clean).expect("open");
+        let index = workspace.open(&edited).expect("open");
+        workspace.set_active(index);
+        workspace.active_mut().insert("; mine\n");
+        assert!(workspace.check_disk().is_empty());
+
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        std::fs::write(&clean, "ret\n").expect("write");
+        std::fs::write(&edited, "ret\n").expect("write");
+        let mut changes = workspace.check_disk();
+        changes.sort_by_key(|change| format!("{change:?}"));
+        assert_eq!(
+            changes,
+            [
+                DiskChange::Conflict(edited.clone()),
+                DiskChange::Reloaded(clean.clone())
+            ]
+        );
+        assert_eq!(workspace.documents()[0].buffer().to_text(), "ret\n");
+        assert!(workspace.documents()[1]
+            .buffer()
+            .to_text()
+            .starts_with("; mine"));
+        assert!(workspace.check_disk().is_empty(), "reported once");
+
+        std::fs::remove_file(&clean).expect("remove");
+        assert_eq!(workspace.check_disk(), [DiskChange::Deleted(clean)]);
     }
 
     #[test]

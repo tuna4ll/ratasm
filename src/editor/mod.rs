@@ -24,4 +24,4 @@ pub use position::{Position, Range};
 pub use search::{find_all, SearchOptions};
 pub use symbols::{Symbol, SymbolKind};
 pub use syntax::{tokenize, Token, TokenKind};
-pub use workspace::{FileError, Workspace};
+pub use workspace::{DiskChange, FileError, Workspace};
