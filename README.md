@@ -42,13 +42,13 @@ first, download it, then run `sh install.sh`.
 Or `cargo install ratasm`, or clone and `cargo install --path .`.
 
 ratasm drives the standard Linux toolchain rather than bundling one: `nasm` to
-assemble, `ld` to link, and `gdb` to debug. Everything except debugging works
-without `gdb`.
+assemble, `ld` to link, `gdb` to debug, and `make` for projects that have a
+Makefile. Everything except debugging works without `gdb`.
 
 ```sh
-sudo apt install nasm binutils gdb      # Debian, Ubuntu
-sudo dnf install nasm binutils gdb      # Fedora
-sudo pacman -S nasm binutils gdb        # Arch
+sudo apt install nasm binutils gdb make      # Debian, Ubuntu
+sudo dnf install nasm binutils gdb make      # Fedora
+sudo pacman -S nasm binutils gdb make        # Arch
 ```
 
 Run `ratasm doctor` to check what is installed. Linux on x86-64 only for now.
@@ -62,104 +62,103 @@ ratasm
 ```
 
 `ratasm new` writes a working, commented `write`/`exit` program rather than a
-stub. <kbd>F6</kbd> assembles it, <kbd>F5</kbd> runs it, <kbd>F9</kbd> sets a
-breakpoint on the cursor's line, and <kbd>F7</kbd> steps one instruction while
-you watch the registers move.
+stub. <kbd>F6</kbd> builds it, <kbd>F5</kbd> runs it, <kbd>F9</kbd> sets a
+breakpoint on the cursor's line, <kbd>F12</kbd> starts debugging, and
+<kbd>F7</kbd> steps one instruction while you watch the registers move.
+
+| Command | Starts from |
+| --- | --- |
+| `ratasm new NAME` | `write`/`exit` with syscalls, built by nasm and ld |
+| `ratasm new --make NAME` | the same program with a `Makefile` (`all`, `run`, `clean`) |
+| `ratasm new --libc NAME` | a `main` that calls `printf`, linked by gcc |
+
+Any folder of assembly is a project too: run `ratasm` in it, or
+`ratasm path/to/file.asm`. Without a project file ratasm builds every `.asm`
+file in the folder; with a `Makefile` it runs `make`.
 
 Running opens a real terminal in the Output panel. Programs can prompt, read
 input, move the cursor and use ANSI colour; the same terminal is attached when
 the program runs under GDB. <kbd>Ctrl</kbd>+<kbd>F5</kbd> stops it.
 
-`ratasm new --libc hello` starts from a `main` that calls `printf` instead,
-linked against the C library by `gcc`; debugging stops at `main`.
+## The IDE
 
-`ratasm file.asm` opens single files, several at once if you name several.
+<img src="assets/screenshot-code.png" alt="the code page: editor with a breakpoint and an error, project files, the program's output" width="100%">
 
-## Editing
+- **Editor** with tabs, undo and redo, selection, clipboard, find and replace,
+  go to line, go to definition, NASM highlighting and bracket pairing.
+  Errors and warnings from the last build sit beside their lines, and a failed
+  build puts the cursor on the first one.
+- **Project** files in the explorer: create, rename, move and delete them
+  there. Files changed on disk by something else are reloaded.
+- **Search**: <kbd>Ctrl</kbd>+<kbd>T</kbd> jumps to any label, constant or
+  macro in the project, <kbd>Alt</kbd>+<kbd>F</kbd> searches every file.
+- **Builds** with nasm and ld, or with your `Makefile`; *Run a make target*
+  in the palette runs `clean`, `run` or any other target.
+- **Debugger**: breakpoints, conditions, watchpoints, stepping forwards and
+  backwards, writable registers, memory, the call stack, and disassembly that
+  names branch targets.
+- **Sessions**: open files and breakpoints come back when you reopen the
+  project.
 
-The Editor panel runs your own editor. With Neovim, ratasm drives it: builds
-save its buffers, <kbd>F9</kbd> sets a breakpoint on its cursor line, errors
-and breakpoints show in its sign column, and a failed build puts the cursor on
-the first error. Any other editor works too, with the file read back from disk.
-<kbd>Ctrl</kbd>+<kbd>T</kbd> jumps to a symbol and <kbd>Ctrl</kbd>+<kbd>F</kbd>
-searches every file of the project. Open files and breakpoints come back the
-next time you open the project.
-
-## Pages
-
-The interface is four pages, each holding the panels for one activity.
-<kbd>Alt</kbd> plus the number along the top opens one; <kbd>Tab</kbd> moves
-between the panels of the page you are on.
-
-| Page | For |
-| --- | --- |
-| Code | Writing and building: source view, project files, build output |
-| Debug | Watching the machine: registers, flags, stack, disassembly |
-| Learn | Lessons and questions, with a scratchpad to try them in |
-| Reference | Looking up a system call or what an instruction does |
+There are two pages. <kbd>Alt</kbd>+<kbd>1</kbd> is **Code**: editor,
+explorer, output. <kbd>Alt</kbd>+<kbd>2</kbd> is **Debug**: editor, registers
+and flags, stack, disassembly and an explanation of the current instruction.
+<kbd>F1</kbd> switches to the study mode, **Learn** and **Reference**: lessons
+and questions checked against the processor, a scratchpad that runs one
+instruction, and the system call and instruction reference.
 
 <details>
-<summary>Code, search, Learn and Reference</summary>
+<summary>Search, Learn and Reference</summary>
 
-<img src="assets/screenshot-code.png" alt="the code page with Neovim, a breakpoint and the program's output" width="100%">
 <img src="assets/screenshot-search.png" alt="searching every file of the project" width="100%">
-<img src="assets/screenshot-learn.png" alt="the learn page" width="100%">
+<img src="assets/screenshot-learn.png" alt="the learn page with the scratchpad" width="100%">
 <img src="assets/screenshot-reference.png" alt="the reference page" width="100%">
 
 </details>
-
-Panels adapt to the terminal. Anything taller than its panel scrolls, with a
-scrollbar to say so; the mouse wheel moves whatever it is pointing at. Below
-roughly 100 columns a page keeps its main panel and puts the rest behind a tab
-strip rather than squeezing a register view into a width where it shows
-nothing.
 
 ## Keys
 
 | Key | Action |
 | --- | --- |
-| <kbd>F5</kbd> / <kbd>F6</kbd> | Run or continue / build |
+| <kbd>F6</kbd> / <kbd>F5</kbd> | Build / run, or continue when paused |
+| <kbd>F12</kbd> / <kbd>Shift</kbd>+<kbd>F12</kbd> | Start / stop debugging |
+| <kbd>F9</kbd> | Toggle a breakpoint on the cursor's line |
 | <kbd>F7</kbd> / <kbd>F8</kbd> / <kbd>F10</kbd> | Step instruction / over / source line |
 | <kbd>Shift</kbd>+<kbd>F7</kbd> | Step one instruction backwards |
-| <kbd>F9</kbd> | Toggle a breakpoint on the cursor's line |
-| <kbd>F1</kbd> / <kbd>F2</kbd> | Learning panel / scratchpad |
-| <kbd>F3</kbd> | Show the complete status message in Output |
-| <kbd>Ctrl</kbd>+<kbd>P</kbd> | Command palette |
-| <kbd>Ctrl</kbd>+<kbd>E</kbd> / <kbd>Ctrl</kbd>+<kbd>O</kbd> | Edit in `$EDITOR` / open |
-| <kbd>Ctrl</kbd>+<kbd>G</kbd> | Show an address in the memory panel |
-| <kbd>Ctrl</kbd>+<kbd>K</kbd> | Syscall finder |
-| <kbd>Ctrl</kbd>+<kbd>T</kbd> / <kbd>Ctrl</kbd>+<kbd>F</kbd> | Go to symbol / search in files |
-| <kbd>Alt</kbd>+<kbd>←</kbd> / <kbd>→</kbd> | Previous / next panel, from anywhere |
-| <kbd>Alt</kbd>+<kbd>1</kbd>..<kbd>4</kbd> | Open a page |
+| <kbd>Ctrl</kbd>+<kbd>S</kbd> / <kbd>Ctrl</kbd>+<kbd>N</kbd> / <kbd>Ctrl</kbd>+<kbd>O</kbd> | Save / new file / open |
+| <kbd>Ctrl</kbd>+<kbd>F</kbd> / <kbd>Alt</kbd>+<kbd>F</kbd> | Find in file / search the project |
+| <kbd>Ctrl</kbd>+<kbd>T</kbd> / <kbd>Ctrl</kbd>+<kbd>G</kbd> | Go to symbol / line |
+| <kbd>Ctrl</kbd>+<kbd>P</kbd> | Command palette: every command, with its key |
+| <kbd>Alt</kbd>+<kbd>1</kbd> / <kbd>2</kbd> | Code / Debug page |
+| <kbd>Alt</kbd>+<kbd>←</kbd> / <kbd>→</kbd> | Previous / next panel |
+| <kbd>F1</kbd> | Learn and Reference, and back |
 
-Every binding is configurable, and conflicts are reported at start-up instead
-of silently shadowing one another. Full list:
-[docs/keybindings.md](docs/keybindings.md).
+Every binding is configurable, and conflicts are reported at start-up.
+Full list: [docs/keybindings.md](docs/keybindings.md).
 
 ## Configuration
 
-Per-project settings live in `.ratasm.toml` beside your source. Every field has
-a default, so you write down only what differs.
+Nothing is required. A `.ratasm.toml` in the project root pins down what would
+otherwise be inferred:
 
 ```toml
 [project]
-name = "hello"
 entry = "src/main.asm"
 sources = ["src/util.asm"]
 
 [build]
 assembler_args = ["-f", "elf64"]
+# make = false            # ignore the Makefile
+# executable = "build/x"  # the program a Makefile builds
 
 [run]
-timeout_ms = 5000        # 0 disables the limit
+timeout_ms = 5000         # 0 disables the limit
 ```
 
 A misspelled key is an error at load time rather than a setting that quietly
-does nothing, and paths may not escape the project directory. Reference:
+does nothing, and paths may not escape the project directory. Editor, theme,
+debugger and key settings live in `~/.config/ratasm/config.toml`. Reference:
 [docs/configuration.md](docs/configuration.md).
-
-A single `.asm` file with no project file works too: ratasm uses the defaults
-and treats the file's directory as the root.
 
 ## Security
 
@@ -183,8 +182,8 @@ and never through a shell.
 - Source-level stepping needs debug information. Without it you get
   instruction-level stepping.
 - One debug session at a time, no multi-threaded targets.
-- Only Neovim is driven. Other editors cannot report their cursor or save on
-  request, so <kbd>F9</kbd> asks for a line and a build uses what is on disk.
+- With a Makefile, debug information is the Makefile's to ask for
+  (`-g -F dwarf` for nasm).
 - Stepping backwards needs GDB's recording, which is on by default and costs
   time per instruction. `record = false` turns it off.
 - Copying reaches the system clipboard through OSC 52 where the terminal allows
@@ -199,14 +198,14 @@ cargo clippy --all-targets --all-features -- -D warnings
 cargo test --all-features
 ```
 
-All three must pass. Tests needing `nasm`, `ld` or `gdb` skip themselves when
-those are missing. Workflow: [CONTRIBUTING.md](CONTRIBUTING.md). Architecture
+All three must pass. Tests needing `nasm`, `ld`, `gdb`, `make` or `gcc` skip
+themselves when those are missing. Workflow: [CONTRIBUTING.md](CONTRIBUTING.md). Architecture
 notes: [docs/architecture.md](docs/architecture.md).
 
 ## Roadmap
 
-AT&T syntax throughout, GAS source support, driving Vim and Helix the way
-Neovim is driven, and AArch64 and RISC-V back ends.
+AT&T syntax throughout, GAS source support, a C front end for mixed projects,
+and AArch64 and RISC-V back ends.
 
 ## Licence
 

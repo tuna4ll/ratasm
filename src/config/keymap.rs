@@ -280,6 +280,12 @@ impl Keymap {
 
         bind(KeyBinding::ctrl(KeyCode::Char('p')), Command::OpenPalette);
         bind(KeyBinding::ctrl(KeyCode::Char('f')), Command::Search);
+        bind(KeyBinding::plain(KeyCode::F(3)), Command::SearchNext);
+        bind(
+            KeyBinding::new(KeyCode::F(3), KeyModifiers::SHIFT),
+            Command::SearchPrevious,
+        );
+        bind(KeyBinding::ctrl(KeyCode::Char('r')), Command::Replace);
         bind(KeyBinding::ctrl(KeyCode::Char('g')), Command::GoToLine);
         bind(KeyBinding::ctrl(KeyCode::Char('t')), Command::GoToSymbol);
         bind(
@@ -560,6 +566,8 @@ mod tests {
             ("F12", Command::DebugStart),
             ("shift+F12", Command::DebugStop),
             ("ctrl+t", Command::GoToSymbol),
+            ("F3", Command::SearchNext),
+            ("ctrl+r", Command::Replace),
             ("alt+f", Command::SearchFiles),
             ("alt+1", Command::GoToPage(Page::Code)),
             ("alt+2", Command::GoToPage(Page::Debug)),

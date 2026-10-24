@@ -1,9 +1,36 @@
 # Configuration
 
+## Projects
+
+A project is a folder. `ratasm` opens the folder you start it in, or the one
+holding the file you name, and walks upwards to find its root: the nearest
+folder with a `.ratasm.toml`, else the nearest with a `Makefile` or a `.git`,
+else the folder itself. The explorer shows every source, include, Makefile and
+note under the root.
+
+How the project is built depends on what is in it:
+
+| The root holds | F6 runs |
+| --- | --- |
+| A `Makefile` | `make`, in the root |
+| A `.ratasm.toml` | nasm and ld as configured below |
+| Neither | nasm on every `.asm` file, then ld |
+
+Without a project file, the entry is the file that declares `global _start`,
+or else `global main`; a program with only `main` is linked by `gcc -no-pie`
+against the C library. Files added later are built too.
+
+With a Makefile, the program to run and debug is `build.executable` when the
+project file sets it, and otherwise the most recently written ELF executable in
+the project. Errors and warnings in make's output are placed beside their lines.
+*Run a make target* in the command palette runs any other target. Debug
+information is the Makefile's business: pass `-g -F dwarf` to nasm, as
+`ratasm new --make` does.
+
 ## Project settings: `.ratasm.toml`
 
-Placed in the project root, beside your source. Every field has a default, so
-you only write down what differs from the defaults.
+Optional. Placed in the project root, it pins down what would otherwise be
+inferred. Every field has a default, so you only write down what differs.
 
 ```toml
 [project]
@@ -52,7 +79,8 @@ recognised but not implemented.
 | `linker_args` | `[]` | Extra linker arguments. |
 | `objects` | `[]` | Pre-built object files to link in. |
 | `output_directory` | `"build"` | Where artefacts are written. |
-| `executable` | *(from the entry file's name)* | Explicit output path. |
+| `executable` | *(from the entry file's name)* | Explicit output path; with a Makefile, the program it builds. |
+| `make` | *(when there is a Makefile)* | `false` builds with nasm and ld even though a Makefile exists. |
 
 The default commands are exactly:
 
@@ -87,16 +115,6 @@ time rather than becoming a setting that silently does nothing.
 are rejected, so a project file cannot direct writes to arbitrary locations on
 your filesystem.
 
-## Working without a project file
-
-Opening a single `.asm` file with no `.ratasm.toml` anywhere above it works.
-`ratasm` builds an implicit project: the file is the entry point, its directory
-is the root, and everything else takes its default. Build, run and debug behave
-identically either way.
-
-`ratasm` searches for a project file in the file's directory and then upwards,
-so a file deep inside a project still finds it.
-
 ## User settings: `~/.config/ratasm/config.toml`
 
 Project settings describe *a project*; user settings describe *you*, and follow
@@ -110,9 +128,9 @@ theme = "dark"          # dark, light, ansi16, colorblind
 # unicode = false       # omit to detect from the locale
 
 [editor]
+indent_width = 4
 line_numbers = true
-command = "nvim"           # overrides $VISUAL and $EDITOR
-line_argument = "+{line}"  # or "{file}:{line}"
+auto_close_pairs = true
 
 [debugger]
 gdb = "gdb"
@@ -122,7 +140,7 @@ stack_depth = 16
 record = true
 
 [keys]
-"F5" = "debugger.continue"
+"F5" = "debug.continue"
 ```
 
 ### `[appearance]`
@@ -136,12 +154,11 @@ record = true
 
 | Field | Default | Meaning |
 | --- | --- | --- |
+| `indent_width` | `4` | Spaces inserted by <kbd>Tab</kbd>. |
 | `line_numbers` | `true` | Show line numbers beside the source. |
-| `command` | unset | The editor to run; unset uses `$VISUAL`, then `$EDITOR`, then `vi`. |
-| `line_argument` | unset | How the editor takes a line. `{line}` is replaced; a value containing `{file}` replaces the file argument too. Unset gives `+LINE` to editors known to take it. |
-
-Text is edited in your own editor, not in ratasm: `$VISUAL`, then `$EDITOR`,
-then `vi`. See [keybindings](keybindings.md#editing).
+| `highlight_current_line` | `true` | Shade the cursor's line. |
+| `match_brackets` | `true` | Mark the bracket matching the one at the cursor. |
+| `auto_close_pairs` | `true` | Typing an opening bracket or quote inserts its partner. |
 
 ### `[debugger]`
 

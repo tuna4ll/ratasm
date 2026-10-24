@@ -6,31 +6,46 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- ratasm edits text itself again. The editor has tabs, undo and redo,
+  selection, the clipboard, find and replace, go to line and go to definition;
+  building saves every file first, <kbd>F9</kbd> toggles a breakpoint on the
+  cursor's line, and errors and warnings are shown beside their lines. Running
+  `$EDITOR` inside the panel, and the `editor.command` and
+  `editor.line_argument` settings, are gone.
+- Any folder is a project. Without a `.ratasm.toml` every `.asm` file in it is
+  built, the entry is the file declaring `_start` (or `main`, linked by gcc),
+  and files added later are built too. The project root is the nearest folder
+  with a `.ratasm.toml`, a `Makefile` or a `.git`.
+- Two pages, Code and Debug. Learn and Reference are a study mode that
+  <kbd>F1</kbd> enters and leaves; <kbd>Alt</kbd>+<kbd>1</kbd> and
+  <kbd>2</kbd> move within whichever pair is open. The flags are shown in the
+  Registers panel. <kbd>F2</kbd>, <kbd>F3</kbd>'s status details,
+  <kbd>Ctrl</kbd>+<kbd>K</kbd> and <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>A</kbd>
+  are palette commands now.
+
 ### Added
 
-- Neovim is driven through `--listen`: a build saves its buffers first,
-  <kbd>F9</kbd> toggles a breakpoint on its cursor line, opening a file or
-  failing a build moves it there, and breakpoints and errors appear in its
-  sign column.
-- `editor.command` and `editor.line_argument` settings choose the editor and
-  how it takes a line.
-- The source listing has a selected line; <kbd>F9</kbd> and
-  <kbd>Enter</kbd> act on it, and build errors are marked beside their lines.
+- Makefile projects: <kbd>F6</kbd> runs `make`, its errors are placed beside
+  their lines, and the program it builds is found for running and debugging.
+  *Run a make target* runs any other target. `ratasm new --make` creates one.
+- `ratasm new --libc`: a `main` that calls `printf`, linked by gcc; debugging
+  stops at `main`.
 - Go to symbol (<kbd>Ctrl</kbd>+<kbd>T</kbd>) and search in files
-  (<kbd>Ctrl</kbd>+<kbd>F</kbd>) across the whole project.
-- Conditional breakpoints, watchpoints and register writes
-  (`debug.condition`, `debug.watch`, `debug.set-register`); <kbd>C</kbd> and
-  <kbd>W</kbd> in the Breakpoints panel.
-- The explorer creates, renames, moves and deletes files, keeping
-  `.ratasm.toml` and breakpoints in step.
+  (<kbd>Alt</kbd>+<kbd>F</kbd>) across the project; find next and previous on
+  <kbd>F3</kbd> and <kbd>Shift</kbd>+<kbd>F3</kbd>, replace on
+  <kbd>Ctrl</kbd>+<kbd>R</kbd>.
+- The explorer lists every source, include, Makefile and note, and creates,
+  renames, moves and deletes files.
+- Files changed on disk are reloaded, or reported when they have unsaved
+  changes.
+- Conditional breakpoints, watchpoints and register writes.
 - Open files and breakpoints are restored per project.
-- `ratasm new --libc` starts from a `main` that calls `printf`, linked by
-  gcc; debugging stops at `main`.
 - Six lessons and ten processor-checked questions.
-- Alt chords that work everywhere, the editor included: <kbd>Alt</kbd>+arrows
-  between panels, <kbd>Alt</kbd>+<kbd>P</kbd>, <kbd>O</kbd>, <kbd>N</kbd>,
-  <kbd>T</kbd>, <kbd>F</kbd>, <kbd>Q</kbd>. Pressing the open page's number
-  moves to its next panel. <kbd>Shift</kbd>+<kbd>F12</kbd> stops debugging.
+- <kbd>Shift</kbd>+<kbd>F12</kbd> stops debugging, and
+  <kbd>Alt</kbd>+<kbd>←</kbd> / <kbd>→</kbd> move between panels from
+  anywhere.
 
 ### Fixed
 
@@ -42,7 +57,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - <kbd>Ctrl</kbd>+<kbd>F5</kbd> stops a paused debug session.
 - The disassembly follows the program counter, branch operands are short and
   name their targets, and the listing no longer runs past the code.
-- Files opened as `./src/main.asm` were reported as not built.
 - `ratasm run` runs the program on the terminal, so it can read input.
 - The flags panel groups aliases of the same jump, and the explanation keeps
   the name of the register being written.

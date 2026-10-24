@@ -67,13 +67,23 @@ save — rather than by a timer, so grouping is deterministic and testable.
 "Modified" is tracked by comparing state ids, not by a boolean, so undoing back
 to the save point correctly clears the marker.
 
-Neovim is the exception that is driven rather than only hosted. It is started
-with `--listen` on a socket, and `process::editor::Remote` talks to it by
-running `nvim --server … --remote-expr`: one short-lived client per request,
-which needs no msgpack code here and is fast enough for requests made on a key
-press. Saving before a build, reading the cursor for <kbd>F9</kbd>, opening a
-file at a line and placing signs all go through it. When the editor is not
-Neovim, each of those falls back to what can be done from outside.
+Each open file remembers the modification time and size it was read or written
+with. Once a second the run loop compares them with the disk: a file without
+unsaved changes is reloaded, and one with unsaved changes is left alone and
+reported, so nothing typed is ever lost to an outside change.
+
+## Projects and builds
+
+A project is a folder. `Project::open` walks up to the nearest `.ratasm.toml`,
+`Makefile` or `.git`; without a project file, `Project::rescan` derives the
+sources and entry from the folder again before every build, so a file created
+anywhere in the project is built without being declared. The rest of the code
+only ever sees a `ProjectConfig`, whether it came from a file or from a scan.
+
+`assembler::build` hands over to `assembler::make` when the root holds a
+Makefile. make is run as it is; ratasm parses its output for located errors
+and finds the program it produced, so running and debugging work the same for
+both kinds of project.
 
 ## The debugger
 
@@ -122,10 +132,12 @@ entry invents no arguments, no return value and no example.
 
 ## Pages
 
-Fourteen panels do not fit on one screen, and Tab through fourteen of them is a
-search rather than navigation. So `app::page` groups them into four pages — one
-per activity — and the layout's only job is arranging the panels the open page
-holds. The layout never has to decide whether the register view is relevant,
+Thirteen panels do not fit on one screen, and Tab through thirteen of them is a
+search rather than navigation. So `app::page` groups them into pages, and the
+layout's only job is arranging the panels the open page holds. Code and Debug
+are the IDE; Learn and Reference form a study mode that F1 enters and leaves,
+so the page bar only ever shows two pages and <kbd>Alt</kbd>+<kbd>1</kbd> and
+<kbd>2</kbd> always mean the first and second of them. The layout never has to decide whether the register view is relevant,
 only how much room it gets.
 
 Two invariants hold the model together, both pinned by tests: every panel is on

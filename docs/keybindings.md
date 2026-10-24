@@ -2,116 +2,126 @@
 
 ## Pages
 
-The interface is four pages, each holding the panels for one activity. The
-page bar across the top names them, with the number that opens it:
+ratasm has two pages, and a study mode with two more.
 
 | Key | Page | What is on it |
 | --- | --- | --- |
 | <kbd>Alt</kbd>+<kbd>1</kbd> | Code | Editor, project files and symbols, build output |
-| <kbd>Alt</kbd>+<kbd>2</kbd> | Debug | Editor, disassembly, explanation, registers, flags, stack, output |
-| <kbd>Alt</kbd>+<kbd>3</kbd> | Learn | Lessons and questions, the scratchpad, the explanation |
-| <kbd>Alt</kbd>+<kbd>4</kbd> | Reference | System calls and instruction semantics |
+| <kbd>Alt</kbd>+<kbd>2</kbd> | Debug | Editor, registers and flags, stack, disassembly, explanation, output |
+| <kbd>F1</kbd> | Learn and Reference | Lessons, questions and the scratchpad; system calls and instructions |
 
-<kbd>Tab</kbd> moves between the panels of the *current page*, except while a
-live terminal has focus, where it is sent to the program. Pressing the number
-of the page you are already on moves to its next panel, so
-<kbd>Alt</kbd>+<kbd>1</kbd> is also a way out of the editor. Starting a debug
-session opens the Debug page, and so does stopping at a breakpoint — being
-stopped is the one moment the machine state is unambiguously what you want.
+In study mode the page bar reads *1 Learn  2 Reference*, and
+<kbd>Alt</kbd>+<kbd>1</kbd> and <kbd>2</kbd> move between those two;
+<kbd>F1</kbd> again returns to the page you came from.
 
-Panels that share a slot, such as the stack and the memory view, have a small
-tab strip above them naming the others.
+<kbd>Tab</kbd> moves between the panels of the page, except in the editor, where
+it indents. <kbd>Alt</kbd>+<kbd>←</kbd> / <kbd>→</kbd> move between panels from
+anywhere, and pressing the number of the page you are on moves to its next
+panel. Starting a debug session opens the Debug page, and so does stopping at
+a breakpoint.
 
 ## Defaults
-
-### Running and debugging
-
-| Key | Action |
-| --- | --- |
-| <kbd>F5</kbd> | Run, or continue when paused |
-| <kbd>F6</kbd> | Build |
-| <kbd>F7</kbd> | Step one instruction |
-| <kbd>F8</kbd> | Step over |
-| <kbd>F9</kbd> | Toggle a breakpoint on the selected line, or the editor's cursor line |
-| <kbd>F10</kbd> | Step one source line |
-| <kbd>Ctrl</kbd>+<kbd>F5</kbd> | Stop the running program or debug session |
-| <kbd>F11</kbd> | Step out of the current call |
-| <kbd>F12</kbd> | Start a debug session |
-| <kbd>Shift</kbd>+<kbd>F12</kbd> | Stop the debug session |
-| <kbd>Shift</kbd>+<kbd>F5</kbd> | Continue *backwards* |
-| <kbd>Shift</kbd>+<kbd>F7</kbd> | Step one instruction backwards |
-| <kbd>Shift</kbd>+<kbd>F8</kbd> | Step backwards over a call |
-
-`F7` and `F10` differ in a way worth internalising: `F7` steps one *machine
-instruction*, `F10` steps one *source line*, which may be several instructions.
-While learning, `F7` is usually what you want.
-
-The <kbd>Shift</kbd> keys undo a step. They need GDB's process recording, which
-ratasm turns on when a session starts (`debugger.record` in `.ratasm.toml`
-switches it off). Stepping back past the start of the recording is refused
-rather than guessed at.
-
-### The interactive Output terminal
-
-<kbd>F5</kbd> builds and runs the program in the Output panel. While that panel
-has focus, ordinary keys, control characters such as <kbd>Ctrl</kbd>+<kbd>C</kbd>,
-arrow and function keys, Unicode text and pasted text go to the program. ANSI
-colour, cursor movement, alternate-screen programs and terminal resizing are
-interpreted as they would be in a standalone terminal.
-
-Application navigation remains available: <kbd>Alt</kbd>+<kbd>1</kbd> through
-<kbd>4</kbd> leaves the terminal for another page,
-<kbd>Ctrl</kbd>+<kbd>P</kbd> opens the command palette, and
-<kbd>Ctrl</kbd>+<kbd>F5</kbd> stops the program. The same terminal is connected
-to a program running under GDB, and the interface remains responsive while the
-inferior waits for input.
-
-### Learning and experimenting
-
-| Key | Action |
-| --- | --- |
-| <kbd>F1</kbd> | Learning panel: lessons and questions |
-| <kbd>F2</kbd> | Scratchpad: try one instruction |
-| <kbd>F3</kbd> | Show the complete status message in Output |
-
-In the learning panel, <kbd>←</kbd> and <kbd>→</kbd> move through the material,
-<kbd>?</kbd> jumps to the questions, and on a question you type a value and
-press <kbd>Enter</kbd>. A wrong answer stays put and shows the worked
-explanation.
-
-In the scratchpad, you type an instruction and press <kbd>Enter</kbd> to run
-it. A line of the form `rax=0x10` sets a starting value instead of being
-assembled, and `rax=` removes it again. <kbd>Tab</kbd> still leaves the panel.
 
 ### Files
 
 | Key | Action |
 | --- | --- |
-| <kbd>Ctrl</kbd>+<kbd>E</kbd> | Open `$EDITOR` on the active file in the Editor panel |
-| <kbd>Ctrl</kbd>+<kbd>N</kbd> | Name a new file and create it in `$EDITOR` |
-| <kbd>Ctrl</kbd>+<kbd>O</kbd> | Open |
-| <kbd>Ctrl</kbd>+<kbd>W</kbd> | Close the file |
-| <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>A</kbd> | Add this file to the project's sources |
-| <kbd>Tab</kbd> | Complete the path, inside an open or new-file prompt |
-| <kbd>Ctrl</kbd>+<kbd>Q</kbd> | Quit |
+| <kbd>Ctrl</kbd>+<kbd>N</kbd> | New file: name it, and it is created in the project |
+| <kbd>Ctrl</kbd>+<kbd>O</kbd> | Open a file; <kbd>Tab</kbd> completes the path |
+| <kbd>Ctrl</kbd>+<kbd>S</kbd> / <kbd>Alt</kbd>+<kbd>S</kbd> | Save / save all |
+| <kbd>Ctrl</kbd>+<kbd>W</kbd> | Close the file, asking about unsaved changes |
+| <kbd>Ctrl</kbd>+<kbd>PgUp</kbd> / <kbd>PgDn</kbd> | Previous / next open file |
+| <kbd>Ctrl</kbd>+<kbd>Q</kbd> | Quit, asking about unsaved changes |
 
-### Navigation
+Building saves every modified file first. A file changed on disk by something
+else is reloaded when it has no unsaved changes; when it has some, they are
+kept and the status bar says so.
+
+### Editing
+
+| Key | Action |
+| --- | --- |
+| <kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Y</kbd> | Undo / redo |
+| <kbd>Ctrl</kbd>+<kbd>C</kbd> / <kbd>X</kbd> / <kbd>V</kbd> | Copy, cut, paste; with nothing selected, the whole line |
+| <kbd>Ctrl</kbd>+<kbd>A</kbd> | Select all |
+| <kbd>Shift</kbd>+arrows | Select |
+| <kbd>Ctrl</kbd>+<kbd>←</kbd> / <kbd>→</kbd> | Move by word |
+| <kbd>Ctrl</kbd>+<kbd>Backspace</kbd> / <kbd>Delete</kbd> | Delete a word |
+| <kbd>Tab</kbd> / <kbd>Shift</kbd>+<kbd>Tab</kbd> | Indent / dedent the line or selection |
+| <kbd>Enter</kbd> | New line, keeping the indentation and indenting after a label |
+
+Brackets and quotes close themselves; set `editor.auto_close_pairs = false` to
+stop that. Copying reaches the system clipboard through OSC 52 where the
+terminal allows it.
+
+### Finding your way
 
 | Key | Action |
 | --- | --- |
 | <kbd>Ctrl</kbd>+<kbd>P</kbd> | Command palette |
-| <kbd>Ctrl</kbd>+<kbd>G</kbd> | Show an address in the memory panel |
+| <kbd>Ctrl</kbd>+<kbd>F</kbd> | Find in the file; <kbd>F3</kbd> / <kbd>Shift</kbd>+<kbd>F3</kbd> next / previous |
+| <kbd>Ctrl</kbd>+<kbd>R</kbd> | Replace every match |
+| <kbd>Alt</kbd>+<kbd>F</kbd> | Search every file of the project |
 | <kbd>Ctrl</kbd>+<kbd>T</kbd> | Go to a symbol anywhere in the project |
-| <kbd>Ctrl</kbd>+<kbd>F</kbd> | Search every project file |
-| <kbd>Ctrl</kbd>+<kbd>K</kbd> | Syscall finder |
-| <kbd>Tab</kbd> | Next panel on this page |
-| <kbd>Shift</kbd>+<kbd>Tab</kbd> | Previous panel |
+| <kbd>Ctrl</kbd>+<kbd>D</kbd> | Go to the definition of the symbol under the cursor |
+| <kbd>Ctrl</kbd>+<kbd>G</kbd> | Go to a line |
+
+### Building and running
+
+| Key | Action |
+| --- | --- |
+| <kbd>F6</kbd> | Build: the project's Makefile when it has one, otherwise nasm and ld |
+| <kbd>F5</kbd> | Build and run in the Output terminal; continue when paused |
+| <kbd>Ctrl</kbd>+<kbd>F5</kbd> | Stop the program or the debug session |
+
+A failed build puts the cursor on the first error, and every error and warning
+is shown beside its line. *Run a make target* in the palette lists the
+Makefile's targets, such as `clean` or `run`, and runs the one you pick.
+
+### Debugging
+
+| Key | Action |
+| --- | --- |
+| <kbd>F12</kbd> / <kbd>Shift</kbd>+<kbd>F12</kbd> | Start / stop a debug session |
+| <kbd>F9</kbd> | Toggle a breakpoint on the cursor's line |
+| <kbd>F7</kbd> | Step one instruction |
+| <kbd>F8</kbd> | Step over a call |
+| <kbd>F10</kbd> | Step one source line |
+| <kbd>F11</kbd> | Step out of the current call |
+| <kbd>Shift</kbd>+<kbd>F5</kbd> | Continue backwards |
+| <kbd>Shift</kbd>+<kbd>F7</kbd> / <kbd>F8</kbd> | Step backwards |
+
+`F7` steps one *machine instruction*, `F10` one *source line*, which may be
+several. The <kbd>Shift</kbd> keys need GDB's process recording, which ratasm
+turns on when a session starts (`debugger.record` in the configuration
+switches it off).
+
+In the Breakpoints panel, <kbd>Space</kbd> enables or disables,
+<kbd>D</kbd> removes, <kbd>C</kbd> sets a condition and <kbd>W</kbd> adds a
+watchpoint. *Set a register* in the palette writes one while paused.
+
+### The Output terminal
+
+<kbd>F5</kbd> runs the program in the Output panel. While that panel has focus,
+ordinary keys, control characters such as <kbd>Ctrl</kbd>+<kbd>C</kbd>, arrow
+and function keys, Unicode text and pasted text go to the program. ANSI colour,
+cursor movement, alternate-screen programs and resizing work as in a
+standalone terminal. <kbd>Alt</kbd>+<kbd>1</kbd> / <kbd>2</kbd>,
+<kbd>Alt</kbd>+arrows, <kbd>Ctrl</kbd>+<kbd>P</kbd> and
+<kbd>Ctrl</kbd>+<kbd>F5</kbd> stay with ratasm. The same terminal is attached
+to a program running under GDB.
+
+### Study mode
+
+In the Learn panel, <kbd>←</kbd> and <kbd>→</kbd> move through the material,
+<kbd>?</kbd> jumps to the questions, and on a question you type a value and
+press <kbd>Enter</kbd>. A wrong answer stays put and shows the worked
+explanation.
+
+In the scratchpad you type an instruction and press <kbd>Enter</kbd> to run it.
+A line such as `rax=0x10` sets a starting value instead, and `rax=` removes it.
 
 ### Scrolling a panel
-
-Every panel but the Editor and the scratchpad holds a list that is often taller
-than the room it has. A scrollbar down the right edge appears when there is more
-than fits.
 
 | Key | Action |
 | --- | --- |
@@ -120,9 +130,7 @@ than fits.
 | <kbd>Home</kbd> / <kbd>End</kbd> | First row / last screenful |
 
 Completed output keeps showing its newest line. Scroll up and it stays where
-you put it; <kbd>End</kbd> makes it follow again. A live terminal instead uses
-the navigation keys itself, then becomes an ordinary scrollable log when the
-program exits.
+you put it; <kbd>End</kbd> makes it follow again.
 
 ### The explorer
 
@@ -133,85 +141,25 @@ program exits.
 | <kbd>N</kbd> | Create a file |
 | <kbd>M</kbd> | Rename or move the selected file |
 | <kbd>D</kbd> / <kbd>Delete</kbd> | Delete the selected file, after typing `yes` |
-| <kbd>A</kbd> | Add the selected file to the project's sources |
-| <kbd>R</kbd> | Re-read the file list from disk |
+| <kbd>A</kbd> | Add the selected file to the sources in `.ratasm.toml` |
+| <kbd>R</kbd> | Re-read the file list |
 
-Renaming or deleting a source listed in `.ratasm.toml` updates the project file
-too, and breakpoints in the file follow it.
-
-The list is the project's sources plus any other assembly file under the root,
-so a file that exists but is not in the build is visible rather than something
-you have to remember. Files the build does not know about are marked; add one
-with <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>A</kbd>.
+The list holds every source, include, Makefile and note in the project, and
+follows files created or removed outside ratasm. Renaming or deleting a source
+named in `.ratasm.toml` updates that file too, and breakpoints follow the file.
 
 ### The mouse
 
 | Action | Result |
 | --- | --- |
-| Wheel | Scrolls whatever is under the pointer, without taking focus |
+| Wheel | Scrolls whatever is under the pointer |
 | Click a panel | Focuses it |
-| Click a page name | Opens that page |
-| Click a file name | Switches to that buffer |
-| Click a tab | Focuses that panel |
+| Click a page name or file name | Opens it |
+| Click in the editor | Moves the cursor |
 | Click a file in the explorer | Opens it |
 
-Mouse reporting means the terminal's own text selection is off while ratasm is
-running. Hold <kbd>Shift</kbd> while dragging to select and copy the way the
-terminal normally would; most terminals reserve that for exactly this.
-
-### Editing
-
-ratasm does not edit text itself. The Editor panel runs your own editor inside
-it: `editor.command` from the configuration, then `$VISUAL`, then `$EDITOR`,
-then `vi`, started on the project's entry file
-as soon as ratasm opens. While the panel has focus every key goes to the
-editor, <kbd>Tab</kbd> and <kbd>Ctrl</kbd> chords included, except the
-function keys and the Alt chords below, which stay with ratasm so building,
-running, debugging and changing page still work.
-
-| Key | Action |
-| --- | --- |
-| <kbd>Alt</kbd>+<kbd>←</kbd> / <kbd>→</kbd> | Previous / next panel |
-| <kbd>Alt</kbd>+<kbd>P</kbd> | Command palette |
-| <kbd>Alt</kbd>+<kbd>O</kbd> / <kbd>Alt</kbd>+<kbd>N</kbd> | Open / new file |
-| <kbd>Alt</kbd>+<kbd>T</kbd> / <kbd>Alt</kbd>+<kbd>F</kbd> | Go to symbol / search in files |
-| <kbd>Alt</kbd>+<kbd>Q</kbd> | Quit |
-
-The same chords work everywhere else too, including while a program owns the
-Output terminal.
-
-The command goes through `sh -c`, so a value such as `emacsclient -t` works.
-Editors known to take `+LINE` (vim, neovim, nano, emacs, micro, kakoune and a
-few more) open at the selected line; for any other editor set
-`editor.line_argument`, or it is given just the file.
-
-**Neovim is driven.** ratasm starts it with `--listen` and talks to it through
-that socket:
-
-- a build first writes every modified buffer, so unsaved changes are built;
-- <kbd>F9</kbd> toggles a breakpoint on the cursor's line;
-- opening a file, from the explorer or <kbd>Alt</kbd>+<kbd>O</kbd>, opens it in
-  the running Neovim;
-- a failed build moves the cursor to the first error;
-- breakpoints and build errors appear in the sign column.
-
-Any other editor is run as it is. A build reads what is on disk and says so
-when the editor may hold unsaved changes, <kbd>F9</kbd> asks for a line, and a
-file opened while the editor runs opens in it as soon as you quit it.
-
-With the editor closed, or during a debug session, the panel shows a listing of
-the source with a selected line, its breakpoints, the build's errors and the
-line the program stopped on.
-
-| Key | Action |
-| --- | --- |
-| <kbd>Enter</kbd> / <kbd>Ctrl</kbd>+<kbd>E</kbd> | Open the editor at the selected line |
-| <kbd>↑</kbd> / <kbd>↓</kbd>, <kbd>PgUp</kbd> / <kbd>PgDn</kbd> | Move the selected line |
-| <kbd>Home</kbd> / <kbd>End</kbd> | First / last line |
-| <kbd>F9</kbd> | Toggle a breakpoint on the selected line |
-
-Quitting ratasm while the editor still runs asks for a second Quit, since that
-kills the editor and anything it has not saved.
+Hold <kbd>Shift</kbd> while dragging to select with the terminal's own
+selection.
 
 ## The command palette
 
@@ -228,7 +176,7 @@ Bindings live in the `[keys]` section of your configuration file
 ```toml
 [keys]
 "F5" = "debug.continue"
-"ctrl+s" = "file.edit"
+"ctrl+e" = "build.make-target"
 "ctrl+shift+p" = "app.palette"
 ```
 
