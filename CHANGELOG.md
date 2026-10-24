@@ -6,6 +6,47 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Neovim is driven through `--listen`: a build saves its buffers first,
+  <kbd>F9</kbd> toggles a breakpoint on its cursor line, opening a file or
+  failing a build moves it there, and breakpoints and errors appear in its
+  sign column.
+- `editor.command` and `editor.line_argument` settings choose the editor and
+  how it takes a line.
+- The source listing has a selected line; <kbd>F9</kbd> and
+  <kbd>Enter</kbd> act on it, and build errors are marked beside their lines.
+- Go to symbol (<kbd>Ctrl</kbd>+<kbd>T</kbd>) and search in files
+  (<kbd>Ctrl</kbd>+<kbd>F</kbd>) across the whole project.
+- Conditional breakpoints, watchpoints and register writes
+  (`debug.condition`, `debug.watch`, `debug.set-register`); <kbd>C</kbd> and
+  <kbd>W</kbd> in the Breakpoints panel.
+- The explorer creates, renames, moves and deletes files, keeping
+  `.ratasm.toml` and breakpoints in step.
+- Open files and breakpoints are restored per project.
+- `ratasm new --libc` starts from a `main` that calls `printf`, linked by
+  gcc; debugging stops at `main`.
+- Six lessons and ten processor-checked questions.
+- Alt chords that work everywhere, the editor included: <kbd>Alt</kbd>+arrows
+  between panels, <kbd>Alt</kbd>+<kbd>P</kbd>, <kbd>O</kbd>, <kbd>N</kbd>,
+  <kbd>T</kbd>, <kbd>F</kbd>, <kbd>Q</kbd>. Pressing the open page's number
+  moves to its next panel. <kbd>Shift</kbd>+<kbd>F12</kbd> stops debugging.
+
+### Fixed
+
+- A program being debugged no longer dies of SIGHUP on its first write after
+  continuing or stepping.
+- With recording on, a program runs to its exit instead of hanging for 15
+  seconds and failing the session.
+- Removing, disabling or changing a breakpoint during a session reaches GDB.
+- <kbd>Ctrl</kbd>+<kbd>F5</kbd> stops a paused debug session.
+- The disassembly follows the program counter, branch operands are short and
+  name their targets, and the listing no longer runs past the code.
+- Files opened as `./src/main.asm` were reported as not built.
+- `ratasm run` runs the program on the terminal, so it can read input.
+- The flags panel groups aliases of the same jump, and the explanation keeps
+  the name of the register being written.
+
 ## [0.2.0] - 2026-09-27
 
 ### Changed

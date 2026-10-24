@@ -75,6 +75,16 @@ linked against the C library by `gcc`; debugging stops at `main`.
 
 `ratasm file.asm` opens single files, several at once if you name several.
 
+## Editing
+
+The Editor panel runs your own editor. With Neovim, ratasm drives it: builds
+save its buffers, <kbd>F9</kbd> sets a breakpoint on its cursor line, errors
+and breakpoints show in its sign column, and a failed build puts the cursor on
+the first error. Any other editor works too, with the file read back from disk.
+<kbd>Ctrl</kbd>+<kbd>T</kbd> jumps to a symbol and <kbd>Ctrl</kbd>+<kbd>F</kbd>
+searches every file of the project. Open files and breakpoints come back the
+next time you open the project.
+
 ## Pages
 
 The interface is four pages, each holding the panels for one activity.
@@ -89,9 +99,10 @@ between the panels of the page you are on.
 | Reference | Looking up a system call or what an instruction does |
 
 <details>
-<summary>Code, Learn and Reference</summary>
+<summary>Code, search, Learn and Reference</summary>
 
-<img src="assets/screenshot-code.png" alt="the code page" width="100%">
+<img src="assets/screenshot-code.png" alt="the code page with Neovim, a breakpoint and the program's output" width="100%">
+<img src="assets/screenshot-search.png" alt="searching every file of the project" width="100%">
 <img src="assets/screenshot-learn.png" alt="the learn page" width="100%">
 <img src="assets/screenshot-reference.png" alt="the reference page" width="100%">
 
@@ -117,6 +128,8 @@ nothing.
 | <kbd>Ctrl</kbd>+<kbd>E</kbd> / <kbd>Ctrl</kbd>+<kbd>O</kbd> | Edit in `$EDITOR` / open |
 | <kbd>Ctrl</kbd>+<kbd>G</kbd> | Show an address in the memory panel |
 | <kbd>Ctrl</kbd>+<kbd>K</kbd> | Syscall finder |
+| <kbd>Ctrl</kbd>+<kbd>T</kbd> / <kbd>Ctrl</kbd>+<kbd>F</kbd> | Go to symbol / search in files |
+| <kbd>Alt</kbd>+<kbd>←</kbd> / <kbd>→</kbd> | Previous / next panel, from anywhere |
 | <kbd>Alt</kbd>+<kbd>1</kbd>..<kbd>4</kbd> | Open a page |
 
 Every binding is configurable, and conflicts are reported at start-up instead
@@ -170,6 +183,8 @@ and never through a shell.
 - Source-level stepping needs debug information. Without it you get
   instruction-level stepping.
 - One debug session at a time, no multi-threaded targets.
+- Only Neovim is driven. Other editors cannot report their cursor or save on
+  request, so <kbd>F9</kbd> asks for a line and a build uses what is on disk.
 - Stepping backwards needs GDB's recording, which is on by default and costs
   time per instruction. `record = false` turns it off.
 - Copying reaches the system clipboard through OSC 52 where the terminal allows
@@ -190,8 +205,8 @@ notes: [docs/architecture.md](docs/architecture.md).
 
 ## Roadmap
 
-Watchpoints and conditional breakpoints, AT&T syntax throughout, GAS source
-support, more lessons, and AArch64 and RISC-V back ends.
+AT&T syntax throughout, GAS source support, driving Vim and Helix the way
+Neovim is driven, and AArch64 and RISC-V back ends.
 
 ## Licence
 

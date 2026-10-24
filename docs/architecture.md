@@ -64,6 +64,14 @@ Buffers are never written, only read, so disk is the single source of truth.
 `Workspace::reload` re-reads every open file when the editor exits and before
 each build, keeping the cursor where the new text allows.
 
+Neovim is the exception that is driven rather than only hosted. It is started
+with `--listen` on a socket, and `process::editor::Remote` talks to it by
+running `nvim --server … --remote-expr`: one short-lived client per request,
+which needs no msgpack code here and is fast enough for requests made on a key
+press. Saving before a build, reading the cursor for <kbd>F9</kbd>, opening a
+file at a line and placing signs all go through it. When the editor is not
+Neovim, each of those falls back to what can be done from outside.
+
 ## The debugger
 
 GDB is driven over its machine interface. One background task owns GDB's
