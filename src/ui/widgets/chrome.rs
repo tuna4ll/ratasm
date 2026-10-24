@@ -7,7 +7,6 @@ use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 use ratatui::Frame;
 
 use crate::app::mode::Mode;
-use crate::app::page::Page;
 use crate::app::panel::Panel;
 use crate::app::state::Severity;
 use crate::app::App;
@@ -443,14 +442,16 @@ pub fn draw_page_bar(frame: &mut Frame, app: &App, area: Rect) {
     let theme = &app.theme;
     let symbols = theme.symbols();
 
-    let full: usize = Page::ALL
+    let full: usize = app
+        .page
+        .group()
         .iter()
         .map(|page| page.title().chars().count() + 4)
         .sum();
     let compact = usize::from(area.width) < full + 24;
 
     let mut spans: Vec<Span> = Vec::new();
-    for page in Page::ALL {
+    for page in app.page.group() {
         let label = if compact {
             format!(" {} ", page.number())
         } else {
@@ -464,6 +465,10 @@ pub fn draw_page_bar(frame: &mut Frame, app: &App, area: Rect) {
                 theme.dim()
             },
         ));
+    }
+
+    if app.page.is_study() {
+        spans.push(Span::styled("  F1 back", theme.dim()));
     }
 
     let used: usize = spans.iter().map(|span| span.content.chars().count()).sum();

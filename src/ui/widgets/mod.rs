@@ -78,7 +78,6 @@ pub fn draw_panel(frame: &mut Frame, app: &App, panel: Panel, area: Rect) {
     match panel {
         Panel::Editor => editor::draw(frame, app, area, focused),
         Panel::Registers => cpu::draw_registers(frame, app, area, focused),
-        Panel::Flags => cpu::draw_flags(frame, app, area, focused),
         Panel::Stack => cpu::draw_stack(frame, app, area, focused),
         Panel::CallStack => code::draw_call_stack(frame, app, area, focused),
         Panel::Memory => cpu::draw_memory(frame, app, area, focused),
@@ -146,8 +145,7 @@ pub fn wrapped_rows(lines: &[Line<'_>], width: usize) -> usize {
 pub fn content_rows(app: &App, panel: Panel, width: u16) -> usize {
     let width = usize::from(width);
     match panel {
-        Panel::Registers => cpu::register_lines(app, width).len(),
-        Panel::Flags => cpu::flag_lines(app, width).len(),
+        Panel::Registers => cpu::registers_and_flags(app, width).len(),
         Panel::Stack => cpu::stack_lines(app).len(),
         Panel::Memory => cpu::memory_lines(app).len(),
         Panel::Disassembly => app.disassembly.len(),

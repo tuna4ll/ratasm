@@ -323,7 +323,6 @@ code, so a command missing here is a build failure rather than a surprise.
 | `navigate.page.reference` | Reference page |
 | `navigate.focus.editor` | Focus editor |
 | `navigate.focus.registers` | Focus registers |
-| `navigate.focus.flags` | Focus flags |
 | `navigate.focus.stack` | Focus stack |
 | `navigate.focus.call-stack` | Focus call stack |
 | `navigate.focus.memory` | Focus memory |

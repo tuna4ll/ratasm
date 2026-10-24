@@ -416,7 +416,7 @@ mod tests {
         app.open_page(crate::app::Page::Debug);
         let text = screen(&app, 160, 48);
 
-        for title in ["Editor", "Registers", "Flags", "Disassembly", "Explain"] {
+        for title in ["Editor", "Registers", "Disassembly", "Explain"] {
             assert!(text.contains(title), "{title} is missing from the screen");
         }
     }
@@ -426,7 +426,7 @@ mod tests {
         let app = app();
         let bar = render(&app, 160, 48).remove(0);
 
-        for page in crate::app::Page::ALL {
+        for page in app.page.group() {
             assert!(bar.contains(page.title()), "{page} is missing: {bar}");
             assert!(
                 bar.contains(&page.number().to_string()),

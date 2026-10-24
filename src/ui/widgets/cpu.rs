@@ -38,8 +38,19 @@ pub fn draw_registers(frame: &mut Frame, app: &App, area: Rect, focused: bool) {
         return;
     }
 
-    let lines = register_lines(app, usize::from(inner.width));
+    let lines = registers_and_flags(app, usize::from(inner.width));
     super::draw_scrolled(frame, app, Panel::Registers, inner, lines, None);
+}
+
+/// The register rows, then the flags and the jumps they would take.
+pub fn registers_and_flags<'a>(app: &App, width: usize) -> Vec<Line<'a>> {
+    let mut lines = register_lines(app, width);
+    let flags = flag_lines(app, width);
+    if !flags.is_empty() {
+        lines.push(Line::from(""));
+        lines.extend(flags);
+    }
+    lines
 }
 
 /// The register rows for a panel `width` columns wide.
@@ -142,24 +153,6 @@ fn register_spans<'a>(entry: &RegisterEntry, app: &App, theme: &Theme) -> Vec<Sp
     );
 
     vec![marker, name, value]
-}
-
-/// Draws the flags panel.
-pub fn draw_flags(frame: &mut Frame, app: &App, area: Rect, focused: bool) {
-    let block = super::panel_block(&app.theme, Panel::Flags, focused);
-
-    if app.registers.flags().is_none() {
-        super::draw_placeholder(frame, area, &app.theme, block, NO_SESSION);
-        return;
-    }
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
-    if inner.width == 0 || inner.height == 0 {
-        return;
-    }
-
-    let lines = flag_lines(app, usize::from(inner.width));
-    super::draw_scrolled(frame, app, Panel::Flags, inner, lines, None);
 }
 
 /// The flag rows and the jumps they would take, for a panel `width` wide.

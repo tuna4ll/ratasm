@@ -267,13 +267,6 @@ impl Keymap {
             Command::SaveAll,
         );
         bind(KeyBinding::ctrl(KeyCode::Char('o')), Command::OpenFile);
-        bind(
-            KeyBinding::new(
-                KeyCode::Char('a'),
-                KeyModifiers::CONTROL | KeyModifiers::ALT,
-            ),
-            Command::AddToProject,
-        );
         bind(KeyBinding::ctrl(KeyCode::Char('n')), Command::NewFile);
         bind(KeyBinding::ctrl(KeyCode::Char('w')), Command::CloseFile);
         bind(KeyBinding::ctrl(KeyCode::Char('q')), Command::Quit);
@@ -294,10 +287,6 @@ impl Keymap {
             Command::SearchFiles,
         );
         bind(
-            KeyBinding::ctrl(KeyCode::Char('k')),
-            Command::OpenSyscallFinder,
-        );
-        bind(
             KeyBinding::ctrl(KeyCode::Char('d')),
             Command::GoToDefinition,
         );
@@ -305,14 +294,12 @@ impl Keymap {
             KeyBinding::plain(KeyCode::F(1)),
             Command::ToggleLearningMode,
         );
-        bind(KeyBinding::plain(KeyCode::F(2)), Command::OpenScratchpad);
-        bind(KeyBinding::plain(KeyCode::F(3)), Command::ShowStatusDetails);
         bind(KeyBinding::plain(KeyCode::Tab), Command::NextPanel);
         bind(KeyBinding::plain(KeyCode::BackTab), Command::PreviousPanel);
         bind(KeyBinding::ctrl(KeyCode::PageDown), Command::NextDocument);
         bind(KeyBinding::ctrl(KeyCode::PageUp), Command::PreviousDocument);
 
-        for (index, page) in Page::ALL.iter().enumerate() {
+        for (index, page) in [Page::Code, Page::Debug].iter().enumerate() {
             let digit = char::from_digit(index as u32 + 1, 10).unwrap_or('1');
             bindings.insert(
                 KeyBinding::new(KeyCode::Char(digit), KeyModifiers::ALT),
@@ -570,11 +557,12 @@ mod tests {
             ("F9", Command::ToggleBreakpoint),
             ("F10", Command::StepLine),
             ("F1", Command::ToggleLearningMode),
-            ("F2", Command::OpenScratchpad),
+            ("F12", Command::DebugStart),
+            ("shift+F12", Command::DebugStop),
+            ("ctrl+t", Command::GoToSymbol),
+            ("alt+f", Command::SearchFiles),
             ("alt+1", Command::GoToPage(Page::Code)),
             ("alt+2", Command::GoToPage(Page::Debug)),
-            ("alt+3", Command::GoToPage(Page::Learn)),
-            ("alt+4", Command::GoToPage(Page::Reference)),
             ("shift+F5", Command::ReverseContinue),
             ("ctrl+F5", Command::Stop),
             ("shift+F7", Command::StepBack),
@@ -584,7 +572,6 @@ mod tests {
             ("ctrl+p", Command::OpenPalette),
             ("ctrl+f", Command::Search),
             ("ctrl+g", Command::GoToLine),
-            ("ctrl+k", Command::OpenSyscallFinder),
             ("ctrl+q", Command::Quit),
             ("tab", Command::NextPanel),
             ("shift+tab", Command::PreviousPanel),

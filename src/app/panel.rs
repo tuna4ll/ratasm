@@ -10,8 +10,6 @@ pub enum Panel {
     Editor,
     /// General-purpose register values.
     Registers,
-    /// The processor flags.
-    Flags,
     /// Memory around the stack pointer.
     Stack,
     /// The chain of calls that reached the current instruction.
@@ -38,10 +36,9 @@ pub enum Panel {
 
 impl Panel {
     /// Every panel, in a fixed order used for cycling with Tab.
-    pub const ALL: [Panel; 14] = [
+    pub const ALL: [Panel; 13] = [
         Panel::Editor,
         Panel::Registers,
-        Panel::Flags,
         Panel::Stack,
         Panel::CallStack,
         Panel::Memory,
@@ -60,7 +57,6 @@ impl Panel {
         match self {
             Panel::Editor => "editor",
             Panel::Registers => "registers",
-            Panel::Flags => "flags",
             Panel::Stack => "stack",
             Panel::CallStack => "call-stack",
             Panel::Memory => "memory",
@@ -80,7 +76,6 @@ impl Panel {
         match self {
             Panel::Editor => "Editor",
             Panel::Registers => "Registers",
-            Panel::Flags => "Flags",
             Panel::Stack => "Stack",
             Panel::CallStack => "Call stack",
             Panel::Memory => "Memory",
@@ -99,7 +94,7 @@ impl Panel {
     pub const fn needs_debug_session(self) -> bool {
         matches!(
             self,
-            Panel::Registers | Panel::Flags | Panel::Stack | Panel::CallStack | Panel::Memory
+            Panel::Registers | Panel::Stack | Panel::CallStack | Panel::Memory
         )
     }
 
@@ -109,7 +104,7 @@ impl Panel {
             Panel::Editor | Panel::Learn | Panel::Scratchpad => 8,
             Panel::Registers | Panel::Syscalls | Panel::Explorer => 6,
             Panel::Disassembly => 5,
-            Panel::Flags | Panel::Memory | Panel::Stack | Panel::Explain => 4,
+            Panel::Memory | Panel::Stack | Panel::Explain => 4,
             Panel::Output | Panel::CallStack | Panel::Breakpoints => 3,
         }
     }
@@ -223,7 +218,6 @@ mod tests {
     #[test]
     fn panels_needing_a_session_are_the_cpu_state_panels() {
         assert!(Panel::Registers.needs_debug_session());
-        assert!(Panel::Flags.needs_debug_session());
         assert!(Panel::Stack.needs_debug_session());
         assert!(Panel::Memory.needs_debug_session());
 

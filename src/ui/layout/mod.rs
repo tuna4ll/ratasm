@@ -277,11 +277,7 @@ fn wide_debug(body: Rect, focus: Panel) -> Layout {
         ],
         focus,
     );
-    let (right, mut right_out) = stack(
-        halves[1],
-        &[(Panel::Registers, 3), (Panel::Flags, 1), (shown, 2)],
-        focus,
-    );
+    let (right, mut right_out) = stack(halves[1], &[(Panel::Registers, 3), (shown, 2)], focus);
 
     let mut panels = left;
     let mut tab_bar = None;
@@ -711,7 +707,6 @@ mod tests {
         for panel in [
             Panel::Editor,
             Panel::Registers,
-            Panel::Flags,
             Panel::Disassembly,
             Panel::Explain,
             Panel::Output,

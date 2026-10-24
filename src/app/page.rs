@@ -59,7 +59,6 @@ impl Page {
             Page::Debug => &[
                 Panel::Editor,
                 Panel::Registers,
-                Panel::Flags,
                 Panel::Stack,
                 Panel::CallStack,
                 Panel::Memory,
@@ -97,7 +96,26 @@ impl Page {
 
     /// The page's position in the bar, counting from one.
     pub fn number(self) -> usize {
-        Self::ALL.iter().position(|p| *p == self).unwrap_or(0) + 1
+        self.group().iter().position(|p| *p == self).unwrap_or(0) + 1
+    }
+
+    /// Whether this page belongs to the study mode F1 opens.
+    pub const fn is_study(self) -> bool {
+        matches!(self, Page::Learn | Page::Reference)
+    }
+
+    /// The pages shown together in the page bar: the IDE's, or the study mode's.
+    pub const fn group(self) -> [Page; 2] {
+        if self.is_study() {
+            [Page::Learn, Page::Reference]
+        } else {
+            [Page::Code, Page::Debug]
+        }
+    }
+
+    /// The page at this page's position in the group `open` belongs to.
+    pub fn within(self, open: Page) -> Page {
+        open.group()[self.number() - 1]
     }
 
     /// Resolves a page from its identifier.
@@ -106,16 +124,15 @@ impl Page {
         Self::ALL.into_iter().find(|page| page.id() == id)
     }
 
-    /// The next page, wrapping around.
+    /// The other page of the same group.
     pub fn next(self) -> Self {
-        let index = Self::ALL.iter().position(|p| *p == self).unwrap_or(0);
-        Self::ALL[(index + 1) % Self::ALL.len()]
+        let group = self.group();
+        group[self.number() % group.len()]
     }
 
-    /// The previous page, wrapping around.
+    /// The other page of the same group.
     pub fn previous(self) -> Self {
-        let index = Self::ALL.iter().position(|p| *p == self).unwrap_or(0);
-        Self::ALL[(index + Self::ALL.len() - 1) % Self::ALL.len()]
+        self.next()
     }
 
     /// The panel after `panel` on this page, wrapping around.
@@ -228,13 +245,12 @@ mod tests {
     }
 
     #[test]
-    fn pages_cycle_in_both_directions() {
-        let mut page = Page::Code;
-        for _ in 0..Page::ALL.len() {
-            page = page.next();
-        }
-        assert_eq!(page, Page::Code);
-        assert_eq!(Page::Code.previous(), Page::Reference);
+    fn pages_cycle_within_their_group() {
+        assert_eq!(Page::Code.next(), Page::Debug);
+        assert_eq!(Page::Debug.next(), Page::Code);
+        assert_eq!(Page::Learn.previous(), Page::Reference);
+        assert_eq!(Page::Code.within(Page::Reference), Page::Learn);
+        assert_eq!(Page::Reference.within(Page::Code), Page::Debug);
     }
 
     #[test]
@@ -247,6 +263,8 @@ mod tests {
     #[test]
     fn the_numbers_match_the_bar_order() {
         assert_eq!(Page::Code.number(), 1);
-        assert_eq!(Page::Reference.number(), Page::ALL.len());
+        assert_eq!(Page::Debug.number(), 2);
+        assert_eq!(Page::Learn.number(), 1);
+        assert_eq!(Page::Reference.number(), 2);
     }
 }

@@ -245,7 +245,7 @@ pub struct App {
     /// Which operand order the disassembly uses.
     pub disassembly_syntax: Syntax,
     /// Whether the learning panel is showing.
-    pub learning_mode: bool,
+    pub ide_page: Page,
     /// The snippet being tried, and the values it starts from.
     pub scratchpad: crate::scratchpad::Scratchpad,
     /// What the last snippet produced, or why it could not run.
@@ -315,7 +315,7 @@ impl App {
 
             register_format: Format::default(),
             disassembly_syntax: Syntax::default(),
-            learning_mode: false,
+            ide_page: Page::Code,
             scratchpad: crate::scratchpad::Scratchpad::new(),
             scratchpad_result: None,
             learning: crate::learning::Progress::new(),
@@ -339,6 +339,9 @@ impl App {
         if self.page == page {
             return;
         }
+        if page.is_study() && !self.page.is_study() {
+            self.ide_page = self.page;
+        }
         self.page = page;
         self.focus = page.default_panel();
     }
@@ -346,7 +349,11 @@ impl App {
     /// Focuses a panel, opening a page that shows it if necessary.
     pub fn focus_panel(&mut self, panel: Panel) {
         if !self.page.contains(panel) {
-            self.page = Page::for_panel(panel);
+            let page = Page::for_panel(panel);
+            if page.is_study() && !self.page.is_study() {
+                self.ide_page = self.page;
+            }
+            self.page = page;
         }
         self.focus = panel;
     }
@@ -456,12 +463,12 @@ impl App {
                 Effect::None
             }
 
-            Command::GoToPage(page) if *page == self.page => {
+            Command::GoToPage(page) if page.within(self.page) == self.page => {
                 self.focus = self.page.next_panel(self.focus);
                 Effect::None
             }
             Command::GoToPage(page) => {
-                self.open_page(*page);
+                self.open_page(page.within(self.page));
                 Effect::None
             }
             Command::NextPage => {
@@ -659,15 +666,15 @@ impl App {
                 Effect::None
             }
             Command::ToggleLearningMode => {
-                self.learning_mode = !self.learning_mode;
-                if self.learning_mode {
-                    self.focus_panel(Panel::Learn);
-                }
-                self.status = Status::info(if self.learning_mode {
-                    "Learning mode on: ←→ moves through the material, ? jumps to the questions"
+                if self.page.is_study() {
+                    self.open_page(self.ide_page);
+                    self.status = Status::default();
                 } else {
-                    "Learning mode off"
-                });
+                    self.open_page(Page::Learn);
+                    self.status = Status::info(
+                        "Learn: ←→ moves through the material, ? jumps to the questions, F1 goes back",
+                    );
+                }
                 Effect::None
             }
 
@@ -1825,7 +1832,7 @@ mod tests {
     fn changing_page_moves_focus_onto_it() {
         let mut app = app();
         for page in Page::ALL {
-            app.apply(&Command::GoToPage(page));
+            app.open_page(page);
             assert_eq!(app.page, page);
             assert!(
                 page.contains(app.focus),
@@ -1835,7 +1842,7 @@ mod tests {
         }
 
         app.apply(&Command::NextPage);
-        assert_eq!(app.page, Page::Code, "the last page wraps to the first");
+        assert_eq!(app.page, Page::Learn, "pages wrap within their group");
         app.apply(&Command::PreviousPage);
         assert_eq!(app.page, Page::Reference);
     }
@@ -2619,9 +2626,16 @@ mod tests {
         assert_ne!(app.theme.kind(), theme);
         assert_eq!(app.settings.appearance.theme, app.theme.kind());
 
-        assert!(!app.learning_mode);
         app.apply(&Command::ToggleLearningMode);
-        assert!(app.learning_mode);
+        assert_eq!(app.page, Page::Learn);
+        app.apply(&Command::GoToPage(Page::Debug));
+        assert_eq!(
+            app.page,
+            Page::Reference,
+            "the second page of the open group"
+        );
+        app.apply(&Command::ToggleLearningMode);
+        assert_eq!(app.page, Page::Code);
     }
 
     #[test]

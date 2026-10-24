@@ -224,7 +224,7 @@ fn scroll_text_panel(app: &mut App, panel: Panel, down: bool) -> Effect {
 /// Opens the page or document whose label was clicked in the page bar.
 fn click_page_bar(app: &mut App, column: u16) -> Effect {
     let mut offset = 0u16;
-    for page in crate::app::Page::ALL {
+    for page in app.page.group() {
         let width = format!(" {} {} ", page.number(), page.title())
             .chars()
             .count() as u16;
@@ -1193,7 +1193,7 @@ mod tests {
         let mut app = app();
         app.focus_panel(Panel::Registers);
         handle_key(&mut app, press(KeyCode::Tab));
-        assert_eq!(app.focus, Panel::Flags);
+        assert_eq!(app.focus, Panel::Stack);
 
         handle_key(&mut app, press(KeyCode::BackTab));
         assert_eq!(app.focus, Panel::Registers);
@@ -1205,10 +1205,10 @@ mod tests {
         app.focus_panel(Panel::Editor);
         handle_key(
             &mut app,
-            KeyEvent::new(KeyCode::Char('3'), KeyModifiers::ALT),
+            KeyEvent::new(KeyCode::Char('2'), KeyModifiers::ALT),
         );
-        assert_eq!(app.page, crate::app::Page::Learn);
-        assert_eq!(app.focus, Panel::Learn);
+        assert_eq!(app.page, crate::app::Page::Debug);
+        assert_eq!(app.focus, Panel::Editor);
         assert_eq!(
             app.workspace.active().buffer().to_text(),
             "",
