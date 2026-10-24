@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-25
+
 ### Changed
 
 - ratasm edits text itself again. The editor has tabs, undo and redo,
@@ -301,7 +303,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   panel-sized gap above the details, and shows the NASM example that was
   already in the database.
 
-[Unreleased]: https://github.com/tuna4ll/ratasm/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/tuna4ll/ratasm/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/tuna4ll/ratasm/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/tuna4ll/ratasm/compare/v0.1.5...v0.2.0
 [0.1.5]: https://github.com/tuna4ll/ratasm/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/tuna4ll/ratasm/compare/v0.1.3...v0.1.4
